@@ -1,0 +1,7 @@
+.idea/
+venv/
+*.egg-info/
+
+# Python cache.
+*.py[cod]
+__pycache__/
