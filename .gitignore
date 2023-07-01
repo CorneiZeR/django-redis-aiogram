@@ -5,3 +5,7 @@ venv/
 # Python cache.
 *.py[cod]
 __pycache__/
+
+# build
+build/
+dist/
