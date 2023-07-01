@@ -8,7 +8,7 @@ Current release of `django-redis-aiogram` is **1.0.0**, and it supports Python 3
 
 ## Installation
 
-The easiest and recommended way to install `django-redis-aiogram` is from [PyPI](https://pypi.python.org/pypi/django-subadmin)
+The easiest and recommended way to install `django-redis-aiogram` is from [PyPI](https://pypi.org/project/django-redis-aiogram/)
 
 ``` shell
 pip install django-redis-aiogram
