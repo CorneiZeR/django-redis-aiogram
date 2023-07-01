@@ -45,7 +45,7 @@ services:
   ...
   
   telegram_bot:
-    container_name: wildberries_telegram_bot
+    container_name: telegram_bot
     restart: always
     command: python manage.py start_tgbot
     build:
