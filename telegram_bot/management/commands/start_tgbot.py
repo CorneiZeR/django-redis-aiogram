@@ -26,7 +26,7 @@ class Command(BaseCommand):
                 return
 
             messages = redis_conn.lrange(conf.REDIS_MESSAGES_KEY, 0, length-1)
-            redis_conn.ltrim(conf.REDIS_MESSAGES_KEY, 0, length)
+            redis_conn.ltrim(conf.REDIS_MESSAGES_KEY, length, -1)
 
             for message in messages:
                 message = json.loads(message)
