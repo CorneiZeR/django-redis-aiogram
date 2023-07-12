@@ -4,7 +4,7 @@ from io import open
 from setuptools import setup, find_packages
 
 NAME = 'django-redis-aiogram'
-VERSION = '1.0.2'
+VERSION = '1.0.3'
 
 
 def read_md(file_path):
