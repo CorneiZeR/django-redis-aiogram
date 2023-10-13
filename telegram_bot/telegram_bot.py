@@ -1,8 +1,8 @@
 import asyncio
 import logging
+import pickle
 from asyncio import AbstractEventLoop
 from dataclasses import dataclass, field
-from json import dumps
 from typing import Dict, Any
 
 from aiogram import Bot, Dispatcher, exceptions, Router
@@ -59,7 +59,7 @@ class TelegramBot:
 
     @staticmethod
     def send_message_via_redis(**kwargs: Dict[str, Any]) -> None:
-        redis_conn.rpush(conf.REDIS_MESSAGES_KEY, dumps(kwargs))
+        redis_conn.rpush(conf.REDIS_MESSAGES_KEY, pickle.dumps(kwargs))
         redis_conn.set(conf.REDIS_EXP_KEY, 'EX', conf.REDIS_EXP_TIME)
 
     def message(self, *args, **kwargs) -> CallbackType:

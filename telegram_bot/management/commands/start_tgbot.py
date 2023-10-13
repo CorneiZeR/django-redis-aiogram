@@ -1,5 +1,5 @@
 import contextlib
-import json
+import pickle
 import logging
 
 from django.core.management import BaseCommand
@@ -29,7 +29,7 @@ class Command(BaseCommand):
             redis_conn.ltrim(conf.REDIS_MESSAGES_KEY, length, -1)
 
             for message in messages:
-                message = json.loads(message)
+                message = pickle.loads(message)
                 bot.send_message(**message)
 
             redis_conn.delete(conf.REDIS_EXP_KEY)

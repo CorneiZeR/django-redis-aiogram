@@ -4,7 +4,7 @@
 
 ### Supported Python and Django releases
 
-Current release of `django-redis-aiogram` is **1.0.0**, and it supports Python 3.8+ and Django 4.2+.
+Current release of `django-redis-aiogram` is **1.0.4**, and it supports Python 3.8+ and Django 4.2+.
 
 ## Installation
 
@@ -56,10 +56,19 @@ services:
 
 To send a message, use the following code:
 ``` python
+from aiogram import types, F
 from telegram_bot import bot
 
 bot.send_message_via_redis(chat_id=CHAT_ID, text=TEXT)
 bot.send_message_via_redis(chat_id=CHAT_ID, caption=TEXT, photo=URL)
+
+markup = types.InlineKeyboardMarkup(inline_keyboard=[
+    [types.InlineKeyboardButton(
+        text='best project ever',
+        web_app=types.WebAppInfo(url='https://pypi.org/project/django-redis-aiogram')
+    )]
+])
+bot.send_message_via_redis(chat_id=CHAT_ID, text=TEXT, reply_markup=markup)
 ```
 
 If you need to use handlers, create file `tg_router.py` (by default) in your app, use the following code:
