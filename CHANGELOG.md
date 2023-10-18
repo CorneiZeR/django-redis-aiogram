@@ -15,3 +15,9 @@
 ## 1.0.4 - 2023-10-13
 - update aiogram version
 - change json to pickle, now supports more types of data
+
+## 1.0.5 - 2023-10-19
+- correcting README
+- update settings to TypedDict
+- add sending raw aiogram functions
+- add possibility to send message from django

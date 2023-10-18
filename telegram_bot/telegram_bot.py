@@ -5,8 +5,9 @@ from asyncio import AbstractEventLoop
 from dataclasses import dataclass, field
 from typing import Dict, Any
 
-from aiogram import Bot, Dispatcher, exceptions, Router
+from aiogram import Bot, Dispatcher, Router, exceptions
 from aiogram.dispatcher.event.handler import CallbackType
+from asgiref.sync import async_to_sync
 from redis.client import Redis
 
 from telegram_bot.redis import redis_conn
@@ -25,7 +26,7 @@ class TelegramBot:
     def __post_init__(self) -> None:
         async def setup() -> None:
             """setup bot and dispatcher"""
-            self.bot = Bot(token=conf.TOKEN)
+            self.bot = Bot(token=conf['TOKEN'])
             self.dispatcher = Dispatcher()
 
         self.loop.run_until_complete(setup())
@@ -35,32 +36,36 @@ class TelegramBot:
         self.dispatcher.include_router(self._router)
         self.loop.run_until_complete(self.dispatcher.start_polling(self.bot))
 
-    def send_message(self, **kwargs) -> None:
+    def send_raw(self, function: str = 'send_message', **kwargs) -> None:
         """sending message"""
 
         async def send():
-            while True:
+            max_retries = 20
+            while max_retries:
                 try:
-                    self.loop.create_task(
-                        self.bot.send_photo(**kwargs)
-                        if kwargs.get('photo') else
-                        self.bot.send_message(**kwargs)
-                    )
+                    await getattr(self.bot, function)(**kwargs)
                     return logging.info(log_text.format('message sent'))
                 except exceptions.TelegramRetryAfter as e:
                     logging.exception(log_text.format(e))
+                    max_retries -= 1
                     await asyncio.sleep(e.retry_after)
                 except Exception as e:
                     logging.exception(log_text.format(e))
+                    break
 
         kwargs = {'parse_mode': 'Markdown', **kwargs}
         log_text = 'send_message: {}'
-        self.loop.create_task(send())
+
+        if self.loop.is_running():
+            self.loop.create_task(send())
+        else:
+            self.loop.run_until_complete(send())
 
     @staticmethod
-    def send_message_via_redis(**kwargs: Dict[str, Any]) -> None:
-        redis_conn.rpush(conf.REDIS_MESSAGES_KEY, pickle.dumps(kwargs))
-        redis_conn.set(conf.REDIS_EXP_KEY, 'EX', conf.REDIS_EXP_TIME)
+    def send_redis(function: str = 'send_message', **kwargs: Dict[str, Any]) -> None:
+        """sending message via redis"""
+        redis_conn.rpush(conf['REDIS_MESSAGES_KEY'], pickle.dumps({'function': function, **kwargs}))
+        redis_conn.set(conf['REDIS_EXP_KEY'], 'EX', conf['REDIS_EXP_TIME'])
 
     def message(self, *args, **kwargs) -> CallbackType:
         """Decorator for 'message' observer"""

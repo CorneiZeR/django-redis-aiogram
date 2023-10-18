@@ -18,27 +18,27 @@ class Command(BaseCommand):
             """message handler"""
 
             # not that key exp
-            if message['data'].decode('utf-8') != conf.REDIS_EXP_KEY:
+            if message['data'].decode('utf-8') != conf['REDIS_EXP_KEY']:
                 return
 
             # no messages to send
-            if not (length := redis_conn.llen(conf.REDIS_MESSAGES_KEY)):
+            if not (length := redis_conn.llen(conf['REDIS_MESSAGES_KEY'])):
                 return
 
-            messages = redis_conn.lrange(conf.REDIS_MESSAGES_KEY, 0, length-1)
-            redis_conn.ltrim(conf.REDIS_MESSAGES_KEY, length, -1)
+            messages = redis_conn.lrange(conf['REDIS_MESSAGES_KEY'], 0, length-1)
+            redis_conn.ltrim(conf['REDIS_MESSAGES_KEY'], length, -1)
 
             for message in messages:
                 message = pickle.loads(message)
-                bot.send_message(**message)
+                bot.send_raw(**message)
 
-            redis_conn.delete(conf.REDIS_EXP_KEY)
+            redis_conn.delete(conf['REDIS_EXP_KEY'])
 
         # add redis psubscribe and run in thread
         pubsub = redis_conn.pubsub()
         redis_conn.config_set('notify-keyspace-events', 'Ex')
         pubsub.psubscribe(**{"__keyevent@0__:expired": event_handler})
-        pubsub.run_in_thread(sleep_time=conf.REDIS_EXP_TIME)
+        pubsub.run_in_thread(sleep_time=conf['REDIS_EXP_TIME'])
         logging.info('Running worker redis subscriber')
 
         # start bot

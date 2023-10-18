@@ -4,7 +4,7 @@
 
 ### Supported Python and Django releases
 
-Current release of `django-redis-aiogram` is **1.0.4**, and it supports Python 3.8+ and Django 4.2+.
+Current release of `django-redis-aiogram` is **1.0.5**, and it supports Python 3.8+ and Django 4.2+.
 
 ## Installation
 
@@ -36,7 +36,8 @@ TELEGRAM_BOT = {
 }
 ```
 
-Next, add a separate container to your docker-compose.yml.
+Next, add a separate container to your docker-compose.yml. 
+(optional, if you want to use routers and handlers)
 
 ``` yaml
 # docker-compose.yml
@@ -56,19 +57,29 @@ services:
 
 To send a message, use the following code:
 ``` python
+# test.py
+
 from aiogram import types, F
 from telegram_bot import bot
 
-bot.send_message_via_redis(chat_id=CHAT_ID, text=TEXT)
-bot.send_message_via_redis(chat_id=CHAT_ID, caption=TEXT, photo=URL)
+# sending a message directly
+bot.send_raw(chat_id=CHAT_ID, text=TEXT)
+bot.send_raw('send_photo', chat_id=CHAT_ID, caption=TEXT, photo=URL)
 
+# sending a message via redis
+bot.send_redis(chat_id=CHAT_ID, text=TEXT)
+bot.send_redis('send_photo', chat_id=CHAT_ID, caption=TEXT, photo=URL)
+
+# markup example
 markup = types.InlineKeyboardMarkup(inline_keyboard=[
     [types.InlineKeyboardButton(
         text='best project ever',
         web_app=types.WebAppInfo(url='https://pypi.org/project/django-redis-aiogram')
     )]
 ])
-bot.send_message_via_redis(chat_id=CHAT_ID, text=TEXT, reply_markup=markup)
+
+bot.send_raw(chat_id=CHAT_ID, text=TEXT, reply_markup=markup)
+bot.send_redis(chat_id=CHAT_ID, text=TEXT, reply_markup=markup)
 ```
 
 If you need to use handlers, create file `tg_router.py` (by default) in your app, use the following code:
@@ -88,7 +99,7 @@ async def simple_handler(message: types.Message) -> None:
     await message.reply(message.text)
 ```
 
-YOu can use all handler types like in aiogram.
+You can use all handler types like in aiogram.
 
 ## Settings
 

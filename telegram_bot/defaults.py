@@ -1,4 +1,6 @@
-DEFAULTS = {
+from typing import Dict, Union
+
+DEFAULTS: Dict[str, Union[int, str]] = {
     # event expiration time in redis
     'REDIS_EXP_TIME': 5,
     # redis key for handling expired event
