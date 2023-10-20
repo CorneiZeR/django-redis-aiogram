@@ -2,10 +2,6 @@
 
 `django-redis-aiogram` provides a quick way to install `aiogram` in a container adjacent to `django`, allowing you to use your own router and loop. Also Allows you to send messages through `redis`.
 
-### Supported Python and Django releases
-
-Current release of `django-redis-aiogram` is **1.0.5**, and it supports Python 3.8+ and Django 4.2+.
-
 ## Installation
 
 The easiest and recommended way to install `django-redis-aiogram` is from [PyPI](https://pypi.org/project/django-redis-aiogram/)
@@ -31,21 +27,8 @@ Also, you need to specify the minimum settings:
 # settings.py
 
 TELEGRAM_BOT = {
-    # ------------ REQUIRED ------------
     'REDIS_URL': REDIS_URL,
     'TOKEN': TELEGRAM_BOT_TOKEN,
-
-    # ------------ OPTIONAL ------------
-    # event expiration time in redis
-    'REDIS_EXP_TIME': 5,
-    # redis key for handling expired event
-    'REDIS_EXP_KEY': 'TELEGRAM_BOT_EXP',
-    # redis key for collecting messages
-    'REDIS_MESSAGES_KEY': 'TELEGRAM_BOT_MESSAGE',
-    # name of the module to find
-    'MODULE_NAME': 'tg_router',
-    # default kwargs for telegram bot
-    'DEFAULT_KWARGS': lambda aiogram_function: {}
 }
 ```
 

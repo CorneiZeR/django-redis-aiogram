@@ -27,3 +27,6 @@
 - rm parse_mode by default
 - add the ability to flexibly configure default kwargs for different aiogram functions
 - edit min aiogram version
+
+## 1.0.7 - 2023-10-21
+- edit README
