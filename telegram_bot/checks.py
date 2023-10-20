@@ -1,4 +1,4 @@
-from typing import Tuple, Any, Optional
+from typing import Tuple, Any, Optional, Union, Iterable
 
 from django.core.checks import CheckMessage, Error
 
@@ -33,32 +33,50 @@ def check_int(key: str, error: int, _min: Optional[int] = None, _max: Optional[i
     )
 
     value = conf.get(key)
+    errors = False
     if isinstance(value, int):
-        if _min is not None and value > _min:
-            return tuple()
-        if _max is not None and value < _max:
-            return tuple()
+        if _min is not None and value < _min:
+            errors = True
+        if _max is not None and value > _max:
+            errors = True
 
+    if not errors:
+        return tuple()
     return (Error(error_msg, id=f'telegram_bot.E{str(error).zfill(3)}'),)
 
 
-def check_str(key: str, error: int, _not_equal: Optional[str] = None) -> Tuple[Error]:
+def check_str(key: str, error: int,
+              _not_equal: Optional[Union[str, Iterable[str]]] = None,
+              _equal: Optional[Union[str, Iterable[str]]] = None) -> Tuple[Error]:
     """
     Check if value in settings is string and not empty.
 
     :param key: key in settings
     :param error: error code
-    :param _not_equal: value to compare
+    :param _not_equal: value to compare (not equal)
+    :param _equal: value to compare (equal)
     :return: tuple of errors
     """
-    error_msg = '{key} should be a string {not_equal}.'.format(
+    def prepare_if_string(value: Union[str, Iterable[str]]) -> Iterable[str]:
+        """Prepare value if it is string."""
+        if isinstance(value, str):
+            return (value,)
+        return value
+
+    error_msg = '{key} should be {not_equal}{equal}.'.format(
         key=key,
-        not_equal=f', not not_equal "{_not_equal}"' if _not_equal else ', not empty'
+        not_equal=f'a string, not not_equal to {_not_equal}' if _not_equal else 'an empty string ',
+        equal=f'a string, equal to {_equal}' if _equal else 'an empty string '
     )
 
     value = conf.get(key)
+    errors = False
     if isinstance(value, str):
-        if value != (_not_equal or ''):
-            return tuple()
+        if _not_equal is not None and value in prepare_if_string(_not_equal):
+            errors = True
+        elif _equal is not None and value not in prepare_if_string(_equal):
+            errors = True
 
+    if not errors:
+        return tuple()
     return (Error(error_msg, id=f'telegram_bot.E{str(error).zfill(3)}'),)

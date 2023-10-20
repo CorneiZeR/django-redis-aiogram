@@ -31,8 +31,21 @@ Also, you need to specify the minimum settings:
 # settings.py
 
 TELEGRAM_BOT = {
+    # ------------ REQUIRED ------------
     'REDIS_URL': REDIS_URL,
-    'TOKEN': TELEGRAM_BOT_TOKEN
+    'TOKEN': TELEGRAM_BOT_TOKEN,
+
+    # ------------ OPTIONAL ------------
+    # event expiration time in redis
+    'REDIS_EXP_TIME': 5,
+    # redis key for handling expired event
+    'REDIS_EXP_KEY': 'TELEGRAM_BOT_EXP',
+    # redis key for collecting messages
+    'REDIS_MESSAGES_KEY': 'TELEGRAM_BOT_MESSAGE',
+    # name of the module to find
+    'MODULE_NAME': 'tg_router',
+    # default kwargs for telegram bot
+    'DEFAULT_KWARGS': lambda aiogram_function: {}
 }
 ```
 
@@ -108,6 +121,14 @@ You can override settings:
 ``` python
 # settings.py
 
+def default_kwargs(function: str) -> dict[str, Any]:
+    """Default kwargs for telegram bot functions."""
+    prepared_dict = {
+        'send_message': {'parse_mode': 'HTML'},
+        'send_photo': {'parse_mode': 'Markdown', 'caption': '`Photo`'}
+    }
+    return prepared_dict.get(function, {})
+
 TELEGRAM_BOT = {
     {
     # event expiration time in redis
@@ -118,9 +139,11 @@ TELEGRAM_BOT = {
     'REDIS_MESSAGES_KEY': 'TELEGRAM_BOT_MESSAGE',
     # name of the module to find
     'MODULE_NAME': 'tg_router',
+    # default kwargs for telegram bot
+    'DEFAULT_KWARGS': default_kwargs,
     # telegram bot token
-    'TOKEN': TELEGRAM_BOT_TOKEN,
+    'TOKEN': <TELEGRAM_BOT_TOKEN>,
     # url for redis connection
-    'REDIS_URL': REDIS_URL
+    'REDIS_URL': <REDIS_URL>
 }
 ```

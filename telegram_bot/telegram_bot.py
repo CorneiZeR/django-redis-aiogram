@@ -7,7 +7,6 @@ from typing import Dict, Any
 
 from aiogram import Bot, Dispatcher, Router, exceptions
 from aiogram.dispatcher.event.handler import CallbackType
-from asgiref.sync import async_to_sync
 from redis.client import Redis
 
 from telegram_bot.redis import redis_conn
@@ -53,7 +52,8 @@ class TelegramBot:
                     logging.exception(log_text.format(e))
                     break
 
-        kwargs = {'parse_mode': 'Markdown', **kwargs}
+        default_kwargs = conf['DEFAULT_KWARGS'](function)
+        kwargs = {**default_kwargs, **kwargs}
         log_text = 'send_message: {}'
 
         if self.loop.is_running():

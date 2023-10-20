@@ -1,4 +1,4 @@
-from typing import TypedDict
+from typing import TypedDict, Callable
 
 from django.conf import settings
 
@@ -12,6 +12,7 @@ class Settings(TypedDict):
     TOKEN: str
     REDIS_URL: str
     MODULE_NAME: str
+    DEFAULT_KWARGS: Callable
 
 
 # noinspection PyTypeChecker

@@ -21,3 +21,9 @@
 - update settings to TypedDict
 - add sending raw aiogram functions
 - add possibility to send message from django
+
+
+## 1.0.6 - 2023-10-21
+- rm parse_mode by default
+- add the ability to flexibly configure default kwargs for different aiogram functions
+- edit min aiogram version
