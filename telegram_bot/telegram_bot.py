@@ -50,7 +50,7 @@ class TelegramBot:
                     await asyncio.sleep(e.retry_after)
                 except Exception as e:
                     logging.exception(log_text.format(e))
-                    break
+                    raise
 
         default_kwargs = conf['DEFAULT_KWARGS'](function)
         kwargs = {**default_kwargs, **kwargs}
