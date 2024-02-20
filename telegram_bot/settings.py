@@ -13,6 +13,8 @@ class Settings(TypedDict):
     REDIS_URL: str
     MODULE_NAME: str
     DEFAULT_KWARGS: Callable
+    MAX_RETRIES: int
+    RAISE_EXCEPTION: bool
 
 
 # noinspection PyTypeChecker

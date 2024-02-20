@@ -1,6 +1,6 @@
 # django-redis-aiogram
 
-`django-redis-aiogram` provides a quick way to install `aiogram` in a container adjacent to `django`, allowing you to use your own router and loop. Also Allows you to send messages through `redis`.
+`django-redis-aiogram` provides a quick way to install `aiogram` in a container adjacent to `django`, allowing you to use your own router and loop. Also allows you to send messages through `redis`.
 
 ## Installation
 
@@ -76,6 +76,15 @@ markup = types.InlineKeyboardMarkup(inline_keyboard=[
 
 bot.send_raw(chat_id=CHAT_ID, text=TEXT, reply_markup=markup)
 bot.send_redis(chat_id=CHAT_ID, text=TEXT, reply_markup=markup)
+
+
+# if RAISE_EXCEPTION is True, you can use try-except to handle errors from send_raw
+from aiogram.exceptions import TelegramBadRequest
+
+try:
+    bot.send_raw(chat_id=CHAT_ID, text='**test*', parse_mode='Markdown')
+except TelegramBadRequest:
+    print('Telegram bad request :)')
 ```
 
 If you need to use handlers, create file `tg_router.py` (by default) in your app, use the following code:
@@ -127,6 +136,10 @@ TELEGRAM_BOT = {
     # telegram bot token
     'TOKEN': <TELEGRAM_BOT_TOKEN>,
     # url for redis connection
-    'REDIS_URL': <REDIS_URL>
+    'REDIS_URL': <REDIS_URL>,
+    # max retries for sending message
+    'MAX_RETRIES': 10,
+    # raise exception if error occurred
+    'RAISE_EXCEPTION': False
 }
 ```

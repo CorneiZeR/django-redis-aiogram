@@ -14,5 +14,9 @@ DEFAULTS: Dict[str, Union[int, str, Callable]] = {
     # telegram bot token
     'TOKEN': '',
     # url for redis connection
-    'REDIS_URL': ''
+    'REDIS_URL': '',
+    # max retries for sending message
+    'MAX_RETRIES': 10,
+    # raise exception if error occurred
+    'RAISE_EXCEPTION': False
 }

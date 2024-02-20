@@ -4,7 +4,7 @@ from io import open
 from setuptools import setup, find_packages
 
 NAME = 'django-redis-aiogram'
-VERSION = '1.0.7'
+VERSION = '1.0.8'
 
 
 def read_md(file_path):
@@ -41,5 +41,6 @@ setup(
         "Programming Language :: Python :: 3",
         'Framework :: Django',
         'Framework :: Django :: 4',
+        'Framework :: Django :: 5.0'
     ]
 )

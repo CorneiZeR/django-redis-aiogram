@@ -12,7 +12,9 @@ def check_settings(**kwargs: Any) -> Tuple[CheckMessage]:
         *check_str('REDIS_MESSAGES_KEY', 3),
         *check_str('TOKEN', 4),
         *check_str('REDIS_URL', 5),
-        *check_str('MODULE_NAME', 6)
+        *check_str('MODULE_NAME', 6),
+        *check_int('MAX_RETRIES', 7, _min=1),
+        *check_bool('RAISE_EXCEPTION', 8)
     )
 
 
@@ -78,5 +80,21 @@ def check_str(key: str, error: int,
             errors = True
 
     if not errors:
+        return tuple()
+    return (Error(error_msg, id=f'telegram_bot.E{str(error).zfill(3)}'),)
+
+
+def check_bool(key: str, error: int) -> Tuple[Error]:
+    """
+    Check if value in settings is boolean.
+
+    :param key: key in settings
+    :param error: error code
+    :return: tuple of errors
+    """
+    error_msg = '{key} should be a boolean.'.format(key=key)
+
+    value = conf.get(key)
+    if isinstance(value, bool):
         return tuple()
     return (Error(error_msg, id=f'telegram_bot.E{str(error).zfill(3)}'),)

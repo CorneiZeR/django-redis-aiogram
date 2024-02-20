@@ -15,6 +15,7 @@ from telegram_bot.settings import conf
 
 @dataclass(repr=False)
 class TelegramBot:
+    max_retries: int = field(default=conf['MAX_RETRIES'])
     loop: AbstractEventLoop = field(default_factory=asyncio.new_event_loop)
 
     redis_conn: Redis = field(init=False, default=redis_conn)
@@ -39,18 +40,21 @@ class TelegramBot:
         """sending message"""
 
         async def send():
-            max_retries = 20
-            while max_retries:
+            retries = 0
+            while retries <= self.max_retries:
                 try:
                     await getattr(self.bot, function)(**kwargs)
                     return logging.info(log_text.format('message sent'))
                 except exceptions.TelegramRetryAfter as e:
                     logging.exception(log_text.format(e))
-                    max_retries -= 1
+                    retries += 1
                     await asyncio.sleep(e.retry_after)
                 except Exception as e:
                     logging.exception(log_text.format(e))
-                    raise
+
+                    if conf['RAISE_EXCEPTION']:
+                        raise e
+                    return
 
         default_kwargs = conf['DEFAULT_KWARGS'](function)
         kwargs = {**default_kwargs, **kwargs}

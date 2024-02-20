@@ -22,7 +22,6 @@
 - add sending raw aiogram functions
 - add possibility to send message from django
 
-
 ## 1.0.6 - 2023-10-21
 - rm parse_mode by default
 - add the ability to flexibly configure default kwargs for different aiogram functions
@@ -30,3 +29,7 @@
 
 ## 1.0.7 - 2023-10-21
 - edit README
+
+## 1.0.8 - 2024-02-20
+- add max retries for sending message to settings (`MAX_RETRIES`)
+- add reraise exception to `send_raw` (`RAISE_EXCEPTION`)
