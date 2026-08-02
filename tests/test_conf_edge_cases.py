@@ -1,0 +1,53 @@
+"""Misconfiguration must produce a clear error, not an obscure crash."""
+
+import types
+
+import pytest
+from django.core.exceptions import ImproperlyConfigured
+from django.core.signals import setting_changed
+from django.test import override_settings
+
+from django_redis_aiogram import conf as conf_object
+from django_redis_aiogram import settings as settings_module
+from django_redis_aiogram.settings import Settings, conf
+
+
+@override_settings(TELEGRAM_BOT=['not', 'a', 'mapping'])
+def test_non_mapping_settings_are_reported_clearly():
+    with pytest.raises(ImproperlyConfigured, match='must be a mapping'):
+        _ = conf['TOKEN']
+
+
+@override_settings(TELEGRAM_BOT='TOKEN=abc')
+def test_string_settings_are_reported_clearly():
+    with pytest.raises(ImproperlyConfigured, match='must be a mapping'):
+        _ = conf['TOKEN']
+
+
+@pytest.mark.parametrize(
+    'module,uid',
+    [
+        ('django_redis_aiogram.settings', 'django_redis_aiogram.settings'),
+        ('django_redis_aiogram.redis', 'django_redis_aiogram.redis'),
+    ],
+)
+def test_reset_receiver_is_deduplicated(module, uid):
+    """Without dispatch_uid, autoreload stacks a fresh receiver every import."""
+    import importlib
+
+    receiver = importlib.import_module(module)._reset_on_setting_change
+    before = len(setting_changed.receivers)
+    setting_changed.connect(receiver, dispatch_uid=uid)
+    assert len(setting_changed.receivers) == before
+
+
+def test_settings_module_is_not_shadowed_by_the_conf_object():
+    """`conf` is exported by the package, so the module cannot be named conf."""
+    assert isinstance(settings_module, types.ModuleType)
+    assert isinstance(conf_object, Settings)
+    assert settings_module.conf is conf_object
+
+
+def test_settings_survive_an_empty_override():
+    with override_settings(TELEGRAM_BOT=None):
+        assert isinstance(Settings()['MAX_RETRIES'], int)
