@@ -18,6 +18,8 @@ DEFAULTS: dict[str, Any] = {
     'DELIVERY': 'blpop',
     # 'json' (recommended) or 'pickle'
     'SERIALIZER': 'json',
+    # accept pickled payloads left in the queue by 1.x; turn off once drained
+    'ALLOW_PICKLE': True,
     # 'redis', 'memory', or a dotted path to a BaseStorage subclass
     'FSM_STORAGE': 'redis',
     # forwarded to aiogram's DefaultBotProperties, e.g. {'parse_mode': 'HTML'}

@@ -1,13 +1,12 @@
 import contextlib
 import logging
-import pickle
 import threading
 from argparse import ArgumentParser
 from typing import Any
 
 from django.core.management import BaseCommand
 
-from django_redis_aiogram import bot
+from django_redis_aiogram import bot, serializers
 from django_redis_aiogram.redis import as_bytes, get_redis
 from django_redis_aiogram.settings import conf
 
@@ -55,7 +54,10 @@ class Command(BaseCommand):
             connection.ltrim(conf['REDIS_MESSAGES_KEY'], length, -1)
 
             for payload in queued:
-                bot.send_raw(**pickle.loads(as_bytes(payload)))
+                try:
+                    bot.send_raw(**serializers.loads(as_bytes(payload)))
+                except serializers.SerializationError:
+                    logger.exception('dropping undecodable queued message')
 
             connection.delete(conf['REDIS_EXP_KEY'])
 

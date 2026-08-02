@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import pickle
 from asyncio import AbstractEventLoop
 from typing import Any
 
@@ -9,6 +8,7 @@ from aiogram.dispatcher.event.handler import CallbackType
 from django.core.exceptions import ImproperlyConfigured
 
 from django_redis_aiogram.redis import get_redis
+from django_redis_aiogram.serializers import get_serializer
 from django_redis_aiogram.settings import SETTINGS_NAME, coerce_bool, conf
 
 logger = logging.getLogger('django_redis_aiogram')
@@ -130,7 +130,7 @@ class TelegramBot:
         connection = get_redis()
         connection.rpush(
             conf['REDIS_MESSAGES_KEY'],
-            pickle.dumps({'function': function, **kwargs}),
+            get_serializer().dumps({'function': function, **kwargs}),
         )
         connection.set(conf['REDIS_EXP_KEY'], 'EX', conf['REDIS_EXP_TIME'])
 

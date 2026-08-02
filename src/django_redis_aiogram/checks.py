@@ -116,6 +116,7 @@ def check_settings(**kwargs: Any) -> list[CheckMessage]:
         lambda: check_bool('ENABLED', 1),
         lambda: check_bool('AUTODISCOVER', 2),
         lambda: check_bool('RAISE_EXCEPTION', 3),
+        lambda: check_bool('ALLOW_PICKLE', 17),
         lambda: check_str('TOKEN', 4),
         lambda: check_str('REDIS_URL', 5),
         lambda: check_str('MODULE_NAME', 6),
