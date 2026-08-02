@@ -1,12 +1,15 @@
 import asyncio
 import logging
 from asyncio import AbstractEventLoop
+from collections.abc import Coroutine
+from concurrent.futures import Future
 from typing import Any
 
 from aiogram import Bot, Dispatcher, Router, exceptions
 from aiogram.dispatcher.event.handler import CallbackType
 from django.core.exceptions import ImproperlyConfigured
 
+from django_redis_aiogram.delivery import KEYSPACE_DELIVERY
 from django_redis_aiogram.redis import get_redis
 from django_redis_aiogram.serializers import get_serializer
 from django_redis_aiogram.settings import SETTINGS_NAME, coerce_bool, conf
@@ -94,37 +97,76 @@ class TelegramBot:
     def send_raw(self, function: str = 'send_message', **kwargs: Any) -> None:
         """Call an aiogram bot method, retrying on Telegram rate limits."""
         if not self.enabled:
-            logger.debug('disabled: skipping %s', function)
+            logger.debug('send skipped: bot disabled', extra={'tg_function': function})
             return
 
         async def send() -> None:
+            last_error: exceptions.TelegramRetryAfter | None = None
             retries = 0
             while retries <= self.max_retries:
                 try:
                     await getattr(self.bot, function)(**call_kwargs)
-                    logger.info('%s: message sent', function)
+                    logger.info('message sent', extra={'tg_function': function})
                     return
                 except exceptions.TelegramRetryAfter as error:
-                    logger.warning('%s: %s', function, error)
+                    last_error = error
+                    logger.warning(
+                        'rate limited by telegram',
+                        extra={
+                            'tg_function': function,
+                            'tg_retry_after': error.retry_after,
+                            'tg_retries': retries,
+                        },
+                    )
                     retries += 1
                     await asyncio.sleep(error.retry_after)
-                except Exception as error:
-                    logger.exception('%s: %s', function, error)
+                except Exception:
+                    logger.exception('send failed', extra={'tg_function': function})
                     if conf['RAISE_EXCEPTION']:
                         raise
                     return
 
-        call_kwargs = {**conf['DEFAULT_KWARGS'](function), **kwargs}
+            # exhausting the retries used to return silently
+            logger.error(
+                'giving up on message',
+                extra={'tg_function': function, 'tg_max_retries': self.max_retries},
+            )
+            if conf['RAISE_EXCEPTION'] and last_error is not None:
+                raise last_error
 
-        if self.loop.is_running():
-            self.loop.create_task(send())
+        call_kwargs = {**conf['DEFAULT_KWARGS'](function), **kwargs}
+        self._schedule(send())
+
+    def _schedule(self, coroutine: Coroutine[Any, Any, None]) -> None:
+        """Run a coroutine on the bot loop from whichever thread we are on.
+
+        The delivery consumer runs in its own thread while the loop belongs to
+        the polling thread; calling create_task across that boundary is not
+        thread safe and silently corrupts the loop's internals.
+        """
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+
+        if running is self.loop:
+            self.loop.create_task(coroutine)
+        elif self.loop.is_running():
+            future = asyncio.run_coroutine_threadsafe(coroutine, self.loop)
+            future.add_done_callback(self._log_failure)
         else:
-            self.loop.run_until_complete(send())
+            self.loop.run_until_complete(coroutine)
+
+    @staticmethod
+    def _log_failure(future: 'Future[None]') -> None:
+        error = future.exception()
+        if error is not None:
+            logger.error('scheduled send failed', exc_info=error)
 
     def send_redis(self, function: str = 'send_message', **kwargs: Any) -> None:
         """Queue a message in Redis for the bot worker to deliver."""
         if not self.enabled:
-            logger.debug('disabled: not queueing %s', function)
+            logger.debug('queueing skipped: bot disabled', extra={'tg_function': function})
             return
 
         connection = get_redis()
@@ -132,7 +174,8 @@ class TelegramBot:
             conf['REDIS_MESSAGES_KEY'],
             get_serializer().dumps({'function': function, **kwargs}),
         )
-        connection.set(conf['REDIS_EXP_KEY'], 'EX', conf['REDIS_EXP_TIME'])
+        if conf['DELIVERY'] == KEYSPACE_DELIVERY:
+            connection.set(conf['REDIS_EXP_KEY'], '1', ex=conf['REDIS_EXP_TIME'])
 
     def message(self, *args: Any, **kwargs: Any) -> CallbackType:
         """Decorator for the 'message' observer."""

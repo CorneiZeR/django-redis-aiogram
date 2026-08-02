@@ -1,13 +1,15 @@
 import contextlib
 import logging
+import signal
 import threading
 from argparse import ArgumentParser
+from types import FrameType
 from typing import Any
 
 from django.core.management import BaseCommand
 
-from django_redis_aiogram import bot, serializers
-from django_redis_aiogram.redis import as_bytes, get_redis
+from django_redis_aiogram import bot
+from django_redis_aiogram.delivery import get_delivery
 from django_redis_aiogram.settings import conf
 
 logger = logging.getLogger('django_redis_aiogram')
@@ -41,31 +43,32 @@ class Command(BaseCommand):
                     threading.Event().wait()
             return
 
-        connection = get_redis()
+        delivery = get_delivery(handler=bot.send_raw)
+        threads: list[threading.Thread] = []
 
-        def event_handler(message: dict[str, Any]) -> None:
-            if message['data'].decode('utf-8') != conf['REDIS_EXP_KEY']:
-                return
+        # Starting the consumer before the loop runs would let a backlog reach
+        # send_raw while loop.is_running() is still False, so the coroutine
+        # would be driven from the consumer thread. Deferring the start until
+        # the loop picks up this callback keeps the loop single-threaded.
+        bot.loop.call_soon(lambda: threads.append(delivery.start_thread()))
+        self._install_sigterm_handler()
 
-            if not (length := connection.llen(conf['REDIS_MESSAGES_KEY'])):
-                return
+        try:
+            with contextlib.suppress(KeyboardInterrupt, SystemExit):
+                bot.start_polling()
+        finally:
+            logger.info('shutting down')
+            delivery.stop()
+            for thread in threads:
+                thread.join(timeout=float(conf['BLPOP_TIMEOUT']) + 1)
+            bot.close()
 
-            queued = connection.lrange(conf['REDIS_MESSAGES_KEY'], 0, length - 1)
-            connection.ltrim(conf['REDIS_MESSAGES_KEY'], length, -1)
+    @staticmethod
+    def _install_sigterm_handler() -> None:
+        """Turn SIGTERM into KeyboardInterrupt so `docker stop` unwinds cleanly."""
 
-            for payload in queued:
-                try:
-                    bot.send_raw(**serializers.loads(as_bytes(payload)))
-                except serializers.SerializationError:
-                    logger.exception('dropping undecodable queued message')
+        def raise_interrupt(signum: int, frame: FrameType | None) -> None:
+            raise KeyboardInterrupt
 
-            connection.delete(conf['REDIS_EXP_KEY'])
-
-        pubsub = connection.pubsub()  # type: ignore[no-untyped-call]
-        connection.config_set('notify-keyspace-events', 'Ex')
-        pubsub.psubscribe(**{'__keyevent@0__:expired': event_handler})
-        pubsub.run_in_thread(sleep_time=conf['REDIS_EXP_TIME'])
-        logger.info('Running worker redis subscriber')
-
-        with contextlib.suppress(KeyboardInterrupt, SystemExit):
-            bot.start_polling()
+        with contextlib.suppress(ValueError):
+            signal.signal(signal.SIGTERM, raise_interrupt)
