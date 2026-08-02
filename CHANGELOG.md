@@ -1,5 +1,84 @@
 # Changelog
 
+## 2.0.0 - unreleased
+
+Nothing is required to keep a 1.x project working: `telegram_bot` still
+imports and still works in `INSTALLED_APPS`. See the upgrade notes in the
+README.
+
+### Breaking
+
+- Package renamed to `django_redis_aiogram`. `telegram_bot` remains as a
+  deprecated shim and is removed in 3.0.
+- Requires Python 3.10–3.14, Django 5.2+, aiogram 3.30+. Django 4.2 reached
+  end of life, and aiogram 3.30 needs Python 3.10.
+- Queue payloads are serialized as JSON by default instead of pickle. Existing
+  pickled payloads are still readable, so no drain is needed. Set
+  `ALLOW_PICKLE: False` to refuse them once the queue is clean.
+- Delivery defaults to `blpop` instead of keyspace expiry events. Set
+  `DELIVERY: 'keyspace'` for the old behaviour.
+- System check ids moved from `telegram_bot.EXXX` to `django_redis_aiogram.EXXX`.
+- `TelegramBot` moved from `telegram_bot.telegram_bot` to
+  `django_redis_aiogram.client`; the package exports the `bot` singleton, which
+  previously shadowed the same-named submodule.
+- Packaging moved to `pyproject.toml` with a `src` layout.
+
+### Added
+
+- `ENABLED` lets a process opt out of the bot entirely: no autodiscover, no
+  system checks, `send_raw` and `send_redis` become no-ops, and no credentials
+  are required. Reads `TELEGRAM_BOT['ENABLED']` or the environment variable
+  `DJANGO_REDIS_AIOGRAM_ENABLED`.
+- Every scalar setting can come from `DJANGO_REDIS_AIOGRAM_<NAME>`; Django
+  settings take precedence.
+- `DEFAULT_BOT_PROPERTIES` maps onto aiogram's `DefaultBotProperties`, so
+  `parse_mode` is configured once on the bot rather than injected into every
+  call.
+- `FSM_STORAGE` selects `redis` (default), `memory`, or a dotted path.
+- `AUTODISCOVER` can be turned off on its own.
+- `start_tgbot --idle` keeps a disabled container parked instead of exiting,
+  for restart policies that treat a clean exit as a crash loop.
+- Public `bot.router`, `bot.dispatcher` and `bot.enabled`.
+- `py.typed`: the package ships type information.
+
+### Fixed
+
+- Importing the package no longer builds a bot, opens a Redis connection or
+  creates an event loop. A missing token or Redis URL used to take the whole
+  Django project down, including its test suite, in every process.
+- System checks now actually validate. The old ones could not fail: the
+  validation flag was only ever set inside an `isinstance` branch that a wrong
+  type never entered.
+- FSM state is no longer lost on restart — the dispatcher was built without a
+  storage, so it defaulted to memory even with Redis configured.
+- The delivery consumer no longer calls `create_task` on an event loop owned by
+  another thread.
+- Exhausting `MAX_RETRIES` now logs and honours `RAISE_EXCEPTION` instead of
+  returning silently.
+- Keyspace delivery reads the database index from `REDIS_URL` instead of
+  assuming 0, and degrades to a warning when the server refuses `CONFIG SET`
+  rather than crashing — managed Redis providers routinely refuse it.
+- `send_redis` writes its expiry key with a real TTL; 1.x relied on positional
+  arguments lining up.
+- Autodiscover no longer swallows `ImportError` raised inside a router module,
+  so a broken router surfaces.
+- Logging goes to the `django_redis_aiogram` logger instead of the root logger,
+  with values in `extra` rather than interpolated into the message.
+- `override_settings(TELEGRAM_BOT=...)` now takes effect; settings used to be
+  frozen at import.
+- SIGTERM shuts the worker down in order and closes the aiogram session.
+
+### Infrastructure
+
+- Test suite covering lazy import, the `ENABLED` flag, serialization
+  round-trips, delivery, checks and the shim.
+- CI across Python 3.10–3.13 and Django 5.2/6.0 with ruff, mypy and pytest,
+  plus a job pinning the lowest supported dependency versions and a
+  non-blocking one on Python 3.14.
+- Releases publish to PyPI through Trusted Publishing.
+- Dependabot, issue and pull request templates, `CONTRIBUTING.md`,
+  `SECURITY.md`.
+
 ## 1.0.0 - 2023-07-01
 - Initial release
 

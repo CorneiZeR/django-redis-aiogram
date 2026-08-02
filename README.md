@@ -1,149 +1,253 @@
 # django-redis-aiogram
 
-`django-redis-aiogram` provides a quick way to install `aiogram` in a container adjacent to `django`, allowing you to use your own router and loop. Also allows you to send messages through `redis`.
+[![PyPI](https://img.shields.io/pypi/v/django-redis-aiogram.svg)](https://pypi.org/project/django-redis-aiogram/)
+[![Python](https://img.shields.io/pypi/pyversions/django-redis-aiogram.svg)](https://pypi.org/project/django-redis-aiogram/)
+[![CI](https://github.com/CorneiZeR/django-redis-aiogram/actions/workflows/ci.yml/badge.svg)](https://github.com/CorneiZeR/django-redis-aiogram/actions/workflows/ci.yml)
+[![License](https://img.shields.io/pypi/l/django-redis-aiogram.svg)](LICENSE)
+
+Run [aiogram](https://docs.aiogram.dev/) in a container next to Django, write
+your handlers as ordinary Django app code, and send Telegram messages from
+anywhere in the project — directly or through a Redis queue.
+
+Only the bot container runs the polling loop. Your web and worker processes
+queue messages instead — though `send_raw` can also call Telegram directly from
+any process when you need it to.
 
 ## Installation
 
-The easiest and recommended way to install `django-redis-aiogram` is from [PyPI](https://pypi.org/project/django-redis-aiogram/)
-
-``` shell
+```shell
 pip install django-redis-aiogram
 ```
 
-You need to add `telegram_bot` to `INSTALLED_APPS` in your projects `settings.py`.
-
-``` python
+```python
 # settings.py
 
-INSTALLED_APPS = (
-    ...
-    'telegram_bot',
-    ...
-)
-```
-
-Also, you need to specify the minimum settings:
-``` python
-# settings.py
+INSTALLED_APPS = [
+    ...,
+    'django_redis_aiogram',
+]
 
 TELEGRAM_BOT = {
-    'REDIS_URL': REDIS_URL,
     'TOKEN': TELEGRAM_BOT_TOKEN,
+    'REDIS_URL': REDIS_URL,
 }
 ```
 
-Next, add a separate container to your docker-compose.yml. 
-(optional, if you want to use routers and handlers)
+Requires Python 3.10–3.14, Django 5.2+, aiogram 3.30+.
 
-``` yaml
-# docker-compose.yml
+Scalar settings — strings, integers and booleans — can also come from the
+environment as `DJANGO_REDIS_AIOGRAM_<NAME>`, which is handy in containers.
+Callables and mappings such as `DEFAULT_KWARGS` and `DEFAULT_BOT_PROPERTIES`
+have no sensible textual form, so they stay in `settings.py`:
 
-services:
-  ...
-  
-  telegram_bot:
-    container_name: telegram_bot
-    restart: always
-    command: python manage.py start_tgbot
-    build:
-      context: ./
+```shell
+DJANGO_REDIS_AIOGRAM_TOKEN=123:abc
+DJANGO_REDIS_AIOGRAM_ENABLED=0
 ```
 
-## Example Usage
+Django settings win over the environment.
 
-To send a message, use the following code:
-``` python
-# test.py
+## Sending messages
 
-from aiogram import types, F
-from telegram_bot import bot
+```python
+from aiogram import types
+from django_redis_aiogram import bot
 
-# sending a message directly
-bot.send_raw(chat_id=CHAT_ID, text=TEXT)
-bot.send_raw('send_photo', chat_id=CHAT_ID, caption=TEXT, photo=URL)
-
-# sending a message via redis
+# queue it — the bot container delivers it
 bot.send_redis(chat_id=CHAT_ID, text=TEXT)
 bot.send_redis('send_photo', chat_id=CHAT_ID, caption=TEXT, photo=URL)
 
-# markup example
+# or call Telegram directly from this process
+bot.send_raw(chat_id=CHAT_ID, text=TEXT)
+
 markup = types.InlineKeyboardMarkup(
-    inline_keyboard=[
-        [
-            types.InlineKeyboardButton(
-                text='best project ever',
-                web_app=types.WebAppInfo(url='https://pypi.org/project/django-redis-aiogram'),
-            )
-        ]
-    ]
+    inline_keyboard=[[types.InlineKeyboardButton(text='open', web_app=types.WebAppInfo(url=URL))]]
 )
-
-bot.send_raw(chat_id=CHAT_ID, text=TEXT, reply_markup=markup)
 bot.send_redis(chat_id=CHAT_ID, text=TEXT, reply_markup=markup)
+```
 
+Any aiogram bot method works — pass its name as the first argument.
 
-# if RAISE_EXCEPTION is True, you can use try-except to handle errors from send_raw
+With `RAISE_EXCEPTION` enabled, `send_raw` propagates failures:
+
+```python
 from aiogram.exceptions import TelegramBadRequest
 
 try:
-    bot.send_raw(chat_id=CHAT_ID, text='**test*', parse_mode='Markdown')
+    bot.send_raw(chat_id=CHAT_ID, text='**oops*', parse_mode='Markdown')
 except TelegramBadRequest:
-    print('Telegram bad request :)')
+    ...
 ```
 
-If you need to use handlers, create file `tg_router.py` (by default) in your app, use the following code:
+## Handlers
 
-``` python
+Create `tg_router.py` in any installed app; it is imported automatically while
+`AUTODISCOVER` is on. `MODULE_NAME` changes which file name is looked for.
+
+```python
+# myapp/tg_router.py
 from aiogram import types, F
-from telegram_bot import bot
+from django_redis_aiogram import bot
 
 
 @bot.message(F.text.startswith('/start'))
 async def start_handler(message: types.Message) -> None:
     await message.answer('hi')
-
-
-@bot.message()
-async def simple_handler(message: types.Message) -> None:
-    await message.reply(message.text)
 ```
 
-You can use all handler types like in aiogram.
+Every aiogram observer has a matching decorator: `message`, `callback_query`,
+`inline_query`, `poll_answer`, `chat_member`, and so on.
+
+Handlers are `async`, so reach for Django's async ORM API (`afirst`,
+`acreate`, …) or wrap sync code in `sync_to_async`.
+
+FSM state is stored in Redis by default, so conversations survive a restart.
+
+## Running the bot
+
+```yaml
+# docker-compose.yml
+services:
+  telegram_bot:
+    image: ${IMAGE}
+    command: python manage.py start_tgbot
+    restart: always
+    env_file: .env
+    depends_on: [redis]
+```
+
+## Turning the bot off per process
+
+Every process loads your Django apps, but only one of them should run the bot.
+`ENABLED` lets the rest opt out: no autodiscover, no system checks, and
+`send_raw` / `send_redis` become no-ops that never build a bot or open a
+connection. A disabled process needs no credentials at all.
+
+```yaml
+services:
+  back:
+    environment:
+      DJANGO_REDIS_AIOGRAM_ENABLED: 0
+  telegram_bot:
+    environment:
+      DJANGO_REDIS_AIOGRAM_ENABLED: 1
+```
+
+`start_tgbot` exits cleanly when disabled. Under `restart: always` a clean exit
+still counts as a restart loop, so either use a compose profile:
+
+```yaml
+  telegram_bot:
+    profiles: [bot]
+```
+
+or keep the container parked with `python manage.py start_tgbot --idle`.
+
+## Delivery
+
+`send_redis` pushes onto a Redis list that the bot container consumes.
+
+| Aspect               | `blpop` (default) | `keyspace`                          |
+| -------------------- | ----------------- | ----------------------------------- |
+| Server configuration | none              | `CONFIG SET notify-keyspace-events` |
+| Managed Redis        | works             | usually refused                     |
+| Latency              | immediate         | up to `REDIS_EXP_TIME`              |
+| Database index       | any               | any (hardcoded to 0 in 1.x)         |
+
+`keyspace` reproduces the 1.x mechanism and exists for compatibility. Prefer
+`blpop`.
 
 ## Settings
 
-You can override settings:
+**Credentials**
 
-``` python
-# settings.py
+| Setting     | Default | Description          |
+| ----------- | ------- | -------------------- |
+| `TOKEN`     | `''`    | Telegram bot token   |
+| `REDIS_URL` | `''`    | Redis connection URL |
 
-def default_kwargs(function: str) -> dict[str, Any]:
-    """Default kwargs for telegram bot functions."""
-    prepared_dict = {
-        'send_message': {'parse_mode': 'HTML'},
-        'send_photo': {'parse_mode': 'Markdown', 'caption': '`Photo`'}
-    }
-    return prepared_dict.get(function, {})
+**Which processes run the bot**
 
+| Setting        | Default       | Description                             |
+| -------------- | ------------- | --------------------------------------- |
+| `ENABLED`      | `True`        | Run the bot in this process at all      |
+| `AUTODISCOVER` | `True`        | Import `<app>.<MODULE_NAME>` on startup |
+| `MODULE_NAME`  | `'tg_router'` | Module to look for in each app          |
+
+**Bot behaviour**
+
+| Setting                  | Default         | Description                                  |
+| ------------------------ | --------------- | -------------------------------------------- |
+| `DEFAULT_BOT_PROPERTIES` | `{}`            | Passed to aiogram's `DefaultBotProperties`   |
+| `DEFAULT_KWARGS`         | `lambda fn: {}` | Per-function extras the above cannot express |
+| `FSM_STORAGE`            | `'redis'`       | `'redis'`, `'memory'`, or a dotted path      |
+| `MAX_RETRIES`            | `10`            | Retries on Telegram rate limits              |
+| `RAISE_EXCEPTION`        | `False`         | Let `send_raw` propagate failures            |
+
+**Queue**
+
+| Setting              | Default                  | Description                                |
+| -------------------- | ------------------------ | ------------------------------------------ |
+| `DELIVERY`           | `'blpop'`                | `'blpop'` or `'keyspace'`                  |
+| `REDIS_MESSAGES_KEY` | `'TELEGRAM_BOT_MESSAGE'` | List holding queued calls                  |
+| `BLPOP_TIMEOUT`      | `5`                      | How often the consumer checks for shutdown |
+| `SERIALIZER`         | `'json'`                 | `'json'` or `'pickle'`                     |
+| `ALLOW_PICKLE`       | `True`                   | Accept pickled payloads left by 1.x        |
+| `REDIS_EXP_KEY`      | `'TELEGRAM_BOT_EXP'`     | `keyspace` delivery only                   |
+| `REDIS_EXP_TIME`     | `5`                      | `keyspace` delivery only                   |
+
+`manage.py check` validates all of these, including misspelled keys and unknown
+bot properties — in processes where the bot is enabled. A disabled process
+registers no checks at all, so run it somewhere `ENABLED` is true.
+
+### parse_mode
+
+Set it once, on the bot, instead of on every call:
+
+```python
 TELEGRAM_BOT = {
-    {
-    # event expiration time in redis
-    'REDIS_EXP_TIME': 5,
-    # redis key for handling expired event
-    'REDIS_EXP_KEY': 'TELEGRAM_BOT_EXP',
-    # redis key for collecting messages
-    'REDIS_MESSAGES_KEY': 'TELEGRAM_BOT_MESSAGE',
-    # name of the module to find
-    'MODULE_NAME': 'tg_router',
-    # default kwargs for telegram bot
-    'DEFAULT_KWARGS': default_kwargs,
-    # telegram bot token
-    'TOKEN': <TELEGRAM_BOT_TOKEN>,
-    # url for redis connection
-    'REDIS_URL': <REDIS_URL>,
-    # max retries for sending message
-    'MAX_RETRIES': 10,
-    # raise exception if error occurred
-    'RAISE_EXCEPTION': False
+    'DEFAULT_BOT_PROPERTIES': {
+        'parse_mode': 'HTML',
+        'link_preview_is_disabled': True,
+    },
 }
 ```
+
+`DEFAULT_KWARGS` remains for what `DefaultBotProperties` has no field for:
+
+```python
+def default_kwargs(function: str) -> dict:
+    return {'send_photo': {'caption': 'Photo'}}.get(function, {})
+```
+
+## Upgrading from 1.x
+
+Once you are on Python 3.10–3.14, Django 5.2+ and aiogram 3.30+, no application
+code has to change — `telegram_bot` still imports and still works in
+`INSTALLED_APPS`, with a deprecation warning. It is removed in 3.0.
+
+Those requirements are the one hard part of the upgrade: Django 4.2 reached end
+of life, and aiogram 3.30 needs Python 3.10.
+
+Worth doing:
+
+1. **Rename the app and imports:** `telegram_bot` → `django_redis_aiogram`.
+2. **Drop placeholder tokens.** The package no longer builds a bot or connects
+   to Redis at import time, so a project without credentials boots and tests
+   normally. Set `ENABLED: False` in processes that should not reach Telegram.
+3. **Move `parse_mode`** from `DEFAULT_KWARGS` into `DEFAULT_BOT_PROPERTIES`.
+4. **Use `bot.router`** instead of the private `bot._router`.
+5. **Close the pickle path** once the queue has drained: `'ALLOW_PICKLE': False`.
+6. **Re-silence checks if you had to.** Ids moved from `telegram_bot.EXXX` to
+   `django_redis_aiogram.EXXX`.
+
+Delivery switches to `blpop` automatically, and queued 1.x payloads stay
+readable, so no drain is needed before deploying. Keep the old behaviour with
+`'DELIVERY': 'keyspace'`.
+
+See [CHANGELOG.md](CHANGELOG.md) for the full list.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Security reports go through
+[SECURITY.md](SECURITY.md).
