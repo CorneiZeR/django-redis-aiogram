@@ -9,7 +9,7 @@ from aiogram.dispatcher.event.handler import CallbackType
 from django.core.exceptions import ImproperlyConfigured
 
 from django_redis_aiogram.redis import get_redis
-from django_redis_aiogram.settings import SETTINGS_NAME, conf
+from django_redis_aiogram.settings import SETTINGS_NAME, coerce_bool, conf
 
 logger = logging.getLogger('django_redis_aiogram')
 
@@ -33,6 +33,11 @@ class TelegramBot:
         self._bot: Bot | None = None
         self._dispatcher: Dispatcher | None = None
         self._router = Router()
+
+    @property
+    def enabled(self) -> bool:
+        """Whether this process should reach Telegram or Redis at all."""
+        return coerce_bool(conf['ENABLED'], f"{SETTINGS_NAME}['ENABLED']")
 
     @property
     def max_retries(self) -> int:
@@ -88,6 +93,9 @@ class TelegramBot:
 
     def send_raw(self, function: str = 'send_message', **kwargs: Any) -> None:
         """Call an aiogram bot method, retrying on Telegram rate limits."""
+        if not self.enabled:
+            logger.debug('disabled: skipping %s', function)
+            return
 
         async def send() -> None:
             retries = 0
@@ -115,6 +123,10 @@ class TelegramBot:
 
     def send_redis(self, function: str = 'send_message', **kwargs: Any) -> None:
         """Queue a message in Redis for the bot worker to deliver."""
+        if not self.enabled:
+            logger.debug('disabled: not queueing %s', function)
+            return
+
         connection = get_redis()
         connection.rpush(
             conf['REDIS_MESSAGES_KEY'],

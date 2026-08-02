@@ -1,6 +1,8 @@
 import contextlib
 import logging
 import pickle
+import threading
+from argparse import ArgumentParser
 from typing import Any
 
 from django.core.management import BaseCommand
@@ -15,7 +17,31 @@ logger = logging.getLogger('django_redis_aiogram')
 class Command(BaseCommand):
     help = 'Start telegram bot'
 
+    def add_arguments(self, parser: ArgumentParser) -> None:
+        parser.add_argument(
+            '--idle',
+            action='store_true',
+            help=(
+                'When the bot is disabled, block instead of exiting. Useful under '
+                'restart policies that treat a clean exit as a crash loop.'
+            ),
+        )
+
     def handle(self, *args: Any, **options: Any) -> None:
+        if not bot.enabled:
+            self.stdout.write(
+                self.style.WARNING(
+                    'django-redis-aiogram is disabled '
+                    "(TELEGRAM_BOT['ENABLED'] or DJANGO_REDIS_AIOGRAM_ENABLED); "
+                    'not starting the bot.'
+                )
+            )
+            if options['idle']:
+                self.stdout.write('Idling. Send SIGINT or SIGTERM to stop.')
+                with contextlib.suppress(KeyboardInterrupt):
+                    threading.Event().wait()
+            return
+
         connection = get_redis()
 
         def event_handler(message: dict[str, Any]) -> None:

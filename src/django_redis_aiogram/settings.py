@@ -28,6 +28,21 @@ def parse_bool(value: str, source: str) -> bool:
     )
 
 
+def coerce_bool(value: Any, source: str) -> bool:
+    """Accept the shapes a settings file realistically holds.
+
+    Plain bool(value) would read the string 'false' as True and quietly enable
+    a bot the project meant to switch off.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return bool(value)
+    if isinstance(value, str):
+        return parse_bool(value, source)
+    raise ImproperlyConfigured(f'{source} must be a boolean, got {type(value).__name__}.')
+
+
 def _from_env(key: str, default: Any) -> Any:
     """Read a setting from the environment, coercing it to the default's type.
 
