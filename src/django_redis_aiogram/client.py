@@ -6,8 +6,13 @@ from concurrent.futures import Future
 from typing import Any
 
 from aiogram import Bot, Dispatcher, Router, exceptions
+from aiogram.client.default import DefaultBotProperties
 from aiogram.dispatcher.event.handler import CallbackType
+from aiogram.fsm.storage.base import BaseStorage
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.storage.redis import RedisStorage
 from django.core.exceptions import ImproperlyConfigured
+from django.utils.module_loading import import_string
 
 from django_redis_aiogram.delivery import KEYSPACE_DELIVERY
 from django_redis_aiogram.redis import get_redis
@@ -15,6 +20,48 @@ from django_redis_aiogram.serializers import get_serializer
 from django_redis_aiogram.settings import SETTINGS_NAME, coerce_bool, conf
 
 logger = logging.getLogger('django_redis_aiogram')
+
+MEMORY_STORAGE = 'memory'
+REDIS_STORAGE = 'redis'
+
+
+def build_default_properties() -> DefaultBotProperties:
+    """Bot-wide defaults such as parse_mode.
+
+    aiogram applies these to every call, which is why unset fields carry a
+    ``Default`` sentinel rather than None.
+    """
+    properties = conf['DEFAULT_BOT_PROPERTIES']
+    try:
+        return DefaultBotProperties(**properties)
+    except TypeError as error:
+        raise ImproperlyConfigured(f"{SETTINGS_NAME}['DEFAULT_BOT_PROPERTIES']: {error}") from None
+
+
+def build_storage() -> BaseStorage:
+    """FSM storage: 'redis', 'memory', or a dotted path to a BaseStorage."""
+    name = conf['FSM_STORAGE']
+    if name == MEMORY_STORAGE:
+        return MemoryStorage()
+    if name == REDIS_STORAGE:
+        url = str(conf['REDIS_URL'] or '').strip()
+        if not url:
+            raise ImproperlyConfigured(
+                f"{SETTINGS_NAME}['REDIS_URL'] is required for the redis FSM storage."
+            )
+        return RedisStorage.from_url(url)
+
+    try:
+        storage_class = import_string(name)
+    except ImportError as error:
+        raise ImproperlyConfigured(
+            f"{SETTINGS_NAME}['FSM_STORAGE'] cannot be imported: {error}"
+        ) from error
+    if not (isinstance(storage_class, type) and issubclass(storage_class, BaseStorage)):
+        raise ImproperlyConfigured(
+            f"{SETTINGS_NAME}['FSM_STORAGE'] must point to a BaseStorage subclass, got {name!r}."
+        )
+    return storage_class()
 
 
 class TelegramBot:
@@ -62,13 +109,13 @@ class TelegramBot:
                 raise ImproperlyConfigured(
                     f"{SETTINGS_NAME}['TOKEN'] is required to talk to Telegram."
                 )
-            self._bot = Bot(token=token)
+            self._bot = Bot(token=token, default=build_default_properties())
         return self._bot
 
     @property
     def dispatcher(self) -> Dispatcher:
         if self._dispatcher is None:
-            self._dispatcher = Dispatcher()
+            self._dispatcher = Dispatcher(storage=build_storage())
         return self._dispatcher
 
     @property

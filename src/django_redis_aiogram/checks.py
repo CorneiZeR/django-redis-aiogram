@@ -5,9 +5,13 @@ Check ids moved from ``telegram_bot.EXXX`` to ``django_redis_aiogram.EXXX`` in
 """
 
 from collections.abc import Callable, Collection, Mapping
+from dataclasses import fields
 from typing import Any
 
+from aiogram.client.default import DefaultBotProperties
+from aiogram.fsm.storage.base import BaseStorage
 from django.core.checks import CheckMessage, Error, Warning
+from django.utils.module_loading import import_string
 
 from django_redis_aiogram.defaults import DEFAULTS
 from django_redis_aiogram.settings import SETTINGS_NAME, conf
@@ -66,6 +70,50 @@ def check_mapping(key: str, code: int) -> list[CheckMessage]:
     if isinstance(value, Mapping):
         return []
     return [_error(key, f'must be a mapping, got {type(value).__name__}.', code)]
+
+
+def check_bot_properties(code: int) -> list[CheckMessage]:
+    value = conf.get('DEFAULT_BOT_PROPERTIES')
+    if not isinstance(value, Mapping):
+        return []
+    known = {field.name for field in fields(DefaultBotProperties)}
+    # keys may be anything a project typed into settings, so stringify before joining
+    unknown = sorted(str(key) for key in value if key not in known)
+    if not unknown:
+        return []
+    return [
+        _error(
+            'DEFAULT_BOT_PROPERTIES',
+            f'has unknown properties: {", ".join(unknown)}. Known: {", ".join(sorted(known))}.',
+            code,
+        )
+    ]
+
+
+def check_fsm_storage(code: int) -> list[CheckMessage]:
+    """Resolve a dotted path here, so a typo fails before the first message."""
+    value = conf.get('FSM_STORAGE')
+    if not isinstance(value, str):
+        return []
+    if value in {'redis', 'memory'}:
+        return []
+    if '.' not in value:
+        return [
+            _error(
+                'FSM_STORAGE',
+                f"must be 'redis', 'memory', or a dotted path, got {value!r}.",
+                code,
+            )
+        ]
+    try:
+        storage = import_string(value)
+    except ImportError as error:
+        return [_error('FSM_STORAGE', f'cannot be imported: {error}', code)]
+    if not (isinstance(storage, type) and issubclass(storage, BaseStorage)):
+        return [
+            _error('FSM_STORAGE', f'must point to a BaseStorage subclass, got {value!r}.', code)
+        ]
+    return []
 
 
 def check_unknown_keys(code: int) -> list[CheckMessage]:
@@ -130,6 +178,8 @@ def check_settings(**kwargs: Any) -> list[CheckMessage]:
         lambda: check_int('BLPOP_TIMEOUT', 14, minimum=1),
         lambda: check_callable('DEFAULT_KWARGS', 15),
         lambda: check_mapping('DEFAULT_BOT_PROPERTIES', 16),
+        lambda: check_bot_properties(18),
+        lambda: check_fsm_storage(19),
         lambda: check_unknown_keys(3),
         check_credentials,
     ]
