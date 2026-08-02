@@ -53,7 +53,7 @@ Issues = "https://github.com/CorneiZeR/django-redis-aiogram/issues"
 path = "src/django_redis_aiogram/__init__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/django_redis_aiogram"]
+packages = ["src/django_redis_aiogram", "src/telegram_bot"]
 
 [tool.hatch.build.targets.sdist]
 include = ["src", "tests", "README.md", "CHANGELOG.md", "LICENSE"]
