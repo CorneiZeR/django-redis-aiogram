@@ -13,6 +13,10 @@ Only the bot container runs the polling loop. Your web and worker processes
 queue messages instead — though `send_raw` can also call Telegram directly from
 any process when you need it to.
 
+📖 **[Full documentation is in the wiki](https://github.com/CorneiZeR/django-redis-aiogram/wiki)** —
+settings reference, delivery modes, deployment recipes, troubleshooting and the
+1.x migration guide.
+
 ## Installation
 
 ```shell
@@ -300,6 +304,28 @@ readable, so no drain is needed before deploying. Keep the old behaviour with
 `'DELIVERY': 'keyspace'`.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full list.
+
+## Documentation
+
+The [wiki](https://github.com/CorneiZeR/django-redis-aiogram/wiki) covers
+everything in depth:
+
+| | |
+| --- | --- |
+| [Installation](../../wiki/Installation) | install, configure, run |
+| [Settings](../../wiki/Settings) | every setting, with defaults and check ids |
+| [Handlers](../../wiki/Handlers) | routers, filters, FSM, the async ORM |
+| [Sending messages](../../wiki/Sending-messages) | routes, keyboards, files, errors |
+| [Delivery](../../wiki/Delivery) | how messages reach Telegram, and which mode to pick |
+| [Rate limits](../../wiki/Rate-limits) | staying inside Telegram's limits |
+| [Deployment](../../wiki/Deployment) | compose recipes, disabling the bot per process |
+| [Logging](../../wiki/Logging) | the logger and its structured fields |
+| [Serialization](../../wiki/Serialization) | what can be queued |
+| [Troubleshooting](../../wiki/Troubleshooting) | symptoms and their usual causes |
+| [Migrating from 1.x](../../wiki/Migrating-from-1.x) | what changed, and what you must do |
+
+Pages live in [`docs/wiki/`](docs/wiki) and are published to the wiki
+automatically, so they are reviewed alongside the code they describe.
 
 ## Contributing
 
