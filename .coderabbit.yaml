@@ -14,6 +14,11 @@ reviews:
   auto_review:
     enabled: true
     drafts: false
+    # 2.0 lands as a stack of pull requests that target each other rather than
+    # the default branch; without this CodeRabbit skips every one of them
+    base_branches:
+      - '2\.0'
+      - 'feat/.*'
 
   path_filters:
     - '!**/__pycache__/**'
