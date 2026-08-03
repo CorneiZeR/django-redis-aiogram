@@ -288,6 +288,10 @@ class KeyspaceDelivery(Delivery):
                 "switch TELEGRAM_BOT['DELIVERY'] to 'blpop'",
                 extra={'tg_error': str(error)},
             )
+        except Exception:
+            # a refusal is normal; anything else is retried by the loop above,
+            # but it must be logged where it happened
+            logger.exception('could not probe keyspace notifications, continuing')
 
     def _on_expired(self, message: dict[str, Any]) -> None:
         data = message['data']

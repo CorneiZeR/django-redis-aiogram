@@ -30,6 +30,7 @@ from aiogram.types.input_file import (
     InputFile,
     URLInputFile,
 )
+from django.core.exceptions import ImproperlyConfigured
 
 TAG_MODEL = '__model__'
 TAG_DEFAULT = '__default__'
@@ -201,9 +202,18 @@ SERIALIZERS: dict[str, type[Serializer]] = {
 
 
 def get_serializer() -> Serializer:
-    from django_redis_aiogram.settings import conf
+    from django_redis_aiogram.settings import SETTINGS_NAME, coerce_bool, conf
 
     name = conf['SERIALIZER']
+    if name == 'pickle' and not coerce_bool(
+        conf['ALLOW_PICKLE'], f"{SETTINGS_NAME}['ALLOW_PICKLE']"
+    ):
+        # check E022 reports this, but a WSGI process never runs the checks
+        raise ImproperlyConfigured(
+            f"{SETTINGS_NAME}['SERIALIZER'] is 'pickle' while ALLOW_PICKLE is False, so "
+            'every queued message would be written and then refused on read. Set '
+            "ALLOW_PICKLE to True, or use the 'json' serializer."
+        )
     try:
         return SERIALIZERS[name]()
     except KeyError:

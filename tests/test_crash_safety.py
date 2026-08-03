@@ -8,6 +8,8 @@ behind. On servers without LMOVE it falls back to plain pops.
 import threading
 
 import pytest
+from aiogram import exceptions
+from aiogram.methods import SendMessage
 from django.test import override_settings
 from redis.exceptions import ResponseError
 
@@ -381,3 +383,122 @@ def test_a_redis_that_fails_to_subscribe_does_not_kill_the_worker(redis_server, 
     assert len(attempts) >= 2, f'the consumer did not retry the subscription: {len(attempts)}'
     assert still_running, 'a failed subscribe ended the consumer'
     assert 'keyspace consumer error, retrying' in caplog.text
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'DELIVERY': 'keyspace'})
+def test_a_redis_that_refuses_config_set_only_warns(redis_server, caplog):
+    """Managed providers (ElastiCache, Upstash) refuse CONFIG SET.
+
+    1.x died on that; the worker has to say so and carry on, because the list is
+    still readable — which is what the startup drain below proves.
+    """
+    redis_server.rpush(QUEUE, payload(3))
+
+    class RefusesConfigSet:
+        def config_get(self, *args, **kwargs):
+            raise ResponseError("unknown command 'CONFIG'")
+
+        def config_set(self, *args, **kwargs):
+            raise ResponseError("unknown command 'CONFIG'")
+
+        def __getattr__(self, name):
+            return getattr(redis_server, name)
+
+    handled = []
+    delivery = KeyspaceDelivery(handler=lambda **kwargs: handled.append(kwargs['chat_id']))
+    with pytest.MonkeyPatch.context() as patch, caplog.at_level('WARNING', logger=LOGGER):
+        patch.setattr('django_redis_aiogram.delivery.get_redis', lambda: RefusesConfigSet())
+        thread = delivery.start_thread()
+        waiter = threading.Event()
+        for _ in range(500):
+            if handled:
+                break
+            waiter.wait(0.01)
+        still_running = thread.is_alive()
+        delivery.stop()
+        thread.join(timeout=5)
+
+    assert 'cannot enable keyspace notifications' in caplog.text
+    assert still_running, 'the refusal killed the consumer thread'
+    assert handled == [3], handled
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'DELIVERY': 'keyspace'})
+def test_a_redis_that_is_down_at_the_notification_probe_does_not_kill_the_worker(
+    redis_server, caplog
+):
+    """config_get runs first in the thread target, before anything catches."""
+    attempts = []
+
+    class DownAtFirst:
+        def config_get(self, *args, **kwargs):
+            attempts.append(True)
+            raise ConnectionError('Connection refused')
+
+        def __getattr__(self, name):
+            return getattr(redis_server, name)
+
+    delivery = KeyspaceDelivery(handler=lambda **kwargs: None)
+    with pytest.MonkeyPatch.context() as patch, caplog.at_level('ERROR', logger=LOGGER):
+        patch.setattr('django_redis_aiogram.delivery.get_redis', lambda: DownAtFirst())
+        thread = delivery.start_thread()
+        waiter = threading.Event()
+        for _ in range(200):
+            if attempts:
+                break
+            waiter.wait(0.01)
+        waiter.wait(0.1)
+        still_running = thread.is_alive()
+        delivery.stop()
+        thread.join(timeout=5)
+
+    assert attempts, 'the probe never ran'
+    assert still_running, 'a connection error at the probe ended the consumer'
+    assert 'could not probe keyspace notifications' in caplog.text
+
+
+@override_settings(
+    TELEGRAM_BOT={
+        **SETTINGS,
+        'TOKEN': '42:x',
+        'FSM_STORAGE': 'memory',
+        'RAISE_EXCEPTION': True,
+        'MAX_RETRIES': 1,
+        'RATE_LIMIT': None,
+    }
+)
+def test_raise_exception_does_not_leave_a_message_in_flight(redis_server):
+    """RAISE_EXCEPTION re-raises out of send_raw once the retries are gone.
+
+    The consumer has to acknowledge anyway: leaving it in the processing list
+    would redeliver a message Telegram has already refused, for ever.
+    """
+    instance = TelegramBot()
+    attempts = []
+
+    class AlwaysRetryAfter:
+        async def send_message(self, **kwargs):
+            attempts.append(kwargs)
+            raise exceptions.TelegramRetryAfter(
+                method=SendMessage(chat_id=1, text='x'),
+                message='Too Many Requests',
+                retry_after=0,
+            )
+
+        class session:
+            @staticmethod
+            async def close():
+                pass
+
+    instance._bot = AlwaysRetryAfter()
+    delivery = Recording(handler=instance.send_raw)
+    delivery.handled = attempts
+    redis_server.rpush(QUEUE, payload(1))
+
+    drain(delivery, expected_handled=2)  # the first try plus one retry
+
+    assert len(attempts) == 2, attempts
+    assert redis_server.llen(QUEUE) == 0
+    assert redis_server.llen(PROCESSING) == 0, 'the refused message was left for reclaim'
+    instance._bot = None
+    instance.close()

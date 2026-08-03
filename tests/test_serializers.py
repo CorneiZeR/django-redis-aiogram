@@ -15,6 +15,7 @@ from aiogram import types
 from aiogram.client.default import Default
 from aiogram.methods import SendMediaGroup, SendMessage
 from aiogram.types.input_file import BufferedInputFile, FSInputFile, URLInputFile
+from django.core.exceptions import ImproperlyConfigured
 from django.test import override_settings
 
 from django_redis_aiogram.serializers import (
@@ -172,7 +173,7 @@ def test_get_serializer_json():
     assert isinstance(get_serializer(), JsonSerializer)
 
 
-@override_settings(TELEGRAM_BOT={'SERIALIZER': 'pickle'})
+@override_settings(TELEGRAM_BOT={'SERIALIZER': 'pickle', 'ALLOW_PICKLE': True})
 def test_get_serializer_pickle():
     assert isinstance(get_serializer(), PickleSerializer)
 
@@ -276,3 +277,10 @@ def test_a_textual_allow_pickle_still_refuses():
 def test_a_textual_allow_pickle_still_permits():
     raw = PickleSerializer().dumps({'function': 'send_message', 'chat_id': 2})
     assert loads(raw)['chat_id'] == 2
+
+
+@override_settings(TELEGRAM_BOT={'SERIALIZER': 'pickle', 'ALLOW_PICKLE': False})
+def test_writing_pickle_the_reader_refuses_is_rejected_at_runtime():
+    """E022 reports this, but a WSGI process never runs the system checks."""
+    with pytest.raises(ImproperlyConfigured, match='ALLOW_PICKLE'):
+        get_serializer()
