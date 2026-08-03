@@ -1,0 +1,58 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# Reviews run through the CodeRabbit GitHub App, which is free for public
+# repositories. Install it once at https://github.com/apps/coderabbitai —
+# no workflow file and no API key are involved.
+
+language: en-US
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  review_status: true
+  auto_review:
+    enabled: true
+    drafts: false
+
+  path_filters:
+    - '!**/__pycache__/**'
+    - '!dist/**'
+
+  path_instructions:
+    - path: 'src/django_redis_aiogram/**'
+      instructions: >-
+        This is a Django library that runs aiogram in a separate container and
+        queues Telegram messages through Redis. Weigh these first:
+
+        - Import-time side effects. The package must stay importable, and
+          Django must boot, with no token and no reachable Redis. Anything
+          that connects or validates credentials belongs behind a property or
+          a function, never at module level.
+        - Thread safety. The delivery consumer runs in its own thread while
+          the event loop belongs to the polling thread. create_task must never
+          cross that boundary.
+        - Serialization. Queued payloads must round-trip to the same concrete
+          types. Discriminated unions such as InputMediaPhoto are the trap:
+          dropping unset fields turns one into an InputMediaAudio silently.
+        - Production-only failures, such as a managed Redis refusing
+          CONFIG SET, or a hardcoded database index.
+        - Logging. Values belong in extra={...}, not interpolated into the
+          message, and keys are prefixed to avoid LogRecord collisions.
+
+        Skip style nits that ruff and mypy already enforce.
+
+    - path: 'src/telegram_bot/**'
+      instructions: >-
+        Deprecated compatibility shim for the 1.x package name. It must keep
+        re-exporting the same singleton — never construct a second one — and
+        must stay usable in INSTALLED_APPS until 3.0.
+
+    - path: 'tests/**'
+      instructions: >-
+        Check that a test would actually fail if the behaviour it covers
+        regressed. Flag assertions that hold regardless of the code under
+        test.
+
+chat:
+  auto_reply: true
