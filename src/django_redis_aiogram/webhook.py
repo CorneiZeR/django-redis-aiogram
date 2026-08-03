@@ -1,0 +1,122 @@
+"""Receive updates over HTTP instead of polling for them.
+
+Long polling needs a process that runs forever. A webhook does not: Telegram
+posts each update to a URL, so the update arrives in whichever process serves
+that URL — normally the web one.
+
+The view is deliberately synchronous. An async view would run on the server's
+own loop under ASGI but on a throwaway loop per request under WSGI, and the
+bot's HTTP session binds to the first loop that uses it. Driving the bot's own
+loop works the same under both.
+"""
+
+import hmac
+import json
+import logging
+from typing import Any
+
+from aiogram.types import Update
+from django.core.exceptions import ImproperlyConfigured
+from django.http import HttpRequest, HttpResponse, HttpResponseNotAllowed
+from django.views.decorators.csrf import csrf_exempt
+from pydantic import ValidationError
+
+from django_redis_aiogram import bot
+from django_redis_aiogram.settings import SETTINGS_NAME, conf
+
+logger = logging.getLogger('django_redis_aiogram')
+
+#: what Telegram sends the configured secret back in
+SECRET_HEADER = 'HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN'
+POLLING = 'polling'
+WEBHOOK = 'webhook'
+MODES = frozenset({POLLING, WEBHOOK})
+
+
+def current_mode() -> str:
+    """Which of the two ways of receiving updates this deployment uses."""
+    mode = str(conf['MODE'] or '').strip().lower()
+    if mode not in MODES:
+        raise ImproperlyConfigured(
+            f"{SETTINGS_NAME}['MODE'] must be one of {sorted(MODES)}, got {mode!r}."
+        )
+    return mode
+
+
+def webhook_secret() -> str:
+    """The shared secret, which the view refuses to run without."""
+    secret = str(conf['WEBHOOK_SECRET'] or '').strip()
+    if not secret:
+        raise ImproperlyConfigured(
+            f"{SETTINGS_NAME}['WEBHOOK_SECRET'] is required to serve the webhook: without it "
+            'anyone who finds the URL can feed your bot updates.'
+        )
+    return secret
+
+
+@csrf_exempt
+def telegram_webhook(request: HttpRequest) -> HttpResponse:
+    """Feed one update to the dispatcher.
+
+    Answers 200 for anything Telegram should not retry, including a handler that
+    raised — a non-2xx makes Telegram redeliver the same update, and a handler
+    that fails once will fail again.
+    """
+    if request.method != 'POST':
+        return HttpResponseNotAllowed(['POST'])
+
+    if not bot.enabled:
+        logger.warning('webhook received an update while the bot is disabled')
+        return HttpResponse(status=503)
+
+    if current_mode() != WEBHOOK:
+        # serving updates here while a worker polls for them would mean two
+        # sources of updates and no way to tell which handled what
+        logger.warning(
+            'webhook received an update while this deployment polls',
+            extra={'tg_mode': current_mode()},
+        )
+        return HttpResponse(status=503)
+
+    given = request.META.get(SECRET_HEADER, '')
+    if not hmac.compare_digest(given, webhook_secret()):
+        logger.warning('webhook rejected an update with a wrong secret')
+        return HttpResponse(status=403)
+
+    try:
+        telegram = bot.bot
+    except ImproperlyConfigured:
+        # a missing token is our problem, not a bad request
+        logger.exception('webhook cannot build the bot')
+        return HttpResponse(status=503)
+
+    try:
+        payload = json.loads(request.body)
+        update = Update.model_validate(payload, context={'bot': telegram})
+    except (json.JSONDecodeError, UnicodeDecodeError, ValidationError, TypeError):
+        # not something Telegram sent, or not something this aiogram understands
+        logger.exception('webhook could not read an update')
+        return HttpResponse(status=400)
+
+    try:
+        bot.feed_update(update)
+    except Exception:
+        logger.exception('webhook handler failed', extra={'tg_update': update.update_id})
+
+    return HttpResponse(status=200)
+
+
+def webhook_settings() -> dict[str, Any]:
+    """Everything `setWebhook` needs, resolved from settings."""
+    url = str(conf['WEBHOOK_URL'] or '').strip()
+    if not url:
+        raise ImproperlyConfigured(
+            f"{SETTINGS_NAME}['WEBHOOK_URL'] is required to register a webhook."
+        )
+    allowed = conf['WEBHOOK_ALLOWED_UPDATES']
+    return {
+        'url': url,
+        'secret_token': webhook_secret(),
+        'allowed_updates': list(allowed) if allowed else None,
+        'drop_pending_updates': False,
+    }

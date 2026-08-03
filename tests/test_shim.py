@@ -175,7 +175,7 @@ def test_the_package_ships_type_information():
         assert marker.is_file(), f'{package.__name__} ships no py.typed'
 
 
-@pytest.mark.parametrize('name', ['start_tgbot', 'tgbot_healthcheck'])
+@pytest.mark.parametrize('name', ['start_tgbot', 'tgbot_healthcheck', 'tgbot_webhook'])
 def test_every_management_command_is_reachable_under_the_old_name(name):
     """A 1.x project has `telegram_bot` in INSTALLED_APPS, so it looks there."""
     shim = importlib.import_module(f'telegram_bot.management.commands.{name}')
