@@ -188,14 +188,15 @@ def test_reader_detects_json():
     assert loads(raw)['chat_id'] == 1
 
 
-def test_reader_still_accepts_legacy_pickle():
-    """A queue written by 1.x must drain after the upgrade."""
+@override_settings(TELEGRAM_BOT={'ALLOW_PICKLE': True})
+def test_legacy_pickle_drains_during_the_upgrade_window():
+    """A queue written by 1.x drains once the operator opts in."""
     raw = PickleSerializer().dumps({'function': 'send_message', 'chat_id': 1})
     assert loads(raw)['chat_id'] == 1
 
 
-@override_settings(TELEGRAM_BOT={'ALLOW_PICKLE': False})
-def test_pickle_reads_can_be_refused():
+def test_pickle_reads_are_refused_by_default():
+    """Unpickling queue data is code execution; it must be an explicit opt-in."""
     raw = PickleSerializer().dumps({'function': 'send_message', 'chat_id': 1})
     with pytest.raises(SerializationError, match='ALLOW_PICKLE'):
         loads(raw)

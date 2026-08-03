@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import threading
 from asyncio import AbstractEventLoop
 from collections.abc import Coroutine
 from concurrent.futures import Future
@@ -89,6 +90,7 @@ class TelegramBot:
         #: sends this bot scheduled, so shutdown drains its own work only
         self._sends: set[asyncio.Task[None]] = set()
         self._polling = False
+        self._send_lock = threading.Lock()
 
     @property
     def enabled(self) -> bool:
@@ -277,7 +279,11 @@ class TelegramBot:
             # can run; run_coroutine_threadsafe hides the task from us
             loop.call_soon_threadsafe(lambda: self._register(loop.create_task(coroutine)))
         else:
-            loop.run_until_complete(coroutine)
+            # several web threads may send at once, and run_until_complete on a
+            # shared loop is not reentrant — the second caller would get
+            # "this event loop is already running"
+            with self._send_lock:
+                loop.run_until_complete(coroutine)
 
     def _drain(self, timeout: float) -> None:
         """Let scheduled sends finish, cancelling whatever outlasts the timeout."""

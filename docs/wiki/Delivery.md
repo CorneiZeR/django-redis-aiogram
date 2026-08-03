@@ -50,6 +50,20 @@ Both consumers take each message once — `blpop` and `LPOP` are atomic. Running
 several bot containers is safe, though a single one handles a lot: the limits
 in **[[Rate limits]]** bind long before the consumer does.
 
+## Crash safety
+
+On Redis 6.2+ a message is moved to `<queue>:processing` while it is being
+sent and removed once the handler returns. A worker killed mid-send leaves it
+there, and the next start reclaims it — delivery is **at-least-once**, so a
+crash can cause a duplicate send.
+
+Older servers lack `LMOVE`; the consumer says so in the log and falls back to
+plain pops, which is the 1.x at-most-once behaviour: a kill between the pop
+and the send loses that one message.
+
+Handler errors are not crashes: a message whose send *failed* is acknowledged
+and logged, not redelivered forever.
+
 ## What happens to a broken message
 
 A payload that cannot be decoded is logged and dropped; the consumer moves on.

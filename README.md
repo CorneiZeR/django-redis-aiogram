@@ -227,7 +227,7 @@ rarely be needed.
 | `REDIS_MESSAGES_KEY` | `'TELEGRAM_BOT_MESSAGE'` | List holding queued calls                  |
 | `BLPOP_TIMEOUT`      | `5`                      | How often the consumer checks for shutdown |
 | `SERIALIZER`         | `'json'`                 | `'json'` or `'pickle'`                     |
-| `ALLOW_PICKLE`       | `True`                   | Accept pickled payloads left by 1.x        |
+| `ALLOW_PICKLE`       | `False`                  | Accept pickled payloads left by 1.x        |
 | `REDIS_EXP_KEY`      | `'TELEGRAM_BOT_EXP'`     | `keyspace` delivery only                   |
 | `REDIS_EXP_TIME`     | `5`                      | `keyspace` delivery only                   |
 
@@ -295,12 +295,13 @@ Worth doing:
    normally. Set `ENABLED: False` in processes that should not reach Telegram.
 3. **Move `parse_mode`** from `DEFAULT_KWARGS` into `DEFAULT_BOT_PROPERTIES`.
 4. **Use `bot.router`** instead of the private `bot._router`.
-5. **Close the pickle path** once the queue has drained: `'ALLOW_PICKLE': False`.
+5. **Draining a 1.x queue?** Pickled payloads are refused by default. If the
+   queue holds messages at the moment you deploy, set `'ALLOW_PICKLE': True`
+   for the upgrade window and remove it once the queue has drained.
 6. **Re-silence checks if you had to.** Ids moved from `telegram_bot.EXXX` to
    `django_redis_aiogram.EXXX`.
 
-Delivery switches to `blpop` automatically, and queued 1.x payloads stay
-readable, so no drain is needed before deploying. Keep the old behaviour with
+Delivery switches to `blpop` automatically. Keep the old behaviour with
 `'DELIVERY': 'keyspace'`.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full list.

@@ -58,13 +58,13 @@ Class lookup is limited to `aiogram.types` members that subclass
 
 ## Switching formats
 
-Reads detect the format per message, so a running deployment can switch without
-draining the queue first. Once no 1.x payloads remain, close the door:
+Reads detect the format per message, but pickled payloads are **refused by
+default** — unpickling queue data is code execution. If the queue still holds
+1.x messages when you deploy, open the door for the upgrade window only:
 
 ```python
 TELEGRAM_BOT = {
-    'SERIALIZER': 'json',
-    'ALLOW_PICKLE': False,
+    'ALLOW_PICKLE': True,  # remove once the queue has drained
 }
 ```
 

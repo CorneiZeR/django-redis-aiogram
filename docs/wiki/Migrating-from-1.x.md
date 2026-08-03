@@ -1,8 +1,12 @@
 # Migrating from 1.x
 
-**Nothing is required.** `telegram_bot` still imports and still works in
-`INSTALLED_APPS`, with a deprecation warning. Queued 1.x payloads still drain.
-The shim is removed in 3.0.
+**Almost nothing is required.** `telegram_bot` still imports and still works
+in `INSTALLED_APPS`, with a deprecation warning. The shim is removed in 3.0.
+
+The one exception: if the Redis queue holds messages written by 1.x at the
+moment you deploy, set `'ALLOW_PICKLE': True` for the upgrade window —
+unpickling queue data is code execution, so 2.0 refuses it by default. Remove
+the setting once the queue has drained.
 
 What follows is what you get by doing the work.
 
@@ -84,13 +88,10 @@ bot.send(chat_id=chat_id, text=text)
 It queues from your app and calls Telegram directly inside the bot container.
 `send_redis` and `send_raw` still work.
 
-## 6. Close the pickle door
+## 6. Drain the 1.x queue, then drop the flag
 
-Reads accept both formats, so deploy first and drain the queue. Then:
-
-```python
-TELEGRAM_BOT = {'SERIALIZER': 'json', 'ALLOW_PICKLE': False}
-```
+If you needed `'ALLOW_PICKLE': True` for the upgrade window, remove it as soon
+as the old messages are gone — it is the code-execution door.
 
 ## 7. Re-silence checks if you had to
 
@@ -103,7 +104,8 @@ Ids moved from `telegram_bot.EXXX` to `django_redis_aiogram.EXXX`.
 | Import without credentials | breaks the project | fine |
 | Delivery | keyspace expiry events | `BLPOP`, no server config needed |
 | Redis database | hardcoded to 0 | taken from `REDIS_URL` |
-| Queue format | pickle | JSON, reads both |
+| Queue format | pickle | JSON; pickle refused unless opted in |
+| Crash mid-send | message lost | redelivered on the next start (Redis 6.2+) |
 | FSM state | lost on restart | stored in Redis |
 | Rate limiting | retry after refusal | paced under the published limits |
 | System checks | could never fail | actually validate |

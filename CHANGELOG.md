@@ -12,9 +12,10 @@ README.
   deprecated shim and is removed in 3.0.
 - Requires Python 3.10–3.14, Django 5.2+, aiogram 3.30+. Django 4.2 reached
   end of life, and aiogram 3.30 needs Python 3.10.
-- Queue payloads are serialized as JSON by default instead of pickle. Existing
-  pickled payloads are still readable, so no drain is needed. Set
-  `ALLOW_PICKLE: False` to refuse them once the queue is clean.
+- Queue payloads are serialized as JSON by default instead of pickle, and
+  pickled payloads are **refused** by default — unpickling queue data is code
+  execution. If the queue holds 1.x messages when you deploy, set
+  `ALLOW_PICKLE: True` for the upgrade window and remove it once drained.
 - Delivery defaults to `blpop` instead of keyspace expiry events. Set
   `DELIVERY: 'keyspace'` for the old behaviour.
 - System check ids moved from `telegram_bot.EXXX` to `django_redis_aiogram.EXXX`.
@@ -72,6 +73,13 @@ README.
   arguments lining up.
 - Keyspace delivery drains the queue with atomic pops. The 1.x lrange+ltrim
   pair let a second worker read the same messages and deliver them twice.
+- Delivery is crash-safe on Redis 6.2+: a message is parked in a processing
+  list while being sent and reclaimed on the next start, so a worker killed
+  mid-send no longer loses it. After a crash a message may be sent twice.
+- The keyspace consumer no longer dies on `decode_responses` connections, and
+  survives errors raised while handling a single event.
+- Concurrent `send_raw` calls from a multi-threaded web server are serialized
+  instead of failing with "this event loop is already running".
 - Payloads are decoded correctly when `REDIS_URL` sets `decode_responses`.
 - The `setting_changed` receivers use a `dispatch_uid`, so autoreload no longer
   stacks duplicates.

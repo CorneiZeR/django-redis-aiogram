@@ -20,6 +20,10 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    permissions:
+      # pushing to <repo>.wiki.git is governed by the contents scope; the
+      # workflow-level read is not enough to publish
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:

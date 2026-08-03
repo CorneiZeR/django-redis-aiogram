@@ -71,7 +71,7 @@ def test_blpop_drains_a_backlog(redis_server):
     assert [item['chat_id'] for item in delivery.handled] == [0, 1, 2]
 
 
-@override_settings(TELEGRAM_BOT={'DELIVERY': 'blpop', 'BLPOP_TIMEOUT': 1})
+@override_settings(TELEGRAM_BOT={'DELIVERY': 'blpop', 'BLPOP_TIMEOUT': 1, 'ALLOW_PICKLE': True})
 def test_blpop_accepts_legacy_pickle(redis_server):
     redis_server.rpush(
         'TELEGRAM_BOT_MESSAGE', PickleSerializer().dumps({'function': 'send_message', 'chat_id': 9})
@@ -199,4 +199,53 @@ def test_schedule_runs_inline_when_no_loop_is_running():
 
     instance._schedule(coroutine())
     assert ran == [True]
+    instance.close()
+
+
+@override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'RATE_LIMIT': None})
+def test_concurrent_send_raw_from_web_threads(monkeypatch):
+    """gunicorn gthread runs several request threads; run_until_complete on a
+    shared loop is not reentrant, so unsynchronised sends crash with
+    'this event loop is already running'."""
+    instance = TelegramBot()
+    sent = []
+
+    expected = 8
+    all_sent = threading.Event()
+
+    class StubBot:
+        async def send_message(self, **kwargs):
+            await asyncio.sleep(0.01)
+            sent.append(kwargs)
+            if len(sent) >= expected:
+                all_sent.set()
+
+        class session:
+            @staticmethod
+            async def close():
+                pass
+
+    instance._bot = StubBot()
+
+    errors = []
+
+    def send(index):
+        try:
+            instance.send_raw(chat_id=index, text='hi')
+        except Exception as error:
+            errors.append(error)
+
+    threads = [threading.Thread(target=send, args=(index,)) for index in range(expected)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+
+    # wait on the sends themselves: a join timeout is a scheduling guess, and a
+    # busy CI runner turned that guess into a flake
+    assert all_sent.wait(30), f'only {len(sent)} of {expected} sends completed'
+    assert [thread for thread in threads if thread.is_alive()] == []
+    assert errors == []
+    assert len(sent) == expected
+    instance._bot = None
     instance.close()
