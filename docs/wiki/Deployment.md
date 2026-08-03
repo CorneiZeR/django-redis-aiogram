@@ -9,15 +9,11 @@ services:
     image: ${IMAGE}
     command: gunicorn core.wsgi:application -b 0:8000
     env_file: .env
-    environment:
-      DJANGO_REDIS_AIOGRAM_ENABLED: 0
 
   celery_worker:
     image: ${IMAGE}
     command: celery -A core worker -l info
     env_file: .env
-    environment:
-      DJANGO_REDIS_AIOGRAM_ENABLED: 0
 
   telegram_bot:
     image: ${IMAGE}
@@ -28,6 +24,12 @@ services:
       DJANGO_REDIS_AIOGRAM_ENABLED: 1
     depends_on: [redis]
 ```
+
+Note what is **not** set: `back` and `celery_worker` leave `ENABLED` alone.
+They queue messages, and `ENABLED=0` would make those calls no-ops — the
+messages would vanish with a debug line and nothing else. The flag is for
+processes that must not reach Telegram or Redis at all: image builds, a
+migration container, CI. See below.
 
 ## What ENABLED=0 turns off
 
@@ -93,5 +95,5 @@ updates.
 ## Not using containers
 
 Nothing here is docker-specific. Run `python manage.py start_tgbot` under
-systemd or supervisor and set `DJANGO_REDIS_AIOGRAM_ENABLED=0` in the
-environment of your web and worker services.
+systemd or supervisor; the web and worker services need no extra environment,
+since only one process should run `start_tgbot` in the first place.

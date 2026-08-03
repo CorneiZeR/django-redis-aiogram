@@ -410,3 +410,38 @@ def test_exhausting_the_retries_raises_when_asked_to():
 
     instance._bot = None
     instance.close()
+
+
+@override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'FSM_STORAGE': 'memory'})
+def test_concurrent_first_sends_share_one_event_loop(monkeypatch):
+    """Two loops means loop_lock hands the senders locks for different loops,
+    and one of the loops is leaked."""
+    instance = TelegramBot()
+    created = []
+    real_new_event_loop = asyncio.new_event_loop
+
+    def slow_new_event_loop():
+        time.sleep(0.05)  # widen the window both threads race through
+        loop = real_new_event_loop()
+        created.append(loop)
+        return loop
+
+    monkeypatch.setattr(asyncio, 'new_event_loop', slow_new_event_loop)
+
+    seen = []
+    ready = threading.Barrier(4, timeout=10)
+
+    def touch():
+        ready.wait()
+        seen.append(instance.loop)
+
+    threads = [threading.Thread(target=touch) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert len(created) == 1, f'{len(created)} event loops were built'
+    assert len({id(loop) for loop in seen}) == 1
+    for loop in created:
+        loop.close()

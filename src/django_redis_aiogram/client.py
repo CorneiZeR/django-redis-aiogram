@@ -107,6 +107,7 @@ class TelegramBot:
         self._sends: set[asyncio.Task[None]] = set()
         self._polling = False
         self._closing = False
+        self._loop_guard = threading.Lock()
 
     @property
     def enabled(self) -> bool:
@@ -134,7 +135,12 @@ class TelegramBot:
     @property
     def loop(self) -> AbstractEventLoop:
         if self._loop is None:
-            self._loop = asyncio.new_event_loop()
+            # two first sends from different web threads would otherwise each
+            # build one, and loop_lock would then serialize nothing: the two
+            # senders would hold locks belonging to different loops
+            with self._loop_guard:
+                if self._loop is None:
+                    self._loop = asyncio.new_event_loop()
         return self._loop
 
     @property

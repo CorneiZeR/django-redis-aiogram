@@ -126,17 +126,23 @@ services:
 
 ## Turning the bot off per process
 
-Every process loads your Django apps, but only one of them should run the bot.
-`ENABLED` lets the rest opt out: no autodiscover, no system checks, and
-`send_raw` / `send_redis` become no-ops that never build a bot or open a
-connection. A disabled process needs no credentials at all.
+Only one process should run the bot, and that is decided by which one runs
+`start_tgbot` — not by this flag. `ENABLED=0` goes further: no autodiscover, no
+system checks, and `send`, `send_redis` and `send_raw` become no-ops that never
+build a bot or open a connection. Such a process needs no credentials at all.
+
+So set it to 0 where nothing should reach Telegram or Redis — image builds, a
+migration container, CI — and **not** on a web or Celery process that queues
+messages, which would silently drop them:
 
 ```yaml
 services:
-  back:
+  migrate:
+    command: python manage.py migrate
     environment:
       DJANGO_REDIS_AIOGRAM_ENABLED: 0
   telegram_bot:
+    command: python manage.py start_tgbot
     environment:
       DJANGO_REDIS_AIOGRAM_ENABLED: 1
 ```
