@@ -6,7 +6,7 @@ from django.test import override_settings
 
 from django_redis_aiogram import TelegramBot
 from django_redis_aiogram.delivery import BlpopDelivery, KeyspaceDelivery
-from django_redis_aiogram.redis import as_bytes, get_db_index
+from django_redis_aiogram.redis import as_bytes, get_db_index, get_redis, reset_redis
 from django_redis_aiogram.serializers import JsonSerializer, loads
 
 
@@ -116,3 +116,44 @@ def test_send_redis_round_trips_through_a_decoded_connection(decoded_server):
 
     queued = loads(as_bytes(decoded_server.lpop('TELEGRAM_BOT_MESSAGE')))
     assert queued == {'function': 'send_message', 'chat_id': 1, 'text': 'hi'}
+
+
+def test_the_connection_is_built_once_and_reused(monkeypatch):
+    """`redis_conn` and every get_redis() caller must land on one client.
+
+    Nothing asserted this: a per-call client would leak a connection pool per
+    send and still pass every other test in the suite.
+    """
+    from redis import Redis
+
+    built = []
+    closed = []
+
+    class Stub:
+        def close(self):
+            closed.append(self)
+
+    def from_url(cls, url):
+        # a fresh object each time, so "the same client" cannot pass by accident
+        built.append(url)
+        return Stub()
+
+    monkeypatch.setattr(Redis, 'from_url', classmethod(from_url))
+    reset_redis()
+
+    with override_settings(TELEGRAM_BOT={'REDIS_URL': 'redis://localhost:6379/7'}):
+        first = get_redis()
+        assert get_redis() is first, 'a second call built another client'
+        assert built == ['redis://localhost:6379/7'], built
+
+        reset_redis()
+        assert closed == [first], 'reset_redis left the connection open'
+
+        # and the slot is empty: keeping a closed client would hand it to the
+        # next caller
+        second = get_redis()
+
+    reset_redis()
+
+    assert second is not first, 'reset_redis kept the closed client'
+    assert len(built) == 2, built
