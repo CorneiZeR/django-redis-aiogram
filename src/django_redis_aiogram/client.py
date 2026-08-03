@@ -133,7 +133,11 @@ class TelegramBot:
         self.loop.run_until_complete(self.dispatcher.start_polling(self.bot))
 
     def close(self) -> None:
-        """Release the aiogram session and the owned event loop."""
+        """Release the aiogram session, the FSM storage and the owned loop."""
+        # RedisStorage owns a second, async Redis client that nothing else closes
+        if self._dispatcher is not None:
+            self.loop.run_until_complete(self._dispatcher.storage.close())
+            self._dispatcher = None
         if self._bot is not None:
             self.loop.run_until_complete(self._bot.session.close())
             self._bot = None

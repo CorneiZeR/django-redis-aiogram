@@ -68,3 +68,13 @@ jobs:
       - run: pip install build twine
       - run: python -m build
       - run: twine check dist/*
+      - name: The wheel must carry the typing marker
+        run: |
+          python - <<'EOF'
+          import glob, zipfile
+          wheel = glob.glob('dist/*.whl')[0]
+          names = zipfile.ZipFile(wheel).namelist()
+          for expected in ('django_redis_aiogram/py.typed', 'telegram_bot/__init__.py'):
+              assert expected in names, f'{expected} missing from {wheel}: {names}'
+          print(f'{wheel} ships py.typed and the shim')
+          EOF

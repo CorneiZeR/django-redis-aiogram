@@ -13,7 +13,7 @@ import logging
 import threading
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 from redis.exceptions import ResponseError
 
@@ -125,14 +125,11 @@ class KeyspaceDelivery(Delivery):
             return
         connection = get_redis()
         key = conf['REDIS_MESSAGES_KEY']
-        length = connection.llen(key)
-        if not length:
-            return
-        queued = connection.lrange(key, 0, length - 1)
-        connection.ltrim(key, length, -1)
-        for raw in queued:
+        # LPOP is atomic, unlike the 1.x lrange+ltrim pair, which let a second
+        # worker read the same messages before the trim landed. The cast is
+        # because lpop only widens to a list when given a count.
+        while (raw := cast('bytes | str | None', connection.lpop(key))) is not None:
             self.dispatch(as_bytes(raw))
-        connection.delete(conf['REDIS_EXP_KEY'])
 
 
 DELIVERIES: dict[str, type[Delivery]] = {

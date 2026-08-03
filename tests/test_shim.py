@@ -1,6 +1,7 @@
 """The old `telegram_bot` package name keeps working, with a warning."""
 
 import importlib
+import pathlib
 import subprocess
 import sys
 import textwrap
@@ -119,3 +120,46 @@ def test_legacy_app_config_targets_the_old_label():
 
     assert issubclass(TelegramBotAppConfig, Base)
     assert TelegramBotAppConfig.name == 'telegram_bot'
+
+
+def test_both_app_labels_can_be_installed_together():
+    """Someone mid-migration may list the old and the new app at once."""
+    script = textwrap.dedent("""
+        import django
+        from django.conf import settings
+
+        settings.configure(
+            INSTALLED_APPS=['django_redis_aiogram', 'telegram_bot'],
+            DATABASES={},
+            USE_TZ=True,
+            TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost:6379/0'},
+        )
+        django.setup()
+
+        from django.apps import apps
+        from django.core.checks import run_checks
+
+        assert apps.is_installed('django_redis_aiogram')
+        assert apps.is_installed('telegram_bot')
+
+        errors = [m for m in run_checks() if m.is_serious()]
+        assert not errors, errors
+
+        # the settings checks must not be reported twice
+        ids = [m.id for m in run_checks() if m.id and m.id.startswith('django_redis_aiogram')]
+        assert len(ids) == len(set(ids)), ids
+        print('ok')
+    """)
+    result = subprocess.run(
+        [sys.executable, '-c', script], capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stderr
+    assert 'ok' in result.stdout
+
+
+def test_the_package_ships_type_information():
+    """py.typed is what makes the annotations visible to a consumer's mypy."""
+    import django_redis_aiogram
+
+    marker = pathlib.Path(django_redis_aiogram.__file__).parent / 'py.typed'
+    assert marker.is_file()

@@ -18,6 +18,9 @@ logger = logging.getLogger('django_redis_aiogram')
 class Command(BaseCommand):
     help = 'Start telegram bot'
 
+    #: what --idle waits on; tests replace it so they can end the wait
+    idle_event: threading.Event | None = None
+
     def add_arguments(self, parser: ArgumentParser) -> None:
         parser.add_argument(
             '--idle',
@@ -40,7 +43,7 @@ class Command(BaseCommand):
             if options['idle']:
                 self.stdout.write('Idling. Send SIGINT or SIGTERM to stop.')
                 with contextlib.suppress(KeyboardInterrupt):
-                    threading.Event().wait()
+                    (self.idle_event or threading.Event()).wait()
             return
 
         delivery = get_delivery(handler=bot.send_raw)
