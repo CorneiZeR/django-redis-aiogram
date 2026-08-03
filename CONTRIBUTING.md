@@ -64,6 +64,12 @@ Pull requests are reviewed automatically by
 [CodeRabbit](https://github.com/apps/coderabbitai), which is free for public
 repositories. `.coderabbit.yaml` points it at the invariants above.
 
+## Documentation
+
+Wiki pages live in `docs/wiki/`. Edit them there, in the same pull request as
+the code they describe; a push to `master` publishes them to the wiki. Links
+between pages use `[[Page name]]`, and a test checks that they all resolve.
+
 ## Commits
 
 Explain why the change is needed, not just what changed. If it fixes a bug,
