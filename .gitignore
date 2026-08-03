@@ -1,5 +1,7 @@
 .idea/
+.vscode/
 venv/
+.venv/
 *.egg-info/
 
 # Python cache.
@@ -9,3 +11,10 @@ __pycache__/
 # build
 build/
 dist/
+
+# tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/

@@ -67,12 +67,16 @@ bot.send_redis(chat_id=CHAT_ID, text=TEXT)
 bot.send_redis('send_photo', chat_id=CHAT_ID, caption=TEXT, photo=URL)
 
 # markup example
-markup = types.InlineKeyboardMarkup(inline_keyboard=[
-    [types.InlineKeyboardButton(
-        text='best project ever',
-        web_app=types.WebAppInfo(url='https://pypi.org/project/django-redis-aiogram')
-    )]
-])
+markup = types.InlineKeyboardMarkup(
+    inline_keyboard=[
+        [
+            types.InlineKeyboardButton(
+                text='best project ever',
+                web_app=types.WebAppInfo(url='https://pypi.org/project/django-redis-aiogram'),
+            )
+        ]
+    ]
+)
 
 bot.send_raw(chat_id=CHAT_ID, text=TEXT, reply_markup=markup)
 bot.send_redis(chat_id=CHAT_ID, text=TEXT, reply_markup=markup)
