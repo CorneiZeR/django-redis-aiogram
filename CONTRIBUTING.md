@@ -26,6 +26,25 @@ mypy
 python -m pytest
 ```
 
+A second suite needs a real Redis and is skipped without one:
+
+```shell
+docker run -d --name drai-redis -p 6399:6379 redis:7-alpine
+until docker exec drai-redis redis-cli ping >/dev/null 2>&1; do sleep 0.3; done
+DJANGO_REDIS_AIOGRAM_TEST_REDIS_URL=redis://localhost:6399/0 python -m pytest -m integration
+```
+
+`docker run` returns before the server accepts connections, hence the wait. Give
+it a **throwaway** server or at least a database nothing else uses: the fixture
+runs `FLUSHDB` before and after every test.
+
+It covers what fakeredis cannot: whether `LMOVE` exists and the consumer picks
+the crash-safe path, whether a reclaim takes back only its own worker's message,
+keyspace delivery with `CONFIG SET` done at startup, a mixed pickle/JSON backlog
+draining, and FSM state surviving a restart. `scripts/smoke_install.sh` is the
+other half — it builds the wheel, installs it into a throwaway project and
+checks that Django boots with no credentials at all.
+
 CI splits those up: `ruff`, `ruff format` and `mypy` run once on Python 3.13,
 while `pytest` runs across Python 3.10–3.13 × Django 5.2/6.0, plus a job pinning
 the lowest supported versions of every dependency. Python 3.14 runs too but

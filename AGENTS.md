@@ -37,6 +37,21 @@ ruff check . && ruff format --check . && mypy && python -m pytest -q
 
 Those four are exactly what CI gates on. `pytest` needs no Redis and no token.
 
+Two more suites exist and are not part of that loop:
+
+```shell
+DJANGO_REDIS_AIOGRAM_TEST_REDIS_URL=redis://localhost:6399/0 python -m pytest -m integration
+bash scripts/smoke_install.sh
+```
+
+The first needs a real server; run it when you touch delivery, serialization,
+FSM persistence, keyspace notifications or connection cleanup. It flushes the
+database it is pointed at, so point it at a throwaway one.
+
+The second builds and installs the wheel; run it when you touch packaging,
+Django startup or the shim. Packaging-only work does not need the Redis suite,
+and vice versa.
+
 ## Rules that are not negotiable
 
 - **Nothing happens at import time.** The package must import, and Django must
