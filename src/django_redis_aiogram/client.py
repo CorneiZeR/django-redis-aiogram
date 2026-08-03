@@ -88,6 +88,7 @@ class TelegramBot:
         self._rate_limiter_built = False
         #: sends this bot scheduled, so shutdown drains its own work only
         self._sends: set[asyncio.Task[None]] = set()
+        self._polling = False
 
     @property
     def enabled(self) -> bool:
@@ -144,10 +145,31 @@ class TelegramBot:
     def redis_conn(self) -> Any:
         return get_redis()
 
+    @property
+    def is_worker(self) -> bool:
+        """True only inside the process that runs the bot itself."""
+        return self._polling
+
     def start_polling(self) -> None:
         """Attach the router and block on Telegram long polling."""
         self.dispatcher.include_router(self._router)
-        self.loop.run_until_complete(self.dispatcher.start_polling(self.bot))
+        self._polling = True
+        try:
+            self.loop.run_until_complete(self.dispatcher.start_polling(self.bot))
+        finally:
+            self._polling = False
+
+    def send(self, function: str = 'send_message', **kwargs: Any) -> None:
+        """Deliver a message the way this process can.
+
+        Inside the bot container that means calling Telegram directly; anywhere
+        else it means handing the call to the queue for the bot to pick up. It
+        saves every caller from having to know which process it is running in.
+        """
+        if self.is_worker:
+            self.send_raw(function, **kwargs)
+        else:
+            self.send_redis(function, **kwargs)
 
     def close(self, drain_timeout: float = 5.0) -> None:
         """Finish what is in flight, then release everything this bot owns.

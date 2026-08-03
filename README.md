@@ -53,17 +53,19 @@ Django settings win over the environment.
 from aiogram import types
 from django_redis_aiogram import bot
 
-# queue it — the bot container delivers it
-bot.send_redis(chat_id=CHAT_ID, text=TEXT)
-bot.send_redis('send_photo', chat_id=CHAT_ID, caption=TEXT, photo=URL)
+# the usual call: queues from your app, calls Telegram directly inside the
+# bot container, so callers do not have to know which process they are in
+bot.send(chat_id=CHAT_ID, text=TEXT)
+bot.send('send_photo', chat_id=CHAT_ID, caption=TEXT, photo=URL)
 
-# or call Telegram directly from this process
+# or pick the route yourself
+bot.send_redis(chat_id=CHAT_ID, text=TEXT)
 bot.send_raw(chat_id=CHAT_ID, text=TEXT)
 
 markup = types.InlineKeyboardMarkup(
     inline_keyboard=[[types.InlineKeyboardButton(text='open', web_app=types.WebAppInfo(url=URL))]]
 )
-bot.send_redis(chat_id=CHAT_ID, text=TEXT, reply_markup=markup)
+bot.send(chat_id=CHAT_ID, text=TEXT, reply_markup=markup)
 ```
 
 Any aiogram bot method works — pass its name as the first argument.
@@ -157,6 +159,34 @@ or keep the container parked with `python manage.py start_tgbot --idle`.
 `keyspace` reproduces the 1.x mechanism and exists for compatibility. Prefer
 `blpop`.
 
+## Rate limits
+
+Telegram publishes its limits, so the bot paces itself against them rather than
+waiting to be refused and retrying:
+
+| Limit | Default |
+| ----- | ------- |
+| Overall | 30 messages/second |
+| Same chat | 1 message/second |
+| Same group or channel | 20 messages/minute |
+
+```python
+TELEGRAM_BOT = {
+    'RATE_LIMIT': {
+        'overall_per_second': 30,
+        'per_chat_per_second': 1,
+        'group_per_minute': 20,
+    },
+}
+```
+
+Set any entry to `0` to drop that limit, or `RATE_LIMIT` to `None` to disable
+pacing entirely. Budgets belong to a bot instance — Telegram meters per token,
+so a second bot gets its own.
+
+Retrying on `TelegramRetryAfter` still happens; pacing just means it should
+rarely be needed.
+
 ## Settings
 
 **Credentials**
@@ -181,6 +211,7 @@ or keep the container parked with `python manage.py start_tgbot --idle`.
 | `DEFAULT_BOT_PROPERTIES` | `{}`            | Passed to aiogram's `DefaultBotProperties`   |
 | `DEFAULT_KWARGS`         | `lambda fn: {}` | Per-function extras the above cannot express |
 | `FSM_STORAGE`            | `'redis'`       | `'redis'`, `'memory'`, or a dotted path      |
+| `RATE_LIMIT`             | see above       | Proactive pacing, or `None` to disable       |
 | `MAX_RETRIES`            | `10`            | Retries on Telegram rate limits              |
 | `RAISE_EXCEPTION`        | `False`         | Let `send_raw` propagate failures            |
 
