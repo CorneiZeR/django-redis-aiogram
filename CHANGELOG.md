@@ -19,8 +19,12 @@ README.
   `DELIVERY: 'keyspace'` for the old behaviour.
 - System check ids moved from `telegram_bot.EXXX` to `django_redis_aiogram.EXXX`.
 - `TelegramBot` moved from `telegram_bot.telegram_bot` to
-  `django_redis_aiogram.client`; the package exports the `bot` singleton, which
-  previously shadowed the same-named submodule.
+  `django_redis_aiogram.client`, and the settings module is
+  `django_redis_aiogram.settings`. The package exports the `bot` and `conf`
+  objects, which would otherwise shadow same-named submodules.
+- `ENABLED` is parsed rather than coerced with `bool()`. The string `'false'`
+  now disables the bot instead of enabling it, integers are accepted, and
+  anything else raises `ImproperlyConfigured`.
 - Packaging moved to `pyproject.toml` with a `src` layout.
 
 ### Added
@@ -35,11 +39,13 @@ README.
   `parse_mode` is configured once on the bot rather than injected into every
   call.
 - `FSM_STORAGE` selects `redis` (default), `memory`, or a dotted path.
+- `ALLOW_PICKLE` refuses pickled payloads once a 1.x queue has drained.
 - `AUTODISCOVER` can be turned off on its own.
 - `start_tgbot --idle` keeps a disabled container parked instead of exiting,
   for restart policies that treat a clean exit as a crash loop.
 - Public `bot.router`, `bot.dispatcher` and `bot.enabled`.
 - `py.typed`: the package ships type information.
+- `close()` releases the FSM storage as well as the bot session and the loop.
 
 ### Fixed
 
@@ -60,6 +66,13 @@ README.
   rather than crashing — managed Redis providers routinely refuse it.
 - `send_redis` writes its expiry key with a real TTL; 1.x relied on positional
   arguments lining up.
+- Keyspace delivery drains the queue with atomic pops. The 1.x lrange+ltrim
+  pair let a second worker read the same messages and deliver them twice.
+- Payloads are decoded correctly when `REDIS_URL` sets `decode_responses`.
+- The `setting_changed` receivers use a `dispatch_uid`, so autoreload no longer
+  stacks duplicates.
+- Serializer failures surface as `SerializationError` instead of raw
+  `TypeError` / `ValueError` escaping to the caller.
 - Autodiscover no longer swallows `ImportError` raised inside a router module,
   so a broken router surfaces.
 - Logging goes to the `django_redis_aiogram` logger instead of the root logger,

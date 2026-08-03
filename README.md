@@ -220,6 +220,29 @@ def default_kwargs(function: str) -> dict:
     return {'send_photo': {'caption': 'Photo'}}.get(function, {})
 ```
 
+## Logging
+
+Everything is logged to the `django_redis_aiogram` logger, and values are
+attached as structured fields rather than baked into the message, so a JSON or
+structlog backend can index them.
+
+```python
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {'class': 'logging.StreamHandler'},
+    },
+    'loggers': {
+        'django_redis_aiogram': {'handlers': ['console'], 'level': 'INFO'},
+    },
+}
+```
+
+Fields are prefixed with `tg_`: `tg_function`, `tg_retry_after`, `tg_retries`,
+`tg_max_retries`, `tg_delivery`, `tg_key`, `tg_channel`. Drop the level to
+`DEBUG` to also see the no-ops a disabled process skips.
+
 ## Upgrading from 1.x
 
 Once you are on Python 3.10–3.14, Django 5.2+ and aiogram 3.30+, no application

@@ -17,9 +17,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+          cache: pip
+          cache-dependency-path: pyproject.toml
       - run: pip install -e '.[dev]'
       - run: ruff check .
       - run: ruff format --check .
@@ -40,10 +44,30 @@ jobs:
             django-version: '6.0'
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
       - run: pip install -e '.[dev]' 'django~=${{ matrix.django-version }}.0'
+      - run: python -m pytest -q
+
+  test-floors:
+    # CI otherwise installs the newest releases, so the declared minimums are
+    # never exercised. Exact pins, not 5.2.* — that resolved to 5.2.16
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e '.[dev]' 'django==5.2.0' 'aiogram==3.30.0' 'redis==5.0.0'
       - run: python -m pytest -q
 
   test-prerelease:
@@ -52,9 +76,13 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.14'
+          cache: pip
+          cache-dependency-path: pyproject.toml
       - run: pip install -e '.[dev]'
       - run: python -m pytest -q
 
@@ -62,9 +90,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
+          cache: pip
+          cache-dependency-path: pyproject.toml
       - run: pip install build twine
       - run: python -m build
       - run: twine check dist/*
