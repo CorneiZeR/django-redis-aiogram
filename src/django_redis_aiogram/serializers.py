@@ -229,6 +229,8 @@ def loads(raw: bytes) -> dict[str, Any]:
         return JsonSerializer().loads(raw)
     if not conf['ALLOW_PICKLE']:
         raise SerializationError(
-            "Refusing to unpickle a queued payload because TELEGRAM_BOT['ALLOW_PICKLE'] is False."
+            'Refusing to unpickle a queued payload. If this queue still holds '
+            "messages written by 1.x, set TELEGRAM_BOT['ALLOW_PICKLE'] = True "
+            'for the upgrade window and remove it once the queue has drained.'
         )
     return PickleSerializer().loads(raw)

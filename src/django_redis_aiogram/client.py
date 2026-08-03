@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import threading
 from asyncio import AbstractEventLoop
 from collections.abc import Coroutine
 from concurrent.futures import Future
@@ -14,6 +15,7 @@ from aiogram.fsm.storage.redis import RedisStorage
 from django.core.exceptions import ImproperlyConfigured
 from django.utils.module_loading import import_string
 
+from django_redis_aiogram.api import check_function
 from django_redis_aiogram.delivery import KEYSPACE_DELIVERY
 from django_redis_aiogram.redis import get_redis
 from django_redis_aiogram.serializers import get_serializer
@@ -89,6 +91,7 @@ class TelegramBot:
         #: sends this bot scheduled, so shutdown drains its own work only
         self._sends: set[asyncio.Task[None]] = set()
         self._polling = False
+        self._send_lock = threading.Lock()
 
     @property
     def enabled(self) -> bool:
@@ -203,6 +206,7 @@ class TelegramBot:
 
     def send_raw(self, function: str = 'send_message', **kwargs: Any) -> None:
         """Call an aiogram bot method, retrying on Telegram rate limits."""
+        check_function(function)
         if not self.enabled:
             logger.debug('send skipped: bot disabled', extra={'tg_function': function})
             return
@@ -285,7 +289,11 @@ class TelegramBot:
             # can run; run_coroutine_threadsafe hides the task from us
             loop.call_soon_threadsafe(lambda: self._register(loop.create_task(coroutine)))
         else:
-            loop.run_until_complete(coroutine)
+            # several web threads may send at once, and run_until_complete on a
+            # shared loop is not reentrant — the second caller would get
+            # "this event loop is already running"
+            with self._send_lock:
+                loop.run_until_complete(coroutine)
 
     def _drain(self, timeout: float) -> None:
         """Let scheduled sends finish, cancelling whatever outlasts the timeout."""
@@ -325,6 +333,7 @@ class TelegramBot:
 
     def send_redis(self, function: str = 'send_message', **kwargs: Any) -> None:
         """Queue a message in Redis for the bot worker to deliver."""
+        check_function(function)
         if not self.enabled:
             logger.debug('queueing skipped: bot disabled', extra={'tg_function': function})
             return

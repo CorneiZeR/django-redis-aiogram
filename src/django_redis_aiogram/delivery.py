@@ -7,16 +7,24 @@ while the worker is down.
 ``keyspace`` reproduces the 1.x mechanism — write a key with a TTL and react to
 its expiry event. It needs ``CONFIG SET notify-keyspace-events``, which managed
 Redis providers usually refuse, and it only delivers once the TTL elapses.
+
+Both consume crash-safely where the server allows it: a message is moved to a
+processing list while it is being sent and removed afterwards, so a worker
+killed mid-send leaves it behind to be reclaimed on the next start. That makes
+delivery at-least-once — after a crash a message may be sent twice. Servers
+older than Redis 6.2 lack ``LMOVE``; there the consumers fall back to plain
+pops, which is the 1.x at-most-once behaviour, and say so in the log.
 """
 
 import logging
 import threading
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import Any, cast
+from typing import Any
 
 from redis.exceptions import ResponseError
 
+from django_redis_aiogram.api import check_function
 from django_redis_aiogram.redis import as_bytes, get_db_index, get_redis
 from django_redis_aiogram.serializers import SerializationError, loads
 from django_redis_aiogram.settings import conf
@@ -35,6 +43,15 @@ class Delivery(ABC):
     def __init__(self, handler: Handler) -> None:
         self.handler = handler
         self._stop = threading.Event()
+        self._reliable = True
+
+    @property
+    def queue_key(self) -> str:
+        return str(conf['REDIS_MESSAGES_KEY'])
+
+    @property
+    def processing_key(self) -> str:
+        return f'{self.queue_key}:processing'
 
     @abstractmethod
     def run(self) -> None:
@@ -48,6 +65,46 @@ class Delivery(ABC):
         thread.start()
         return thread
 
+    def reclaim(self) -> None:
+        """Requeue messages a crashed worker left in the processing list.
+
+        Also the probe for crash-safe mode: on a server without LMOVE the very
+        first call fails, and the consumer downgrades to plain pops.
+        """
+        connection = get_redis()
+        count = 0
+        try:
+            # RIGHT->LEFT keeps the original order at the front of the queue
+            while connection.lmove(self.processing_key, self.queue_key, 'RIGHT', 'LEFT'):
+                count += 1
+        except ResponseError:
+            self._reliable = False
+            logger.warning(
+                'crash-safe delivery unavailable: this Redis predates LMOVE (6.2); '
+                'a worker killed mid-send may lose that one message',
+                extra={'tg_key': self.queue_key},
+            )
+            return
+        if count:
+            logger.info(
+                'reclaimed messages from a previous run',
+                extra={'tg_key': self.queue_key, 'tg_count': count},
+            )
+
+    def acknowledge(self, raw: bytes | str) -> None:
+        """Drop a delivered message from the processing list."""
+        if not self._reliable:
+            return
+        try:
+            # redis-py's stubs say str, but bytes round-trip identically
+            get_redis().lrem(self.processing_key, 1, raw)  # type: ignore[arg-type]
+        except Exception:
+            # worst case the message is redelivered on the next start
+            logger.exception(
+                'failed to acknowledge a delivered message',
+                extra={'tg_key': self.processing_key},
+            )
+
     def dispatch(self, raw: bytes) -> None:
         try:
             payload = loads(raw)
@@ -58,6 +115,14 @@ class Delivery(ABC):
             logger.exception('dropping queued message that failed to decode')
             return
         try:
+            check_function(str(payload.get('function', '')))
+        except ValueError:
+            logger.exception(
+                'dropping queued message naming a method that is not Telegram API',
+                extra={'tg_function': payload.get('function')},
+            )
+            return
+        try:
             self.handler(**payload)
         except Exception:
             logger.exception(
@@ -65,43 +130,84 @@ class Delivery(ABC):
                 extra={'tg_function': payload.get('function')},
             )
 
+    def consume_pending(self) -> None:
+        """Drain the queue without blocking, acknowledging each message."""
+        connection = get_redis()
+        raw: bytes | str | None
+        while not self._stop.is_set():
+            if self._reliable:
+                raw = connection.lmove(self.queue_key, self.processing_key, 'LEFT', 'RIGHT')
+            else:
+                # lpop only widens to a list when given a count
+                raw = connection.lpop(self.queue_key)  # type: ignore[assignment]
+            if raw is None:
+                return
+            self.dispatch(as_bytes(raw))
+            self.acknowledge(raw)
+
 
 class BlpopDelivery(Delivery):
     def run(self) -> None:
         connection = get_redis()
-        key = conf['REDIS_MESSAGES_KEY']
         timeout = int(conf['BLPOP_TIMEOUT'])
+        self.reclaim()
         logger.info(
             'delivery started',
-            extra={'tg_delivery': BLPOP_DELIVERY, 'tg_key': key, 'tg_timeout': timeout},
+            extra={
+                'tg_delivery': BLPOP_DELIVERY,
+                'tg_key': self.queue_key,
+                'tg_timeout': timeout,
+                'tg_crash_safe': self._reliable,
+            },
         )
+        raw: bytes | str | None
         while not self._stop.is_set():
             try:
-                item = connection.blpop([key], timeout=timeout)
+                if self._reliable:
+                    raw = connection.blmove(
+                        self.queue_key, self.processing_key, timeout, 'LEFT', 'RIGHT'
+                    )
+                else:
+                    item = connection.blpop([self.queue_key], timeout=timeout)
+                    raw = None if item is None else item[1]
             except Exception:
                 # a dropped connection must not kill the worker thread
-                logger.exception('blocking pop failed, retrying', extra={'tg_key': key})
+                logger.exception('blocking pop failed, retrying', extra={'tg_key': self.queue_key})
                 self._stop.wait(timeout)
                 continue
-            if item is None:
+            if raw is None:
                 continue
-            self.dispatch(as_bytes(item[1]))
+            self.dispatch(as_bytes(raw))
+            self.acknowledge(raw)
 
 
 class KeyspaceDelivery(Delivery):
     def run(self) -> None:
         connection = get_redis()
         self._enable_notifications()
+        self.reclaim()
+        # expiry events are not replayed, so anything queued while this worker
+        # was down would sit in the list until a later message triggered one
+        self.consume_pending()
         channel = f'__keyevent@{get_db_index()}__:expired'
         pubsub = connection.pubsub(ignore_subscribe_messages=True)  # type: ignore[no-untyped-call]
         pubsub.subscribe(**{channel: self._on_expired})
         logger.info(
             'delivery started',
-            extra={'tg_delivery': KEYSPACE_DELIVERY, 'tg_channel': channel},
+            extra={
+                'tg_delivery': KEYSPACE_DELIVERY,
+                'tg_channel': channel,
+                'tg_crash_safe': self._reliable,
+            },
         )
         try:
             while not self._stop.is_set():
-                pubsub.get_message(timeout=1.0)
+                try:
+                    pubsub.get_message(timeout=1.0)
+                except Exception:
+                    # an error in one event must not kill the consumer thread
+                    logger.exception('keyspace consumer error, continuing')
+                    self._stop.wait(1.0)
         finally:
             pubsub.close()
 
@@ -121,15 +227,12 @@ class KeyspaceDelivery(Delivery):
             )
 
     def _on_expired(self, message: dict[str, Any]) -> None:
-        if message['data'].decode('utf-8') != conf['REDIS_EXP_KEY']:
+        data = message['data']
+        # pubsub hands back str when the URL enables decode_responses
+        text = data.decode('utf-8') if isinstance(data, bytes) else str(data)
+        if text != conf['REDIS_EXP_KEY']:
             return
-        connection = get_redis()
-        key = conf['REDIS_MESSAGES_KEY']
-        # LPOP is atomic, unlike the 1.x lrange+ltrim pair, which let a second
-        # worker read the same messages before the trim landed. The cast is
-        # because lpop only widens to a list when given a count.
-        while (raw := cast('bytes | str | None', connection.lpop(key))) is not None:
-            self.dispatch(as_bytes(raw))
+        self.consume_pending()
 
 
 DELIVERIES: dict[str, type[Delivery]] = {

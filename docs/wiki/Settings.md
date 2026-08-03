@@ -67,7 +67,7 @@ def default_kwargs(function: str) -> dict:
 | `REDIS_MESSAGES_KEY` | `'TELEGRAM_BOT_MESSAGE'` | List holding queued calls |
 | `BLPOP_TIMEOUT` | `5` | How often the consumer checks for shutdown |
 | `SERIALIZER` | `'json'` | `'json'` or `'pickle'` — see **[[Serialization]]** |
-| `ALLOW_PICKLE` | `True` | Accept pickled payloads left behind by 1.x |
+| `ALLOW_PICKLE` | `False` | Migration-only opt-in: `loads()` unpickles without restriction, so enable it for the upgrade window and only on a queue nothing untrusted can write |
 | `REDIS_EXP_KEY` | `'TELEGRAM_BOT_EXP'` | `keyspace` delivery only |
 | `REDIS_EXP_TIME` | `5` | `keyspace` delivery only |
 

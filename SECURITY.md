@@ -25,15 +25,15 @@ Keep Redis reachable only from your own services, and require authentication.
 ### Pickle
 
 1.x serialized queue payloads with `pickle`, which turns "can write to the
-list" into "can execute code in the bot container". 2.0 defaults to JSON.
+list" into "can execute code in the bot container". 2.0 defaults to JSON and
+**refuses pickled payloads by default**.
 
-Reads still accept pickled payloads so an upgrade does not have to drain the
-queue first. Once your queue no longer holds 1.x payloads, close that path:
+If the queue still holds messages written by 1.x at the moment you upgrade,
+open the door for the upgrade window only, then close it again:
 
 ```python
 TELEGRAM_BOT = {
-    'SERIALIZER': 'json',
-    'ALLOW_PICKLE': False,
+    'ALLOW_PICKLE': True,  # remove once the queue has drained
 }
 ```
 
@@ -43,6 +43,14 @@ Redis.
 
 Decoding a JSON payload will only instantiate `aiogram.types` members that
 subclass `TelegramObject`; a payload cannot name an arbitrary import path.
+
+### File payloads
+
+A queued `FSInputFile` names a filesystem path, and the bot uploads that file
+to whatever chat the payload says. Anyone able to write to the queue can
+therefore read any file the bot container can — not just make Telegram calls.
+This is inherent to supporting file sends through the queue; it is another
+reason the Redis behind it must stay inside your own trust boundary.
 
 ## Tokens
 

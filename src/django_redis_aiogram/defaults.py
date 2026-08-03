@@ -18,8 +18,9 @@ DEFAULTS: dict[str, Any] = {
     'DELIVERY': 'blpop',
     # 'json' (recommended) or 'pickle'
     'SERIALIZER': 'json',
-    # accept pickled payloads left in the queue by 1.x; turn off once drained
-    'ALLOW_PICKLE': True,
+    # unpickling queued data means whoever writes the queue can execute code
+    # in the bot container; enable only for the 1.x upgrade window, then drop it
+    'ALLOW_PICKLE': False,
     # 'redis', 'memory', or a dotted path to a BaseStorage subclass
     'FSM_STORAGE': 'redis',
     # forwarded to aiogram's DefaultBotProperties, e.g. {'parse_mode': 'HTML'}
