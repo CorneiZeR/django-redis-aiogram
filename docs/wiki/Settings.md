@@ -67,6 +67,8 @@ def default_kwargs(function: str) -> dict:
 | `REDIS_MESSAGES_KEY` | `'TELEGRAM_BOT_MESSAGE'` | List holding queued calls |
 | `WORKER_NAME` | hostname | Names this worker's in-flight list — see **[[Delivery]]** |
 | `BLPOP_TIMEOUT` | `5` | How often the consumer checks for shutdown |
+| `HEARTBEAT_INTERVAL` | `10` | Seconds between the consumer's reports; the key lives three times as long |
+| `HEALTHCHECK_MAX_QUEUE` | `0` | Longest queue still considered healthy; the check fails only above it, and `0` disables it |
 | `SERIALIZER` | `'json'` | `'json'` or `'pickle'` — see **[[Serialization]]** |
 | `ALLOW_PICKLE` | `False` | Migration-only opt-in: `loads()` unpickles without restriction, so enable it for the upgrade window and only on a queue nothing untrusted can write |
 | `REDIS_EXP_KEY` | `'TELEGRAM_BOT_EXP'` | `keyspace` delivery only |
@@ -109,3 +111,5 @@ if you silenced any.
 | `E020` | `RATE_LIMIT` is malformed |
 | `E021` | `WORKER_NAME` is not a string |
 | `E022` | `SERIALIZER` is `pickle` while `ALLOW_PICKLE` is `False` |
+| `E023` | `HEARTBEAT_INTERVAL` is wrong or below 1 |
+| `E024` | `HEALTHCHECK_MAX_QUEUE` is wrong or negative |

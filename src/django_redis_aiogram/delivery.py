@@ -21,6 +21,7 @@ import logging
 import os
 import socket
 import threading
+import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any
@@ -61,6 +62,7 @@ class Delivery(ABC):
         self.handler = handler
         self._stop = threading.Event()
         self._reliable = True
+        self._beat_at = 0.0
 
     @property
     def queue_key(self) -> str:
@@ -133,6 +135,29 @@ class Delivery(ABC):
             )
         return True
 
+    @property
+    def heartbeat_key(self) -> str:
+        """Per worker, like the in-flight list: each one answers for itself."""
+        return f'{self.queue_key}:heartbeat:{worker_identity()}'
+
+    def heartbeat(self) -> None:
+        """Say the loop is still turning, at most once per HEARTBEAT_INTERVAL.
+
+        A container cannot see a thread in another process. This key is what
+        ``tgbot_healthcheck`` reads, and refreshing it per message would be a
+        write per message, so it is paced.
+        """
+        interval = max(1, int(conf['HEARTBEAT_INTERVAL']))
+        now = time.monotonic()
+        if now - self._beat_at < interval:
+            return
+        self._beat_at = now
+        try:
+            get_redis().set(self.heartbeat_key, str(int(time.time())), ex=interval * 3)
+        except Exception:
+            # the loop must keep consuming even when it cannot say so
+            logger.exception('could not write the heartbeat', extra={'tg_key': self.heartbeat_key})
+
     def acknowledge(self, raw: bytes | str) -> None:
         """Drop a delivered message from the processing list."""
         if not self._reliable:
@@ -191,8 +216,11 @@ class Delivery(ABC):
 class BlpopDelivery(Delivery):
     def run(self) -> None:
         connection = get_redis()
-        # 0 means "block for ever" in Redis, which would swallow stop()
-        timeout = max(1, int(conf['BLPOP_TIMEOUT']))
+        # 0 means "block for ever" in Redis, which would swallow stop(). The
+        # heartbeat is written between reads, so a read longer than its interval
+        # would let the key expire under a consumer that is doing fine
+        interval = max(1, int(conf['HEARTBEAT_INTERVAL']))
+        timeout = max(1, min(int(conf['BLPOP_TIMEOUT']), interval))
         reclaimed = self.reclaim()
         logger.info(
             'delivery started',
@@ -205,6 +233,7 @@ class BlpopDelivery(Delivery):
         )
         raw: bytes | str | None
         while not self._stop.is_set():
+            self.heartbeat()
             if not reclaimed:
                 reclaimed = self.reclaim()
             try:
@@ -234,6 +263,7 @@ class KeyspaceDelivery(Delivery):
         try:
             while not self._stop.is_set():
                 try:
+                    self.heartbeat()
                     if pubsub is None:
                         pubsub = self._subscribe(channel)
                     if not reclaimed:

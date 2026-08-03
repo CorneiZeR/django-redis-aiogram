@@ -100,7 +100,7 @@ DOCUMENTED = re.compile('`([EW]\\d{3})`(?:\\s*[\u2013-]\\s*`([EW]\\d{3})`)?')
 
 # Every id the checks can emit. Two settings dicts are needed: a wrong type
 # stops a check before it can reach its value-level complaint.
-EXPECTED_IDS = {f'E{code:03d}' for code in range(1, 23)} | {'W001', 'W002', 'W003'}
+EXPECTED_IDS = {f'E{code:03d}' for code in range(1, 25)} | {'W001', 'W002', 'W003'}
 
 WRONG_TYPES = {
     'ENABLED': 'yes',
@@ -119,6 +119,8 @@ WRONG_TYPES = {
     'MAX_RETRIES': 'ten',
     'REDIS_EXP_TIME': 'five',
     'BLPOP_TIMEOUT': 'five',
+    'HEARTBEAT_INTERVAL': 'ten',
+    'HEALTHCHECK_MAX_QUEUE': 'lots',
     'DEFAULT_KWARGS': 42,
     'DEFAULT_BOT_PROPERTIES': 42,
     'RATE_LIMIT': 42,

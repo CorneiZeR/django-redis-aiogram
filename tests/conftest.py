@@ -8,6 +8,7 @@ PATCH_TARGETS = (
     'django_redis_aiogram.delivery.get_redis',
     'django_redis_aiogram.client.get_redis',
     'django_redis_aiogram.get_redis',
+    'django_redis_aiogram.management.commands.tgbot_healthcheck.get_redis',
     'telegram_bot.get_redis',
     'telegram_bot.redis.get_redis',
 )

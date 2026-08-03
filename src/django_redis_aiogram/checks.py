@@ -219,6 +219,8 @@ def check_settings(**kwargs: Any) -> list[CheckMessage]:
         lambda: check_int('MAX_RETRIES', 12, minimum=1),
         lambda: check_int('REDIS_EXP_TIME', 13, minimum=1),
         lambda: check_int('BLPOP_TIMEOUT', 14, minimum=1),
+        lambda: check_int('HEARTBEAT_INTERVAL', 23, minimum=1),
+        lambda: check_int('HEALTHCHECK_MAX_QUEUE', 24, minimum=0),
         lambda: check_callable('DEFAULT_KWARGS', 15),
         lambda: check_mapping('DEFAULT_BOT_PROPERTIES', 16),
         lambda: check_bot_properties(18),

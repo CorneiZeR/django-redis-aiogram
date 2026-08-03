@@ -74,6 +74,50 @@ period to finish an in-flight send:
     stop_grace_period: 30s
 ```
 
+## Is it working?
+
+`docker ps` answers the wrong question: the process being up says nothing about
+the consumer thread, which can be dead while polling continues.
+
+```shell
+python manage.py tgbot_healthcheck
+```
+
+Exit 0 and a line on stdout when healthy, non-zero with the reason on stderr
+otherwise. It checks three things: Redis answers, the consumer reported in
+recently, and the queue is not piling up.
+
+The consumer writes `<REDIS_MESSAGES_KEY>:heartbeat:<worker>` every
+`HEARTBEAT_INTERVAL` seconds, with a TTL of three times that — so one missed
+refresh is not a failure, but a dead thread stops looking alive on its own. The
+key is per worker, named like the in-flight list, so each container answers for
+itself.
+
+```yaml
+  telegram_bot:
+    command: python manage.py start_tgbot
+    healthcheck:
+      test: ['CMD', 'python', 'manage.py', 'tgbot_healthcheck']
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+```
+
+`start_period` matters: the first heartbeat is written when the consumer's loop
+first turns, so a container checked immediately after start has nothing to show
+yet.
+
+To fail when work is backing up rather than only when the worker is gone, set a
+queue limit — as a setting, or per invocation:
+
+```shell
+python manage.py tgbot_healthcheck --max-queue 1000 --max-age 60
+```
+
+A disabled process is not unhealthy: with `ENABLED=0` the command says so and
+exits 0, since nothing is meant to be running there.
+
 ## Scaling
 
 One bot container is normally enough — Telegram's limits bind long before the
