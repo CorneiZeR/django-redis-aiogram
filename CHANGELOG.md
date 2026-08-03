@@ -45,6 +45,10 @@ README.
   for restart policies that treat a clean exit as a crash loop.
 - Public `bot.router`, `bot.dispatcher` and `bot.enabled`.
 - `py.typed`: the package ships type information.
+- `bot.send()` picks the route for you: direct inside the bot container,
+  queued anywhere else.
+- `RATE_LIMIT` paces outgoing calls under Telegram's published limits instead
+  of waiting to be refused. Budgets are per bot, so a second token gets its own.
 - `close()` releases the FSM storage as well as the bot session and the loop.
 
 ### Fixed
