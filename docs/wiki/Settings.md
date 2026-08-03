@@ -65,6 +65,7 @@ def default_kwargs(function: str) -> dict:
 | ------- | ------- | ----------- |
 | `DELIVERY` | `'blpop'` | `'blpop'` or `'keyspace'` — see **[[Delivery]]** |
 | `REDIS_MESSAGES_KEY` | `'TELEGRAM_BOT_MESSAGE'` | List holding queued calls |
+| `WORKER_NAME` | hostname | Names this worker's in-flight list — see **[[Delivery]]** |
 | `BLPOP_TIMEOUT` | `5` | How often the consumer checks for shutdown |
 | `SERIALIZER` | `'json'` | `'json'` or `'pickle'` — see **[[Serialization]]** |
 | `ALLOW_PICKLE` | `False` | Migration-only opt-in: `loads()` unpickles without restriction, so enable it for the upgrade window and only on a queue nothing untrusted can write |
@@ -106,3 +107,5 @@ if you silenced any.
 | `E018` | unknown key in `DEFAULT_BOT_PROPERTIES` |
 | `E019` | `FSM_STORAGE` is not `redis`, `memory` or a dotted path |
 | `E020` | `RATE_LIMIT` is malformed |
+| `E021` | `WORKER_NAME` is not a string |
+| `E022` | `SERIALIZER` is `pickle` while `ALLOW_PICKLE` is `False` |

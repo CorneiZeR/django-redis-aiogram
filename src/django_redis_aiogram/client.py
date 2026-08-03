@@ -1,9 +1,9 @@
 import asyncio
 import logging
 import threading
+import weakref
 from asyncio import AbstractEventLoop
 from collections.abc import Coroutine
-from concurrent.futures import Future
 from typing import Any
 
 from aiogram import Bot, Dispatcher, Router, exceptions
@@ -26,6 +26,21 @@ logger = logging.getLogger('django_redis_aiogram')
 
 MEMORY_STORAGE = 'memory'
 REDIS_STORAGE = 'redis'
+
+# run_until_complete is not reentrant, and the loop — not the bot — is what
+# cannot be entered twice. Two bots handed the same loop must share one lock.
+_loop_locks: 'weakref.WeakKeyDictionary[AbstractEventLoop, threading.Lock]' = (
+    weakref.WeakKeyDictionary()
+)
+_loop_locks_guard = threading.Lock()
+
+
+def loop_lock(loop: AbstractEventLoop) -> threading.Lock:
+    with _loop_locks_guard:
+        lock = _loop_locks.get(loop)
+        if lock is None:
+            lock = _loop_locks[loop] = threading.Lock()
+        return lock
 
 
 def build_default_properties() -> DefaultBotProperties:
@@ -91,7 +106,7 @@ class TelegramBot:
         #: sends this bot scheduled, so shutdown drains its own work only
         self._sends: set[asyncio.Task[None]] = set()
         self._polling = False
-        self._send_lock = threading.Lock()
+        self._closing = False
 
     @property
     def enabled(self) -> bool:
@@ -189,20 +204,35 @@ class TelegramBot:
         waiting — so closing the loop without draining silently dropped those
         messages on every `docker stop`.
         """
-        self._drain(drain_timeout)
-        # RedisStorage owns a second, async Redis client that nothing else closes
-        if self._dispatcher is not None:
-            self.loop.run_until_complete(self._dispatcher.storage.close())
-            self._dispatcher = None
-        if self._bot is not None:
-            self.loop.run_until_complete(self._bot.session.close())
-            self._bot = None
-        if self._loop is not None and not self._loop.is_closed():
-            self._loop.close()
-        self._loop = None
-        # the buckets track wall clock, so a fresh loop needs a fresh limiter
-        self._rate_limiter = None
-        self._rate_limiter_built = False
+        self._closing = True
+        try:
+            if self._loop is not None or self._bot is not None or self._dispatcher is not None:
+                loop = self.loop
+                if loop.is_running():
+                    # run_until_complete and loop.close() both raise on a running
+                    # loop; leaving everything in place keeps close() retryable
+                    logger.warning('skipping close: stop polling before closing the bot')
+                    return
+                # a send from another thread may be driving this loop; the lock
+                # keeps the teardown from interleaving with it
+                with loop_lock(loop):
+                    self._drain(drain_timeout)
+                    # RedisStorage owns a second, async Redis client nothing else closes
+                    if self._dispatcher is not None:
+                        loop.run_until_complete(self._dispatcher.storage.close())
+                        self._dispatcher = None
+                    if self._bot is not None:
+                        loop.run_until_complete(self._bot.session.close())
+                        self._bot = None
+                    if not loop.is_closed():
+                        loop.close()
+            self._loop = None
+            # the buckets track wall clock, so a fresh loop needs a fresh limiter
+            self._rate_limiter = None
+            self._rate_limiter_built = False
+        finally:
+            # a closed bot can be built again, so this must not stick
+            self._closing = False
 
     def send_raw(self, function: str = 'send_message', **kwargs: Any) -> None:
         """Call an aiogram bot method, retrying on Telegram rate limits."""
@@ -276,6 +306,12 @@ class TelegramBot:
         the polling thread; calling create_task across that boundary is not
         thread safe and silently corrupts the loop's internals.
         """
+        if self._closing:
+            # the loop is being torn down, so nothing would ever run this
+            coroutine.close()
+            logger.error('send refused: the bot is shutting down')
+            return
+
         try:
             running = asyncio.get_running_loop()
         except RuntimeError:
@@ -284,16 +320,47 @@ class TelegramBot:
         loop = self.loop
         if running is loop:
             self._register(loop.create_task(coroutine))
-        elif loop.is_running():
-            # create the task on the loop thread so it is registered before it
-            # can run; run_coroutine_threadsafe hides the task from us
-            loop.call_soon_threadsafe(lambda: self._register(loop.create_task(coroutine)))
-        else:
-            # several web threads may send at once, and run_until_complete on a
-            # shared loop is not reentrant — the second caller would get
-            # "this event loop is already running"
-            with self._send_lock:
+            return
+
+        if loop.is_running():
+            self._hand_off(coroutine, loop)
+            return
+
+        # several web threads may send at once, and run_until_complete is not
+        # reentrant — the second caller would get "this event loop is already
+        # running". The lock belongs to the loop, so two bots sharing one are
+        # still serialized.
+        with loop_lock(loop):
+            # close() holds the same lock, so it may have finished the whole
+            # teardown while this thread waited for it
+            if self._closing or loop.is_closed():
+                coroutine.close()
+                logger.error('send refused: the event loop was closed')
+                return
+            try:
                 loop.run_until_complete(coroutine)
+            except RuntimeError:
+                # polling started between the check above and this call
+                if not loop.is_running():
+                    raise
+                self._hand_off(coroutine, loop)
+
+    def _hand_off(self, coroutine: Coroutine[Any, Any, None], loop: AbstractEventLoop) -> None:
+        """Create the task on the loop thread, so it is registered before it runs."""
+
+        def start() -> None:
+            if self._closing:
+                # close() began after this was queued; the loop will not run it
+                coroutine.close()
+                logger.error('send dropped: the bot started shutting down')
+                return
+            self._register(loop.create_task(coroutine))
+
+        try:
+            loop.call_soon_threadsafe(start)
+        except RuntimeError:
+            coroutine.close()
+            logger.error('send dropped: the event loop is closed')
 
     def _drain(self, timeout: float) -> None:
         """Let scheduled sends finish, cancelling whatever outlasts the timeout."""
@@ -324,12 +391,6 @@ class TelegramBot:
             'dropped in-flight sends at shutdown',
             extra={'tg_dropped': len(dropped), 'tg_drain_timeout': timeout},
         )
-
-    @staticmethod
-    def _log_failure(future: 'Future[None]') -> None:
-        error = future.exception()
-        if error is not None:
-            logger.error('scheduled send failed', exc_info=error)
 
     def send_redis(self, function: str = 'send_message', **kwargs: Any) -> None:
         """Queue a message in Redis for the bot worker to deliver."""

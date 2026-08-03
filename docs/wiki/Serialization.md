@@ -84,7 +84,7 @@ TELEGRAM_BOT = {
 ```
 
 Writing pickled payloads again takes both keys — writing a format the reader
-refuses would discard every message:
+refuses would discard every message, which is what `E022` reports:
 
 ```python
 TELEGRAM_BOT = {

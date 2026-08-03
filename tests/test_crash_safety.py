@@ -16,8 +16,9 @@ from django_redis_aiogram.delivery import BlpopDelivery, KeyspaceDelivery
 from django_redis_aiogram.serializers import JsonSerializer
 
 QUEUE = 'TELEGRAM_BOT_MESSAGE'
-PROCESSING = f'{QUEUE}:processing'
-SETTINGS = {'DELIVERY': 'blpop', 'BLPOP_TIMEOUT': 1}
+# the in-flight list is per worker, so ask the delivery for its own name
+SETTINGS = {'DELIVERY': 'blpop', 'BLPOP_TIMEOUT': 1, 'WORKER_NAME': 'tests'}
+PROCESSING = f'{QUEUE}:processing:tests'
 
 
 def payload(chat_id):
@@ -230,3 +231,100 @@ def test_a_queued_non_api_method_is_dropped_not_executed(redis_server):
     drain(delivery, expected_handled=1)
 
     assert [item['chat_id'] for item in delivery.handled] == [5]
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_reclaim_survives_a_redis_that_is_not_up_yet(redis_server, monkeypatch):
+    """run() is the thread target: anything escaping reclaim ends the consumer."""
+
+    class Unreachable:
+        def lmove(self, *args, **kwargs):
+            raise ConnectionError('Connection refused')
+
+        def __getattr__(self, name):
+            return getattr(redis_server, name)
+
+    monkeypatch.setattr('django_redis_aiogram.delivery.get_redis', lambda: Unreachable())
+
+    delivery = Recording()
+    delivery.reclaim()  # must not raise
+
+    assert delivery._reliable is True, 'a connection error is not a missing LMOVE'
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'WORKER_NAME': 'worker-a'})
+def test_a_starting_worker_does_not_steal_another_workers_message(redis_server):
+    """A shared processing list would let a restart pull a message back out
+    from under the worker that is still sending it."""
+    other = Recording()
+    with override_settings(TELEGRAM_BOT={**SETTINGS, 'WORKER_NAME': 'worker-b'}):
+        in_flight = other.processing_key
+        redis_server.rpush(in_flight, payload(1))
+
+    mine = Recording()
+    assert mine.processing_key != in_flight
+    mine.reclaim()
+
+    assert redis_server.llen(in_flight) == 1, "another worker's message was reclaimed"
+    assert redis_server.llen(QUEUE) == 0
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_reclaim_is_retried_when_redis_was_down_at_startup(redis_server):
+    """One attempt would strand those messages until the next restart."""
+    redis_server.rpush(PROCESSING, payload(1))
+    failures = []
+
+    class FlakyOnce:
+        def lmove(self, *args, **kwargs):
+            if not failures:
+                failures.append(True)
+                raise ConnectionError('Connection refused')
+            return redis_server.lmove(*args, **kwargs)
+
+        def __getattr__(self, name):
+            return getattr(redis_server, name)
+
+    delivery = Recording()
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr('django_redis_aiogram.delivery.get_redis', lambda: FlakyOnce())
+        drain(delivery, expected_handled=1)
+
+    assert [item['chat_id'] for item in delivery.handled] == [1]
+    assert redis_server.llen(PROCESSING) == 0
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'DELIVERY': 'keyspace'})
+def test_the_keyspace_consumer_also_retries_a_failed_reclaim(redis_server):
+    """Both loops call reclaim once at startup, so both need the retry."""
+    redis_server.rpush(PROCESSING, payload(7))
+    failures = []
+
+    class DownForTwoAttempts:
+        def lmove(self, *args, **kwargs):
+            if len(failures) < 2:
+                failures.append(True)
+                raise ConnectionError('Connection refused')
+            return redis_server.lmove(*args, **kwargs)
+
+        def __getattr__(self, name):
+            return getattr(redis_server, name)
+
+    handled = []
+    delivery = KeyspaceDelivery(handler=lambda **kwargs: handled.append(kwargs['chat_id']))
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr('django_redis_aiogram.delivery.get_redis', lambda: DownForTwoAttempts())
+        thread = delivery.start_thread()
+        waiter = threading.Event()
+        for _ in range(500):
+            if handled:
+                break
+            waiter.wait(0.01)
+        alive_through_the_outage = thread.is_alive()
+        delivery.stop()
+        thread.join(timeout=5)
+
+    assert alive_through_the_outage, 'the consumer thread died during the outage'
+    assert len(failures) == 2, 'the outage did not last, so the retry loop was not tested'
+    assert handled == [7], handled

@@ -12,6 +12,7 @@ from django.core.management import call_command
 from django.test import override_settings
 
 from django_redis_aiogram import TelegramBot, bot
+from django_redis_aiogram.client import loop_lock
 from django_redis_aiogram.management.commands.start_tgbot import Command as StartCommand
 
 SETTINGS = {'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost:6379/0', 'FSM_STORAGE': 'memory'}
@@ -236,3 +237,103 @@ def test_shutdown_leaves_tasks_it_does_not_own_alone():
     instance.close(drain_timeout=0.1)
 
     assert not foreign[0].cancelled(), 'shutdown cancelled a task belonging to someone else'
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_a_send_started_during_shutdown_is_refused_loudly(caplog):
+    """Scheduling onto a loop that is being torn down loses the message."""
+    instance = TelegramBot()
+    instance._bot = stub_bot()
+    instance._closing = True
+
+    with caplog.at_level('ERROR', logger='django_redis_aiogram'):
+        instance.send_raw(chat_id=1, text='x')
+
+    assert 'send refused: the bot is shutting down' in caplog.text
+    assert not instance._sends, 'the send was scheduled anyway'
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_a_handoff_queued_before_shutdown_is_dropped_loudly(caplog):
+    """close() can start after call_soon_threadsafe and before the callback."""
+    instance = TelegramBot()
+    sent = []
+    instance._bot = stub_bot(sent)
+
+    with running_loop(instance) as loop:
+        instance._closing = True
+        instance._hand_off(instance.bot.send_message(chat_id=1, text='x'), loop)
+        with caplog.at_level('ERROR', logger='django_redis_aiogram'):
+            done = threading.Event()
+            loop.call_soon_threadsafe(done.set)
+            assert done.wait(5), 'the loop never ran the queued callback'
+
+    assert 'send dropped: the bot started shutting down' in caplog.text
+    assert sent == []
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_close_waits_for_a_send_driving_the_same_loop():
+    """Tearing the loop down under run_until_complete corrupts both."""
+    instance = TelegramBot()
+    instance._bot = stub_bot()
+    lock = loop_lock(instance.loop)
+    finished = threading.Event()
+
+    lock.acquire()
+    threading.Thread(
+        target=lambda: (instance.close(drain_timeout=0.1), finished.set()), daemon=True
+    ).start()
+    try:
+        assert not finished.wait(0.3), 'close tore the loop down while it was in use'
+    finally:
+        lock.release()
+    assert finished.wait(5), 'close never finished after the loop was released'
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_a_send_waiting_on_the_lock_finds_the_loop_closed(caplog):
+    """close() holds the same lock, so it can finish while a send waits for it."""
+    instance = TelegramBot()
+    instance._bot = stub_bot()
+    loop = instance.loop
+    entered = threading.Event()
+    released = threading.Event()
+
+    def hold_the_lock():
+        with loop_lock(loop):
+            entered.set()
+            released.wait(5)
+
+    threading.Thread(target=hold_the_lock, daemon=True).start()
+    assert entered.wait(5), 'the lock was never taken'
+
+    sender = threading.Thread(target=lambda: instance.send_raw(chat_id=1, text='x'), daemon=True)
+    with caplog.at_level('ERROR', logger='django_redis_aiogram'):
+        sender.start()
+        # the send is now blocked on the lock; close the loop underneath it
+        loop.close()
+        instance._closing = True
+        released.set()
+        sender.join(timeout=5)
+
+    assert not sender.is_alive(), 'the send never returned'
+    assert 'send refused: the event loop was closed' in caplog.text
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_close_refuses_to_tear_down_a_running_loop(caplog):
+    """run_until_complete and loop.close() both raise on a running loop."""
+    instance = TelegramBot()
+    instance._bot = stub_bot()
+    assert instance.dispatcher is not None  # so there is something to tear down
+
+    with running_loop(instance), caplog.at_level('WARNING', logger='django_redis_aiogram'):
+        instance.close(drain_timeout=0.1)
+
+    assert 'skipping close: stop polling before closing the bot' in caplog.text
+    # nothing was half-released, so closing again after polling stops still works
+    assert instance._loop is not None
+    assert instance._bot is not None
+    instance.close(drain_timeout=0.1)
+    assert instance._loop is None and instance._bot is None

@@ -64,6 +64,14 @@ Older servers lack `LMOVE`; the consumer says so in the log and falls back to
 plain pops, which is the 1.x at-most-once behaviour: a kill between the pop
 and the send loses that one message.
 
+The in-flight list is **per worker**: `<REDIS_MESSAGES_KEY>:processing:<name>`,
+where `<name>` is `WORKER_NAME` when it is set and the hostname (`HOSTNAME`, or
+what the host reports) otherwise. A restarted container keeps its name, which is
+what lets it reclaim its own interrupted messages and never pull one out from
+under a worker that is still sending it. If several workers share a host, give
+each its own `WORKER_NAME` — otherwise they share a list and can duplicate each
+other's sends.
+
 Handler errors are not crashes: a message whose send *failed* is acknowledged
 and logged, not redelivered forever.
 
