@@ -66,7 +66,7 @@ def test_keyspace_handles_str_payloads(decoded_server):
     assert handled == [{'function': 'send_message', 'chat_id': 6}]
 
 
-@override_settings(TELEGRAM_BOT={'DELIVERY': 'keyspace'})
+@override_settings(TELEGRAM_BOT={'DELIVERY': 'keyspace', 'WORKER_NAME': 'tests'})
 def test_keyspace_pops_atomically(redis_server):
     """Two workers reacting to the same expiry must share the messages, not
     duplicate them: every id arrives exactly once across both.

@@ -143,6 +143,21 @@ def check_rate_limit(code: int) -> list[CheckMessage]:
     return []
 
 
+def check_serializer_agrees_with_reads(code: int) -> list[CheckMessage]:
+    """Writing pickle while refusing to read it silently discards every message."""
+    if conf.get('SERIALIZER') != 'pickle' or conf.get('ALLOW_PICKLE'):
+        return []
+    return [
+        _error(
+            'SERIALIZER',
+            "is 'pickle' while ALLOW_PICKLE is False, so queued messages would be "
+            'written and then refused on read. Set ALLOW_PICKLE to True, or use '
+            "the 'json' serializer.",
+            code,
+        )
+    ]
+
+
 def check_unknown_keys(code: int) -> list[CheckMessage]:
     unknown = sorted(set(conf) - set(DEFAULTS))
     if not unknown:
@@ -196,6 +211,7 @@ def check_settings(**kwargs: Any) -> list[CheckMessage]:
         lambda: check_str('REDIS_URL', 5),
         lambda: check_str('MODULE_NAME', 6),
         lambda: check_str('REDIS_MESSAGES_KEY', 7),
+        lambda: check_str('WORKER_NAME', 21),
         lambda: check_str('REDIS_EXP_KEY', 8),
         lambda: check_str('DELIVERY', 9, DELIVERY_CHOICES),
         lambda: check_str('SERIALIZER', 10, SERIALIZER_CHOICES),
@@ -207,6 +223,7 @@ def check_settings(**kwargs: Any) -> list[CheckMessage]:
         lambda: check_mapping('DEFAULT_BOT_PROPERTIES', 16),
         lambda: check_bot_properties(18),
         lambda: check_rate_limit(20),
+        lambda: check_serializer_agrees_with_reads(22),
         lambda: check_fsm_storage(19),
         lambda: check_unknown_keys(3),
         check_credentials,

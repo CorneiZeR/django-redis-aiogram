@@ -225,6 +225,7 @@ rarely be needed.
 | -------------------- | ------------------------ | ------------------------------------------ |
 | `DELIVERY`           | `'blpop'`                | `'blpop'` or `'keyspace'`                  |
 | `REDIS_MESSAGES_KEY` | `'TELEGRAM_BOT_MESSAGE'` | List holding queued calls                  |
+| `WORKER_NAME`        | hostname                 | Names this worker's in-flight list         |
 | `BLPOP_TIMEOUT`      | `5`                      | How often the consumer checks for shutdown |
 | `SERIALIZER`         | `'json'`                 | `'json'` or `'pickle'`                     |
 | `ALLOW_PICKLE`       | `False`                  | Accept pickled payloads left by 1.x        |

@@ -302,3 +302,16 @@ def test_defaults_come_from_the_settings_defaults():
     assert limiter._overall.rate == 7
     assert limiter._per_chat_rate == DEFAULTS['RATE_LIMIT']['per_chat_per_second']
     assert limiter._group_capacity == DEFAULTS['RATE_LIMIT']['group_per_minute']
+
+
+@override_settings(
+    TELEGRAM_BOT={
+        'SERIALIZER': 'pickle',
+        'ALLOW_PICKLE': False,
+        'TOKEN': '42:x',
+        'REDIS_URL': 'r://x',
+    }
+)
+def test_writing_pickle_while_refusing_to_read_it_is_rejected():
+    """Otherwise every queued message is written and then silently discarded."""
+    assert 'django_redis_aiogram.E022' in {message.id for message in check_settings()}

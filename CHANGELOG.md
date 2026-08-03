@@ -73,9 +73,10 @@ README.
   arguments lining up.
 - Keyspace delivery drains the queue with atomic pops. The 1.x lrange+ltrim
   pair let a second worker read the same messages and deliver them twice.
-- Delivery is crash-safe on Redis 6.2+: a message is parked in a processing
-  list while being sent and reclaimed on the next start, so a worker killed
-  mid-send no longer loses it. After a crash a message may be sent twice.
+- Delivery is crash-safe on Redis 6.2+: a message is parked in a per-worker
+  processing list while being sent and reclaimed on the next start, so a worker
+  killed mid-send no longer loses it. After a crash a message may be sent
+  twice. `WORKER_NAME` names that list when several workers share a host.
 - The keyspace consumer no longer dies on `decode_responses` connections, and
   survives errors raised while handling a single event.
 - Concurrent `send_raw` calls from a multi-threaded web server are serialized

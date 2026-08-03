@@ -17,6 +17,8 @@ pops, which is the 1.x at-most-once behaviour, and say so in the log.
 """
 
 import logging
+import os
+import socket
 import threading
 from abc import ABC, abstractmethod
 from collections.abc import Callable
@@ -37,6 +39,19 @@ BLPOP_DELIVERY = 'blpop'
 KEYSPACE_DELIVERY = 'keyspace'
 
 
+def worker_identity() -> str:
+    """Name this worker's processing list.
+
+    Defaults to the hostname, which a container keeps across restarts — that is
+    what lets a restarted worker find its own interrupted messages. Set
+    WORKER_NAME when several workers share a host.
+    """
+    configured = conf.get('WORKER_NAME')
+    if configured:
+        return str(configured)
+    return os.environ.get('HOSTNAME') or socket.gethostname()
+
+
 class Delivery(ABC):
     """Consumes the Redis queue until stopped."""
 
@@ -51,7 +66,12 @@ class Delivery(ABC):
 
     @property
     def processing_key(self) -> str:
-        return f'{self.queue_key}:processing'
+        """Per-worker, so a restarting worker reclaims only its own messages.
+
+        A shared list would let a starting worker pull a message back out from
+        under another worker that is still sending it.
+        """
+        return f'{self.queue_key}:processing:{worker_identity()}'
 
     @abstractmethod
     def run(self) -> None:
@@ -65,11 +85,15 @@ class Delivery(ABC):
         thread.start()
         return thread
 
-    def reclaim(self) -> None:
+    def reclaim(self) -> bool:
         """Requeue messages a crashed worker left in the processing list.
 
         Also the probe for crash-safe mode: on a server without LMOVE the very
         first call fails, and the consumer downgrades to plain pops.
+
+        Returns whether the list is settled; False means the caller should try
+        again, because a Redis that was unreachable at startup left messages
+        stranded there.
         """
         connection = get_redis()
         count = 0
@@ -84,12 +108,21 @@ class Delivery(ABC):
                 'a worker killed mid-send may lose that one message',
                 extra={'tg_key': self.queue_key},
             )
-            return
+            return True
+        except Exception:
+            # run() is the thread target, so anything escaping here — a Redis
+            # that is not up yet, for one — would end the consumer for good
+            logger.exception(
+                'could not reclaim previous messages, will retry',
+                extra={'tg_key': self.processing_key},
+            )
+            return False
         if count:
             logger.info(
                 'reclaimed messages from a previous run',
                 extra={'tg_key': self.queue_key, 'tg_count': count},
             )
+        return True
 
     def acknowledge(self, raw: bytes | str) -> None:
         """Drop a delivered message from the processing list."""
@@ -150,7 +183,7 @@ class BlpopDelivery(Delivery):
     def run(self) -> None:
         connection = get_redis()
         timeout = int(conf['BLPOP_TIMEOUT'])
-        self.reclaim()
+        reclaimed = self.reclaim()
         logger.info(
             'delivery started',
             extra={
@@ -162,6 +195,8 @@ class BlpopDelivery(Delivery):
         )
         raw: bytes | str | None
         while not self._stop.is_set():
+            if not reclaimed:
+                reclaimed = self.reclaim()
             try:
                 if self._reliable:
                     raw = connection.blmove(
@@ -185,10 +220,11 @@ class KeyspaceDelivery(Delivery):
     def run(self) -> None:
         connection = get_redis()
         self._enable_notifications()
-        self.reclaim()
-        # expiry events are not replayed, so anything queued while this worker
-        # was down would sit in the list until a later message triggered one
-        self.consume_pending()
+        reclaimed = self.reclaim()
+        if reclaimed:
+            # expiry events are not replayed, so anything queued while this worker
+            # was down would sit in the list until a later message triggered one
+            self.consume_pending()
         channel = f'__keyevent@{get_db_index()}__:expired'
         pubsub = connection.pubsub(ignore_subscribe_messages=True)  # type: ignore[no-untyped-call]
         pubsub.subscribe(**{channel: self._on_expired})
@@ -203,6 +239,11 @@ class KeyspaceDelivery(Delivery):
         try:
             while not self._stop.is_set():
                 try:
+                    if not reclaimed:
+                        reclaimed = self.reclaim()
+                        if reclaimed:
+                            # no expiry event announces what the retry put back
+                            self.consume_pending()
                     pubsub.get_message(timeout=1.0)
                 except Exception:
                     # an error in one event must not kill the consumer thread
