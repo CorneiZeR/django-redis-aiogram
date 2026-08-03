@@ -21,6 +21,7 @@ bot.send(chat_id=CHAT_ID, text='hello')
 * **[[Handlers]]** — writing routers and using FSM
 * **[[Sending messages]]** — `send`, `send_redis`, `send_raw`, keyboards, files
 * **[[Testing]]** — running your suite without Redis, asserting what was queued
+* **[[API]]** — the instance, its internals, and what stays public
 
 ## Going further
 
