@@ -8,6 +8,8 @@ behind. On servers without LMOVE it falls back to plain pops.
 import threading
 
 import pytest
+from aiogram import exceptions
+from aiogram.methods import SendMessage
 from django.test import override_settings
 from redis.exceptions import ResponseError
 
@@ -453,3 +455,50 @@ def test_a_redis_that_is_down_at_the_notification_probe_does_not_kill_the_worker
     assert attempts, 'the probe never ran'
     assert still_running, 'a connection error at the probe ended the consumer'
     assert 'could not probe keyspace notifications' in caplog.text
+
+
+@override_settings(
+    TELEGRAM_BOT={
+        **SETTINGS,
+        'TOKEN': '42:x',
+        'FSM_STORAGE': 'memory',
+        'RAISE_EXCEPTION': True,
+        'MAX_RETRIES': 1,
+        'RATE_LIMIT': None,
+    }
+)
+def test_raise_exception_does_not_leave_a_message_in_flight(redis_server):
+    """RAISE_EXCEPTION re-raises out of send_raw once the retries are gone.
+
+    The consumer has to acknowledge anyway: leaving it in the processing list
+    would redeliver a message Telegram has already refused, for ever.
+    """
+    instance = TelegramBot()
+    attempts = []
+
+    class AlwaysRetryAfter:
+        async def send_message(self, **kwargs):
+            attempts.append(kwargs)
+            raise exceptions.TelegramRetryAfter(
+                method=SendMessage(chat_id=1, text='x'),
+                message='Too Many Requests',
+                retry_after=0,
+            )
+
+        class session:
+            @staticmethod
+            async def close():
+                pass
+
+    instance._bot = AlwaysRetryAfter()
+    delivery = Recording(handler=instance.send_raw)
+    delivery.handled = attempts
+    redis_server.rpush(QUEUE, payload(1))
+
+    drain(delivery, expected_handled=2)  # the first try plus one retry
+
+    assert len(attempts) == 2, attempts
+    assert redis_server.llen(QUEUE) == 0
+    assert redis_server.llen(PROCESSING) == 0, 'the refused message was left for reclaim'
+    instance._bot = None
+    instance.close()
