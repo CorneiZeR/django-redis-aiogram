@@ -3,6 +3,9 @@
 Thanks for taking the time. Bug reports with a reproduction are as useful as
 patches.
 
+`AGENTS.md` covers the same ground in the form coding agents read: the layout,
+the commands, and the invariants that must stay covered.
+
 ## Getting set up
 
 ```shell
@@ -68,7 +71,8 @@ repositories. `.coderabbit.yaml` points it at the invariants above.
 
 Wiki pages live in `docs/wiki/`. Edit them there, in the same pull request as
 the code they describe; a push to `master` publishes them to the wiki. Links
-between pages use `[[Page name]]`, and a test checks that they all resolve.
+between pages use `[[Page-Name|Link text]]` — the page comes first — and tests
+check that they all resolve and that none is written the other way round.
 
 ## Commits
 

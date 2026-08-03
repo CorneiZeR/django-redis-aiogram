@@ -10,7 +10,9 @@ bot.send(chat_id=CHAT_ID, text='hello')
 anywhere else it queues the call through Redis. Callers do not have to know
 which process they are in.
 
-Any aiogram bot method works — pass its name first:
+Any Telegram API method aiogram exposes works — pass its name first. The name
+is checked against that allowlist, so a queued payload cannot reach anything
+else on the bot:
 
 ```python
 bot.send('send_photo', chat_id=CHAT_ID, photo=URL, caption='look')

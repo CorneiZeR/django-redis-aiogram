@@ -20,6 +20,7 @@ bot.send(chat_id=CHAT_ID, text='hello')
 * **[[Settings]]** — every setting, with defaults
 * **[[Handlers]]** — writing routers and using FSM
 * **[[Sending messages]]** — `send`, `send_redis`, `send_raw`, keyboards, files
+* **[[Testing]]** — running your suite without Redis, asserting what was queued
 
 ## Going further
 
@@ -33,6 +34,7 @@ bot.send(chat_id=CHAT_ID, text='hello')
 ## Upgrading
 
 * **[[Migrating from 1.x]]** — what changed in 2.0 and what you have to do
+* **[[AI-assistants|AI assistants]]** — the brief to hand a coding agent, and what they get wrong
 
 ---
 
