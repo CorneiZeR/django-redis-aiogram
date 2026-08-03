@@ -3,6 +3,8 @@ import threading
 import time
 
 import pytest
+from aiogram import exceptions
+from aiogram.methods import SendMessage
 from django.test import override_settings
 
 from django_redis_aiogram import TelegramBot
@@ -349,3 +351,62 @@ def test_a_zero_blpop_timeout_is_clamped(redis_server, monkeypatch):
 
     assert timeouts, 'the consumer never blocked on the queue'
     assert min(timeouts) >= 1, timeouts
+
+
+def rate_limited_bot(attempts):
+    """A bot that always answers 'retry later', so the retries run out."""
+
+    class AlwaysRetryAfter:
+        async def send_message(self, **kwargs):
+            attempts.append(kwargs)
+            raise exceptions.TelegramRetryAfter(
+                method=SendMessage(chat_id=1, text='x'),
+                message='Too Many Requests',
+                retry_after=0,
+            )
+
+        class session:
+            @staticmethod
+            async def close():
+                pass
+
+    return AlwaysRetryAfter()
+
+
+@override_settings(
+    TELEGRAM_BOT={'TOKEN': '42:x', 'FSM_STORAGE': 'memory', 'MAX_RETRIES': 2, 'RATE_LIMIT': None}
+)
+def test_exhausting_the_retries_is_logged(caplog):
+    """1.x gave up silently: no log, no exception, the message just vanished."""
+    instance = TelegramBot()
+    attempts = []
+    instance._bot = rate_limited_bot(attempts)
+
+    with caplog.at_level('ERROR', logger='django_redis_aiogram'):
+        instance.send_raw(chat_id=1, text='x')
+
+    assert len(attempts) == 3, 'MAX_RETRIES=2 means the first try plus two retries'
+    assert 'giving up on message' in caplog.text
+    instance._bot = None
+    instance.close()
+
+
+@override_settings(
+    TELEGRAM_BOT={
+        'TOKEN': '42:x',
+        'FSM_STORAGE': 'memory',
+        'MAX_RETRIES': 1,
+        'RAISE_EXCEPTION': True,
+        'RATE_LIMIT': None,
+    }
+)
+def test_exhausting_the_retries_raises_when_asked_to():
+    """RAISE_EXCEPTION existed in 1.x but never fired on this path."""
+    instance = TelegramBot()
+    instance._bot = rate_limited_bot([])
+
+    with pytest.raises(exceptions.TelegramRetryAfter):
+        instance.send_raw(chat_id=1, text='x')
+
+    instance._bot = None
+    instance.close()
