@@ -18,6 +18,7 @@ from django_redis_aiogram.delivery import KEYSPACE_DELIVERY
 from django_redis_aiogram.redis import get_redis
 from django_redis_aiogram.serializers import get_serializer
 from django_redis_aiogram.settings import SETTINGS_NAME, coerce_bool, conf
+from django_redis_aiogram.throttling import RateLimiter, get_rate_limiter
 
 logger = logging.getLogger('django_redis_aiogram')
 
@@ -83,11 +84,27 @@ class TelegramBot:
         self._bot: Bot | None = None
         self._dispatcher: Dispatcher | None = None
         self._router = Router()
+        self._rate_limiter: RateLimiter | None = None
+        self._rate_limiter_built = False
+        #: sends this bot scheduled, so shutdown drains its own work only
+        self._sends: set[asyncio.Task[None]] = set()
 
     @property
     def enabled(self) -> bool:
         """Whether this process should reach Telegram or Redis at all."""
         return coerce_bool(conf['ENABLED'], f"{SETTINGS_NAME}['ENABLED']")
+
+    @property
+    def rate_limiter(self) -> RateLimiter | None:
+        """Paced per token: Telegram meters the bot, not this object.
+
+        Two instances holding the same token therefore share one budget; a
+        different token gets its own.
+        """
+        if not self._rate_limiter_built:
+            self._rate_limiter = get_rate_limiter(str(conf['TOKEN'] or ''))
+            self._rate_limiter_built = True
+        return self._rate_limiter
 
     @property
     def max_retries(self) -> int:
@@ -132,8 +149,14 @@ class TelegramBot:
         self.dispatcher.include_router(self._router)
         self.loop.run_until_complete(self.dispatcher.start_polling(self.bot))
 
-    def close(self) -> None:
-        """Release the aiogram session, the FSM storage and the owned loop."""
+    def close(self, drain_timeout: float = 5.0) -> None:
+        """Finish what is in flight, then release everything this bot owns.
+
+        A send waiting in the rate limiter is an ordinary state — pacing means
+        waiting — so closing the loop without draining silently dropped those
+        messages on every `docker stop`.
+        """
+        self._drain(drain_timeout)
         # RedisStorage owns a second, async Redis client that nothing else closes
         if self._dispatcher is not None:
             self.loop.run_until_complete(self._dispatcher.storage.close())
@@ -144,6 +167,9 @@ class TelegramBot:
         if self._loop is not None and not self._loop.is_closed():
             self._loop.close()
         self._loop = None
+        # the buckets track wall clock, so a fresh loop needs a fresh limiter
+        self._rate_limiter = None
+        self._rate_limiter_built = False
 
     def send_raw(self, function: str = 'send_message', **kwargs: Any) -> None:
         """Call an aiogram bot method, retrying on Telegram rate limits."""
@@ -156,6 +182,8 @@ class TelegramBot:
             retries = 0
             while retries <= self.max_retries:
                 try:
+                    if self.rate_limiter is not None:
+                        await self.rate_limiter.acquire(call_kwargs.get('chat_id'))
                     await getattr(self.bot, function)(**call_kwargs)
                     logger.info('message sent', extra={'tg_function': function})
                     return
@@ -188,6 +216,25 @@ class TelegramBot:
         call_kwargs = {**conf['DEFAULT_KWARGS'](function), **kwargs}
         self._schedule(send())
 
+    def _register(self, task: 'asyncio.Task[None]') -> None:
+        """Track a send so :meth:`close` can wait for it.
+
+        Registration happens when the task is created, not when it starts
+        running: a task that has been scheduled but not yet stepped is exactly
+        the one shutdown must not lose.
+        """
+        self._sends.add(task)
+        task.add_done_callback(self._sends.discard)
+        task.add_done_callback(self._log_task_failure)
+
+    @staticmethod
+    def _log_task_failure(task: 'asyncio.Task[None]') -> None:
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            logger.error('scheduled send failed', exc_info=error)
+
     def _schedule(self, coroutine: Coroutine[Any, Any, None]) -> None:
         """Run a coroutine on the bot loop from whichever thread we are on.
 
@@ -200,13 +247,45 @@ class TelegramBot:
         except RuntimeError:
             running = None
 
-        if running is self.loop:
-            self.loop.create_task(coroutine)
-        elif self.loop.is_running():
-            future = asyncio.run_coroutine_threadsafe(coroutine, self.loop)
-            future.add_done_callback(self._log_failure)
+        loop = self.loop
+        if running is loop:
+            self._register(loop.create_task(coroutine))
+        elif loop.is_running():
+            # create the task on the loop thread so it is registered before it
+            # can run; run_coroutine_threadsafe hides the task from us
+            loop.call_soon_threadsafe(lambda: self._register(loop.create_task(coroutine)))
         else:
-            self.loop.run_until_complete(coroutine)
+            loop.run_until_complete(coroutine)
+
+    def _drain(self, timeout: float) -> None:
+        """Let scheduled sends finish, cancelling whatever outlasts the timeout."""
+        loop = self._loop
+        if loop is None or loop.is_closed():
+            return
+        if loop.is_running():
+            # cannot drive it from here; the caller is expected to stop polling first
+            logger.warning('skipping drain: the event loop is still running')
+            return
+
+        # only this bot's sends: cancelling unrelated tasks on the loop is not
+        # ours to do, and aiogram keeps its own there
+        pending = [task for task in self._sends if not task.done()]
+        if not pending:
+            return
+
+        logger.info('draining in-flight sends', extra={'tg_pending': len(pending)})
+        loop.run_until_complete(asyncio.wait(pending, timeout=timeout))
+
+        dropped = [task for task in pending if not task.done()]
+        if not dropped:
+            return
+        for task in dropped:
+            task.cancel()
+        loop.run_until_complete(asyncio.gather(*dropped, return_exceptions=True))
+        logger.warning(
+            'dropped in-flight sends at shutdown',
+            extra={'tg_dropped': len(dropped), 'tg_drain_timeout': timeout},
+        )
 
     @staticmethod
     def _log_failure(future: 'Future[None]') -> None:

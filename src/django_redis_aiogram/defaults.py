@@ -26,6 +26,13 @@ DEFAULTS: dict[str, Any] = {
     'DEFAULT_BOT_PROPERTIES': {},
     # per-function extras for what DefaultBotProperties cannot express
     'DEFAULT_KWARGS': no_default_kwargs,
+    # stay under Telegram's published limits instead of waiting to be refused;
+    # set to None to disable. Budgets are per bot, so a second token gets its own
+    'RATE_LIMIT': {
+        'overall_per_second': 30,
+        'per_chat_per_second': 1,
+        'group_per_minute': 20,
+    },
     'MAX_RETRIES': 10,
     'RAISE_EXCEPTION': False,
     'REDIS_MESSAGES_KEY': 'TELEGRAM_BOT_MESSAGE',

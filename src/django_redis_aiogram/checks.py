@@ -15,6 +15,7 @@ from django.utils.module_loading import import_string
 
 from django_redis_aiogram.defaults import DEFAULTS
 from django_redis_aiogram.settings import SETTINGS_NAME, conf
+from django_redis_aiogram.throttling import KNOWN_RATE_LIMIT_KEYS
 
 DELIVERY_CHOICES = frozenset({'blpop', 'keyspace'})
 SERIALIZER_CHOICES = frozenset({'json', 'pickle'})
@@ -116,6 +117,32 @@ def check_fsm_storage(code: int) -> list[CheckMessage]:
     return []
 
 
+def check_rate_limit(code: int) -> list[CheckMessage]:
+    value = conf.get('RATE_LIMIT')
+    if value is None:
+        return []
+    if not isinstance(value, Mapping):
+        return [
+            _error('RATE_LIMIT', f'must be a mapping or None, got {type(value).__name__}.', code)
+        ]
+    unknown = sorted(str(key) for key in value if key not in KNOWN_RATE_LIMIT_KEYS)
+    if unknown:
+        return [
+            _error(
+                'RATE_LIMIT',
+                f'has unknown keys: {", ".join(unknown)}. '
+                f'Known: {", ".join(sorted(KNOWN_RATE_LIMIT_KEYS))}.',
+                code,
+            )
+        ]
+    for key, rate in value.items():
+        if isinstance(rate, bool) or not isinstance(rate, (int, float)) or rate < 0:
+            return [
+                _error('RATE_LIMIT', f'{key} must be a non-negative number, got {rate!r}.', code)
+            ]
+    return []
+
+
 def check_unknown_keys(code: int) -> list[CheckMessage]:
     unknown = sorted(set(conf) - set(DEFAULTS))
     if not unknown:
@@ -179,6 +206,7 @@ def check_settings(**kwargs: Any) -> list[CheckMessage]:
         lambda: check_callable('DEFAULT_KWARGS', 15),
         lambda: check_mapping('DEFAULT_BOT_PROPERTIES', 16),
         lambda: check_bot_properties(18),
+        lambda: check_rate_limit(20),
         lambda: check_fsm_storage(19),
         lambda: check_unknown_keys(3),
         check_credentials,
