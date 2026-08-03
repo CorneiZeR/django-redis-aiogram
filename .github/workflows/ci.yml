@@ -71,6 +71,7 @@ jobs:
       - run: python -m pytest -q
 
   test-prerelease:
+    name: test (3.14, non-blocking)
     # 3.14 is supported but its dependency wheels lag, so it must not gate a merge
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -106,7 +107,12 @@ jobs:
           import glob, zipfile
           wheel = glob.glob('dist/*.whl')[0]
           names = zipfile.ZipFile(wheel).namelist()
-          for expected in ('django_redis_aiogram/py.typed', 'telegram_bot/__init__.py'):
+          expected_names = (
+              'django_redis_aiogram/py.typed',
+              'telegram_bot/py.typed',
+              'telegram_bot/__init__.py',
+          )
+          for expected in expected_names:
               assert expected in names, f'{expected} missing from {wheel}: {names}'
           print(f'{wheel} ships py.typed and the shim')
           EOF

@@ -140,7 +140,7 @@ WRONG_VALUES = {
 def documented_ids():
     """The table lists ranges, so a documented E004-E011 covers each id between."""
     found = set()
-    for first, last in DOCUMENTED.findall(SETTINGS_PAGE.read_text()):
+    for first, last in DOCUMENTED.findall(SETTINGS_PAGE.read_text(encoding='utf-8')):
         if not last:
             found.add(first)
             continue

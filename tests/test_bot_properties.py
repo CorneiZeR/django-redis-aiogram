@@ -132,3 +132,18 @@ def test_unimportable_storage_is_reported_as_configuration():
     """A raw ModuleNotFoundError does not tell the operator what to fix."""
     with pytest.raises(ImproperlyConfigured, match='cannot be imported'):
         build_storage()
+
+
+@override_settings(
+    TELEGRAM_BOT={
+        'TOKEN': '42:x',
+        'REDIS_URL': 'redis://localhost:6379/0',
+        'FSM_STORAGE': 'aiogram.fsm.storage.memory.MemoryStorage',
+        'DEFAULT_BOT_PROPERTIES': {'parse_mode': 'HTML', 'protect_content': True},
+    }
+)
+def test_a_valid_configuration_reports_neither_e018_nor_e019():
+    """The tests above prove detection; this one guards against false positives."""
+    reported = {message.id for message in check_settings()}
+    assert 'django_redis_aiogram.E018' not in reported
+    assert 'django_redis_aiogram.E019' not in reported

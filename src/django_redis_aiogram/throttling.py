@@ -39,6 +39,8 @@ RATE_LIMIT_DEFAULTS: dict[str, float] = dict(DEFAULTS['RATE_LIMIT'])
 
 # chats a bot talks to at once; beyond this the idle ones are dropped
 MAX_TRACKED_CHATS = 4096
+#: how many of the oldest buckets to look at before evicting one regardless
+EVICTION_CANDIDATES = 8
 
 # refilling accumulates float error, so a full bucket can land on 0.9999999999
 # instead of 1.0. Without this tolerance the wait shrinks to intervals too small
@@ -145,12 +147,18 @@ class RateLimiter:
     @staticmethod
     def _evict(chats: OrderedDict[int, TokenBucket]) -> None:
         while len(chats) > MAX_TRACKED_CHATS:
-            key, oldest = chats.popitem(last=False)
-            if not oldest.is_idle():
-                # it still owes wait time, so put it back and stop trimming
-                chats[key] = oldest
+            # stopping at the first busy bucket left the map uncapped: one chat
+            # that keeps sending pinned everything behind it
+            candidates = [
+                chats.popitem(last=False) for _ in range(min(EVICTION_CANDIDATES, len(chats)))
+            ]
+            evict = next(
+                (index for index, (_, bucket) in enumerate(candidates) if bucket.is_idle()), 0
+            )
+            del candidates[evict]
+            for key, bucket in reversed(candidates):
+                chats[key] = bucket
                 chats.move_to_end(key, last=False)
-                return
 
     @staticmethod
     def is_group(chat_id: int) -> bool:

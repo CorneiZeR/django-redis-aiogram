@@ -35,6 +35,9 @@ def test_there_is_a_logging_example_to_check():
 def test_every_referenced_handler_is_defined(name, source):
     config = ast.literal_eval(source)
     defined = set(config.get('handlers', {}))
-    for logger, options in config.get('loggers', {}).items():
+    named = dict(config.get('loggers', {}))
+    if 'root' in config:  # dictConfig takes the root logger outside 'loggers'
+        named['root'] = config['root']
+    for logger, options in named.items():
         missing = set(options.get('handlers', [])) - defined
         assert not missing, f'{name}: logger {logger!r} references undefined handlers {missing}'

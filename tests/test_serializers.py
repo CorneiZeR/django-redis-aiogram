@@ -262,3 +262,17 @@ def test_a_queue_holding_both_formats_is_read_per_message():
         assert loads(json_payload)['chat_id'] == 1
         with pytest.raises(SerializationError, match='ALLOW_PICKLE'):
             loads(pickle_payload)
+
+
+@override_settings(TELEGRAM_BOT={'ALLOW_PICKLE': 'false'})
+def test_a_textual_allow_pickle_still_refuses():
+    """From the environment the flag is a string, and 'false' is truthy."""
+    raw = PickleSerializer().dumps({'function': 'send_message', 'chat_id': 1})
+    with pytest.raises(SerializationError, match='ALLOW_PICKLE'):
+        loads(raw)
+
+
+@override_settings(TELEGRAM_BOT={'ALLOW_PICKLE': 'yes'})
+def test_a_textual_allow_pickle_still_permits():
+    raw = PickleSerializer().dumps({'function': 'send_message', 'chat_id': 2})
+    assert loads(raw)['chat_id'] == 2

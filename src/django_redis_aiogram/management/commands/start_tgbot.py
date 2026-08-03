@@ -3,6 +3,7 @@ import logging
 import signal
 import threading
 from argparse import ArgumentParser
+from collections.abc import Callable
 from types import FrameType
 from typing import Any
 
@@ -13,6 +14,9 @@ from django_redis_aiogram.delivery import get_delivery
 from django_redis_aiogram.settings import conf
 
 logger = logging.getLogger('django_redis_aiogram')
+
+#: what signal.signal returns: a handler, one of the SIG_* constants, or None
+Handler = Callable[[int, FrameType | None], Any] | int | None
 
 
 class Command(BaseCommand):
@@ -54,7 +58,7 @@ class Command(BaseCommand):
         # would be driven from the consumer thread. Deferring the start until
         # the loop picks up this callback keeps the loop single-threaded.
         bot.loop.call_soon(lambda: threads.append(delivery.start_thread()))
-        self._install_sigterm_handler()
+        previous = self._install_sigterm_handler()
 
         try:
             with contextlib.suppress(KeyboardInterrupt, SystemExit):
@@ -65,13 +69,24 @@ class Command(BaseCommand):
             for thread in threads:
                 thread.join(timeout=float(conf['BLPOP_TIMEOUT']) + 1)
             bot.close()
+            if previous is not None:
+                # the command may be called in-process; leaving our handler
+                # installed would turn a later SIGTERM into a stray interrupt
+                with contextlib.suppress(ValueError):
+                    signal.signal(signal.SIGTERM, previous)
 
     @staticmethod
-    def _install_sigterm_handler() -> None:
-        """Turn SIGTERM into KeyboardInterrupt so `docker stop` unwinds cleanly."""
+    def _install_sigterm_handler() -> Handler:
+        """Turn SIGTERM into KeyboardInterrupt so `docker stop` unwinds cleanly.
+
+        Returns the handler it replaced, or None when it could not install one —
+        signal.signal only works on the main thread.
+        """
 
         def raise_interrupt(signum: int, frame: FrameType | None) -> None:
             raise KeyboardInterrupt
 
-        with contextlib.suppress(ValueError):
-            signal.signal(signal.SIGTERM, raise_interrupt)
+        try:
+            return signal.signal(signal.SIGTERM, raise_interrupt)
+        except ValueError:
+            return None

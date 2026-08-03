@@ -37,12 +37,15 @@ TELEGRAM_BOT = {
 }
 ```
 
-Setting `'SERIALIZER': 'pickle'` re-enables writing pickled payloads. Only do
-so if you must queue objects JSON cannot represent, and only with a trusted
-Redis.
+Setting `'SERIALIZER': 'pickle'` is not enough on its own: the reader still
+refuses pickled payloads, so writing them means `'ALLOW_PICKLE': True` as well.
+Only do so if you must queue objects JSON cannot represent, and only with a
+trusted Redis.
 
 Decoding a JSON payload will only instantiate `aiogram.types` members that
-subclass `TelegramObject`; a payload cannot name an arbitrary import path.
+subclass `TelegramObject`; a payload cannot name an arbitrary import path. Of
+the file wrappers only `FSInputFile`, `URLInputFile` and `BufferedInputFile` are
+rebuilt — any other input-file type is rejected rather than resolved.
 
 ### File payloads
 

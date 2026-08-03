@@ -1,5 +1,6 @@
 import asyncio
 import threading
+import time
 
 import pytest
 from django.test import override_settings
@@ -32,13 +33,15 @@ def test_get_delivery_rejects_unknown():
 def drain(delivery, expected, timeout=5):
     """Run the consumer until it has handled `expected` messages."""
     thread = delivery.start_thread()
-    deadline = threading.Event()
     for _ in range(int(timeout * 100)):
         if len(delivery.handled) >= expected:
             break
-        deadline.wait(0.01)
+        time.sleep(0.01)
     delivery.stop()
     thread.join(timeout=timeout)
+    # a consumer still stuck here would otherwise be a passing test with a
+    # leaked thread
+    assert not thread.is_alive(), 'the consumer did not stop'
     return thread
 
 
@@ -136,6 +139,8 @@ def test_keyspace_ignores_other_keys(redis_server):
     )
     delivery._on_expired({'data': b'SOMETHING_ELSE'})
     assert handled == []
+    # an unrelated expiry must not consume the queue either
+    assert redis_server.llen('TELEGRAM_BOT_MESSAGE') == 1
 
 
 @override_settings(TELEGRAM_BOT={'DELIVERY': 'blpop'})
@@ -312,3 +317,35 @@ def test_sends_that_all_see_a_stopped_loop_are_serialised():
 
     assert errors == [], errors
     assert sorted(item['chat_id'] for item in sent) == list(range(expected))
+
+    instance._loop = instance._loop._loop  # unwrap, so close() drives the real one
+    instance._bot = None
+    instance.close()
+
+
+@override_settings(TELEGRAM_BOT={'DELIVERY': 'blpop', 'BLPOP_TIMEOUT': 0})
+def test_a_zero_blpop_timeout_is_clamped(redis_server, monkeypatch):
+    """0 means "block for ever" to a real Redis, and stop() would never be seen.
+
+    fakeredis returns immediately instead, so this watches the argument rather
+    than the wait — a passing end-to-end test would prove nothing here.
+    """
+    timeouts = []
+
+    class Spy:
+        def blmove(self, source, destination, timeout, *args, **kwargs):
+            timeouts.append(timeout)
+            return redis_server.lmove(source, destination, *args, **kwargs)
+
+        def __getattr__(self, name):
+            return getattr(redis_server, name)
+
+    monkeypatch.setattr('django_redis_aiogram.delivery.get_redis', lambda: Spy())
+    # one message, so the consumer actually reaches the blocking call
+    redis_server.rpush(
+        'TELEGRAM_BOT_MESSAGE', JsonSerializer().dumps({'function': 'send_message', 'chat_id': 1})
+    )
+    drain(RecordingBlpop(), expected=1, timeout=2)
+
+    assert timeouts, 'the consumer never blocked on the queue'
+    assert min(timeouts) >= 1, timeouts

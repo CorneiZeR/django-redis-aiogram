@@ -2,9 +2,10 @@
 
 ## 2.0.0 - unreleased
 
-Nothing is required to keep a 1.x project working: `telegram_bot` still
-imports and still works in `INSTALLED_APPS`. See the upgrade notes in the
-README.
+Upgrading the dependency needs no application-code changes: `telegram_bot`
+still imports and still works in `INSTALLED_APPS`. Settings are a separate
+matter — a 1.x queue needs `ALLOW_PICKLE` for the drain, and `parse_mode` moves
+to `DEFAULT_BOT_PROPERTIES`. See the upgrade notes in the README.
 
 ### Breaking
 
@@ -40,7 +41,8 @@ README.
   `parse_mode` is configured once on the bot rather than injected into every
   call.
 - `FSM_STORAGE` selects `redis` (default), `memory`, or a dotted path.
-- `ALLOW_PICKLE` refuses pickled payloads once a 1.x queue has drained.
+- `ALLOW_PICKLE` is the temporary opt-in for *reading* 1.x pickled payloads.
+  Turn it off once the queue has drained; it is off by default.
 - `AUTODISCOVER` can be turned off on its own.
 - `start_tgbot --idle` keeps a disabled container parked instead of exiting,
   for restart policies that treat a clean exit as a crash loop.

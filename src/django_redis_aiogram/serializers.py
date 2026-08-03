@@ -223,11 +223,12 @@ def loads(raw: bytes) -> dict[str, Any]:
     Detection is what lets a running deployment switch to JSON without draining
     the queue first.
     """
-    from django_redis_aiogram.settings import conf
+    from django_redis_aiogram.settings import SETTINGS_NAME, coerce_bool, conf
 
     if looks_like_json(raw):
         return JsonSerializer().loads(raw)
-    if not conf['ALLOW_PICKLE']:
+    # from the environment this arrives as a string, and 'false' is truthy
+    if not coerce_bool(conf['ALLOW_PICKLE'], f"{SETTINGS_NAME}['ALLOW_PICKLE']"):
         raise SerializationError(
             'Refusing to unpickle a queued payload. If this queue still holds '
             "messages written by 1.x, set TELEGRAM_BOT['ALLOW_PICKLE'] = True "

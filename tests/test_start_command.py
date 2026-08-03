@@ -1,6 +1,8 @@
 """The consumer thread must not touch the loop before the loop is running."""
 
 import asyncio
+import signal
+import threading
 from types import SimpleNamespace
 
 from django.core.management import call_command
@@ -64,3 +66,35 @@ def test_shutdown_is_safe_when_the_consumer_never_started(monkeypatch):
 
     assert 'consumer-started' not in events
     assert events == ['stopped', 'closed']
+
+
+@override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost:6379/0'})
+def test_the_previous_sigterm_handler_is_restored(monkeypatch):
+    """The command may run in-process; a left-behind handler turns a later
+    SIGTERM into a stray KeyboardInterrupt somewhere else entirely."""
+
+    def sentinel(signum, frame):
+        pass
+
+    previous = signal.signal(signal.SIGTERM, sentinel)
+    try:
+        monkeypatch.setattr(
+            'django_redis_aiogram.management.commands.start_tgbot.get_delivery',
+            lambda handler: _NoDelivery(),
+        )
+        monkeypatch.setattr(bot, 'close', lambda: None)
+        monkeypatch.setattr(bot, 'start_polling', lambda: None)
+
+        call_command('start_tgbot')
+
+        assert signal.getsignal(signal.SIGTERM) is sentinel
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
+class _NoDelivery:
+    def start_thread(self):
+        return threading.Thread(target=lambda: None)
+
+    def stop(self):
+        pass

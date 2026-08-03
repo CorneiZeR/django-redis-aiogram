@@ -78,9 +78,13 @@ One bot container is normally enough — Telegram's limits bind long before the
 consumer does. Several are safe if you want the redundancy: the pop is atomic,
 so a queued message goes to exactly one worker.
 
-That is not a delivery guarantee, though. A message is durable only until it is
-taken off the list: a send that fails, or a worker killed between the pop and
-the call, loses it. Treat delivery as at-most-once.
+On Redis 6.2+ a message is moved to a per-worker processing list while it is
+being sent, and a restarted worker reclaims what it left there — delivery is
+**at-least-once**, so a crash mid-send can produce a duplicate. Older servers
+lack `LMOVE` and fall back to plain pops, which is **at-most-once**: a kill
+between the pop and the call loses that one message. A send that *fails* is
+acknowledged and logged either way, never redelivered for ever. See
+**[[Delivery]]**.
 
 Do not run two containers polling the **same token**, though. Telegram allows
 only one `getUpdates` consumer per bot, and the second will fight the first for

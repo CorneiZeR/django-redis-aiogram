@@ -15,7 +15,7 @@ async def start_handler(message: types.Message) -> None:
     await message.answer('hi')
 
 
-@bot.message()
+@bot.message(F.text)
 async def echo(message: types.Message) -> None:
     await message.reply(message.text)
 ```

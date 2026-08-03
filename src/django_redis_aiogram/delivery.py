@@ -16,6 +16,7 @@ older than Redis 6.2 lack ``LMOVE``; there the consumers fall back to plain
 pops, which is the 1.x at-most-once behaviour, and say so in the log.
 """
 
+import contextlib
 import logging
 import os
 import socket
@@ -24,6 +25,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any
 
+from redis.client import PubSub
 from redis.exceptions import ResponseError
 
 from django_redis_aiogram.api import check_function
@@ -101,7 +103,14 @@ class Delivery(ABC):
             # RIGHT->LEFT keeps the original order at the front of the queue
             while connection.lmove(self.processing_key, self.queue_key, 'RIGHT', 'LEFT'):
                 count += 1
-        except ResponseError:
+        except ResponseError as error:
+            if 'unknown command' not in str(error).lower():
+                # WRONGTYPE, NOPERM and friends say nothing about LMOVE support
+                logger.exception(
+                    'could not reclaim previous messages, will retry',
+                    extra={'tg_key': self.processing_key},
+                )
+                return False
             self._reliable = False
             logger.warning(
                 'crash-safe delivery unavailable: this Redis predates LMOVE (6.2); '
@@ -182,7 +191,8 @@ class Delivery(ABC):
 class BlpopDelivery(Delivery):
     def run(self) -> None:
         connection = get_redis()
-        timeout = int(conf['BLPOP_TIMEOUT'])
+        # 0 means "block for ever" in Redis, which would swallow stop()
+        timeout = max(1, int(conf['BLPOP_TIMEOUT']))
         reclaimed = self.reclaim()
         logger.info(
             'delivery started',
@@ -218,15 +228,34 @@ class BlpopDelivery(Delivery):
 
 class KeyspaceDelivery(Delivery):
     def run(self) -> None:
-        connection = get_redis()
-        self._enable_notifications()
-        reclaimed = self.reclaim()
-        if reclaimed:
-            # expiry events are not replayed, so anything queued while this worker
-            # was down would sit in the list until a later message triggered one
-            self.consume_pending()
         channel = f'__keyevent@{get_db_index()}__:expired'
-        pubsub = connection.pubsub(ignore_subscribe_messages=True)  # type: ignore[no-untyped-call]
+        pubsub: PubSub | None = None
+        reclaimed = False
+        try:
+            while not self._stop.is_set():
+                try:
+                    if pubsub is None:
+                        pubsub = self._subscribe(channel)
+                    if not reclaimed:
+                        reclaimed = self.reclaim()
+                        if reclaimed:
+                            # no expiry event announces what the retry put back
+                            self.consume_pending()
+                    pubsub.get_message(timeout=1.0)
+                except Exception:
+                    # setting up is as much a network call as reading: a Redis
+                    # that is not up yet must not end the consumer thread
+                    logger.exception('keyspace consumer error, retrying')
+                    pubsub = self._close(pubsub)
+                    self._stop.wait(1.0)
+        finally:
+            self._close(pubsub)
+
+    def _subscribe(self, channel: str) -> PubSub:
+        self._enable_notifications()
+        pubsub: PubSub = get_redis().pubsub(  # type: ignore[no-untyped-call]
+            ignore_subscribe_messages=True
+        )
         pubsub.subscribe(**{channel: self._on_expired})
         logger.info(
             'delivery started',
@@ -236,21 +265,14 @@ class KeyspaceDelivery(Delivery):
                 'tg_crash_safe': self._reliable,
             },
         )
-        try:
-            while not self._stop.is_set():
-                try:
-                    if not reclaimed:
-                        reclaimed = self.reclaim()
-                        if reclaimed:
-                            # no expiry event announces what the retry put back
-                            self.consume_pending()
-                    pubsub.get_message(timeout=1.0)
-                except Exception:
-                    # an error in one event must not kill the consumer thread
-                    logger.exception('keyspace consumer error, continuing')
-                    self._stop.wait(1.0)
-        finally:
-            pubsub.close()
+        return pubsub
+
+    @staticmethod
+    def _close(pubsub: PubSub | None) -> None:
+        if pubsub is not None:
+            with contextlib.suppress(Exception):
+                pubsub.close()
+        return None
 
     def _enable_notifications(self) -> None:
         connection = get_redis()

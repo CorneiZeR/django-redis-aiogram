@@ -315,3 +315,16 @@ def test_defaults_come_from_the_settings_defaults():
 def test_writing_pickle_while_refusing_to_read_it_is_rejected():
     """Otherwise every queued message is written and then silently discarded."""
     assert 'django_redis_aiogram.E022' in {message.id for message in check_settings()}
+
+
+def test_eviction_caps_the_map_even_when_every_bucket_is_busy():
+    """Stopping at the first busy bucket left the map growing without limit."""
+    limiter = RateLimiter(overall_per_second=0, per_chat_per_second=1, group_per_minute=0)
+
+    for chat_id in range(1, MAX_TRACKED_CHATS + 51):
+        asyncio.run(limiter.acquire(chat_id))  # one token each, so none is idle
+
+    assert len(limiter._chats) <= MAX_TRACKED_CHATS, len(limiter._chats)
+    assert not [bucket for bucket in limiter._chats.values() if bucket.is_idle()], (
+        'the buckets were idle, so this did not exercise the busy path'
+    )

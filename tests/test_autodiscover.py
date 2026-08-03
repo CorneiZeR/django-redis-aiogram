@@ -7,12 +7,14 @@ a plain `django.setup()` is enough to exercise the whole path.
 import sys
 
 import pytest
-from django.core.exceptions import ImproperlyConfigured
+from django.apps import apps
 from django.test import override_settings
 from django.utils import module_loading
+from django.utils.module_loading import module_has_submodule
 
 from django_redis_aiogram import bot
 from django_redis_aiogram.routers import autodiscover_tg_routers
+from django_redis_aiogram.settings import conf
 
 
 def test_router_module_was_imported():
@@ -34,6 +36,14 @@ def test_handlers_landed_on_the_shared_bot():
 
 
 def test_a_missing_router_module_is_not_an_error():
+    """Most installed apps have no router module, and that is not a failure."""
+    without = [
+        app.label
+        for app in apps.get_app_configs()
+        if not module_has_submodule(app.module, conf['MODULE_NAME'])
+    ]
+    assert without, 'every installed app has a router module, so nothing is tested here'
+
     autodiscover_tg_routers()
 
 
@@ -62,5 +72,5 @@ def test_unknown_module_name_finds_nothing(monkeypatch):
 def test_a_broken_router_surfaces_instead_of_being_swallowed():
     """1.x caught bare ImportError, so a typo inside a router silently
     disabled the whole file."""
-    with pytest.raises(ImproperlyConfigured, match='intentionally broken'):
+    with pytest.raises(ImportError, match='ImproperlyConfigred'):
         autodiscover_tg_routers()

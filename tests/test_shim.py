@@ -145,9 +145,13 @@ def test_both_app_labels_can_be_installed_together():
         errors = [m for m in run_checks() if m.is_serious()]
         assert not errors, errors
 
-        # the settings checks must not be reported twice
-        ids = [m.id for m in run_checks() if m.id and m.id.startswith('django_redis_aiogram')]
-        assert len(ids) == len(set(ids)), ids
+        # one AppConfig per label, but only one of them may register the checks
+        from django.core.checks.registry import registry as check_registry
+
+        from django_redis_aiogram.checks import check_settings
+
+        registered = [c for c in check_registry.get_checks() if c is check_settings]
+        assert len(registered) == 1, registered
         print('ok')
     """)
     result = subprocess.run(
@@ -158,8 +162,14 @@ def test_both_app_labels_can_be_installed_together():
 
 
 def test_the_package_ships_type_information():
-    """py.typed is what makes the annotations visible to a consumer's mypy."""
-    import django_redis_aiogram
+    """py.typed is what makes the annotations visible to a consumer's mypy.
 
-    marker = pathlib.Path(django_redis_aiogram.__file__).parent / 'py.typed'
-    assert marker.is_file()
+    The shim needs its own: a project still importing `telegram_bot` gets no
+    types from the package it does not name.
+    """
+    import django_redis_aiogram
+    import telegram_bot
+
+    for package in (django_redis_aiogram, telegram_bot):
+        marker = pathlib.Path(str(package.__file__)).parent / 'py.typed'
+        assert marker.is_file(), f'{package.__name__} ships no py.typed'

@@ -28,8 +28,11 @@ redis-cli -n <db> llen TELEGRAM_BOT_MESSAGE
 ```
 
 A growing list means the consumer is not running — see above. Messages wait
-there until a worker takes them; once taken, a failed send or a killed worker
-loses that message. Delivery is at-most-once.
+there until a worker takes them. On Redis 6.2+ a taken message sits in
+`TELEGRAM_BOT_MESSAGE:processing:<worker>` until the send returns, and a
+restart with the same `WORKER_NAME` reclaims it: at-least-once, so a crash
+mid-send can duplicate a send. Without `LMOVE` it is at-most-once. A send that
+exhausted `MAX_RETRIES` is logged and acknowledged, not redelivered.
 
 ## Handlers never fire
 
@@ -67,8 +70,13 @@ often left over from then.
 ## Duplicate messages
 
 Check whether two bot containers are polling the same token — Telegram allows
-one `getUpdates` consumer per bot. The queue pop is atomic, so delivery itself
-hands each message to a single worker.
+one `getUpdates` consumer per bot.
+
+The queue pop is atomic, so each message goes to one worker — that is ownership,
+not exactly-once. Two other sources of duplicates: a worker killed mid-send has
+its message reclaimed and sent again, and two workers sharing a `WORKER_NAME`
+share an in-flight list, so one can reclaim a message the other is still
+sending. Give each its own name.
 
 ## The bot ignores ENABLED
 

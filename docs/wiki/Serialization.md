@@ -6,8 +6,10 @@ JSON.
 ## Why not pickle
 
 Whatever can write to the Redis list decides what the bot container executes.
-With pickle that means arbitrary code; with JSON it means, at worst, a
-different Telegram call. Treat the queue as a trust boundary either way — see
+With pickle that means arbitrary code. JSON is narrower, but not merely "a
+different Telegram call": a payload naming an `FSInputFile` picks a path, so a
+queue writer can make the bot upload any file its container can read. Treat the
+queue as a trust boundary either way — see
 [SECURITY.md](https://github.com/CorneiZeR/django-redis-aiogram/blob/master/SECURITY.md).
 
 1.0.4 moved *to* pickle because keyboards would not survive as plain dicts.
@@ -39,6 +41,16 @@ queued, naming the alternative:
 ```text
 FooInputFile cannot be queued. Send a file_id or a URL instead,
 or set TELEGRAM_BOT['SERIALIZER'] to 'pickle'.
+```
+
+Falling back to pickle takes both keys, and a queue nothing untrusted can write
+to — the reader refuses pickled payloads unless told otherwise:
+
+```python
+TELEGRAM_BOT = {
+    'SERIALIZER': 'pickle',
+    'ALLOW_PICKLE': True,
+}
 ```
 
 ## The method name is checked against an allowlist

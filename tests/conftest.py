@@ -7,6 +7,9 @@ PATCH_TARGETS = (
     'django_redis_aiogram.redis.get_redis',
     'django_redis_aiogram.delivery.get_redis',
     'django_redis_aiogram.client.get_redis',
+    'django_redis_aiogram.get_redis',
+    'telegram_bot.get_redis',
+    'telegram_bot.redis.get_redis',
 )
 
 
@@ -15,5 +18,5 @@ def redis_server(monkeypatch):
     """Swap the shared connection for an in-memory one."""
     server = fakeredis.FakeRedis()
     for target in PATCH_TARGETS:
-        monkeypatch.setattr(target, lambda server=server: server)
+        monkeypatch.setattr(target, lambda *args, server=server, **kwargs: server)
     return server

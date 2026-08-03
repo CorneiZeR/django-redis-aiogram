@@ -75,6 +75,7 @@ logging.getLogger('django_redis_aiogram').addHandler(handler)
 With it in place the `tg_` fields arrive as event keys:
 
 ```python
+logger = logging.getLogger('django_redis_aiogram')
 logger.warning('rate limited by telegram', extra={'tg_function': 'send_message'})
 # -> {"event": "rate limited by telegram", "tg_function": "send_message", ...}
 ```

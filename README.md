@@ -72,7 +72,9 @@ markup = types.InlineKeyboardMarkup(
 bot.send(chat_id=CHAT_ID, text=TEXT, reply_markup=markup)
 ```
 
-Any aiogram bot method works — pass its name as the first argument.
+Any Telegram API method aiogram exposes works — pass its name as the first
+argument. The name is checked against that allowlist, so a queued payload
+cannot reach anything else on the bot.
 
 With `RAISE_EXCEPTION` enabled, `send_raw` propagates failures:
 
