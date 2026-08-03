@@ -17,6 +17,19 @@ def test_package_exposes_public_api():
     assert bot.router is not None
 
 
+def test_bot_name_is_not_shadowed_by_a_module():
+    """The singleton is exported as `bot`, so the class must not live in bot.py.
+
+    Otherwise `django_redis_aiogram.bot` resolves to the module or the instance
+    depending on import order.
+    """
+    import django_redis_aiogram
+    import django_redis_aiogram.client
+
+    assert isinstance(django_redis_aiogram.bot, TelegramBot)
+    assert django_redis_aiogram.client.TelegramBot is TelegramBot
+
+
 def test_building_a_bot_is_cheap():
     instance = TelegramBot()
     assert instance._bot is None
