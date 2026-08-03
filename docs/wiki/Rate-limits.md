@@ -64,3 +64,20 @@ messaging many different users. Broadcasting to one large group is bound by
 `group_per_minute` instead. If you are being refused anyway, lower
 `overall_per_second` before raising `MAX_RETRIES` — the limits are not
 contractual and are applied more tightly to some accounts than others.
+
+## Memory, and what happens beyond it
+
+Per-chat buckets are kept in memory, so the limiter tracks at most 4096 chats
+and groups at a time. Once past that, the least recently used bucket is dropped
+when a new chat needs one — and if every candidate still owes wait time, one of
+them is dropped anyway.
+
+That is a deliberate bounded loss, not a way around the limit. A bucket is only
+evicted after 4096 *other* chats have been more recently active, which at
+`overall_per_second: 30` takes over two minutes; per-chat debt clears in about a
+second, so what is dropped is stale in practice. The overall bucket is never
+evicted, so the bot-wide rate holds regardless.
+
+If you genuinely message tens of thousands of distinct chats inside a couple of
+minutes, treat per-chat pacing as best-effort and keep `overall_per_second` as
+the limit you rely on.

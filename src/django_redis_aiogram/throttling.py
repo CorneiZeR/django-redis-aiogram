@@ -146,6 +146,15 @@ class RateLimiter:
 
     @staticmethod
     def _evict(chats: OrderedDict[int, TokenBucket]) -> None:
+        """Keep the map at the cap, preferring buckets that owe no wait time.
+
+        When every candidate is still busy the least recently used one goes
+        anyway, and its debt goes with it. That is a bounded loss rather than a
+        way around the limit: a bucket is only evicted once MAX_TRACKED_CHATS
+        other chats have been more recently active, which at the overall limit
+        takes minutes, while per-chat debt clears in about a second. The
+        alternative is an unbounded map, which is a leak.
+        """
         while len(chats) > MAX_TRACKED_CHATS:
             # stopping at the first busy bucket left the map uncapped: one chat
             # that keeps sending pinned everything behind it
