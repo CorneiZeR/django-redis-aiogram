@@ -124,6 +124,14 @@ services:
     depends_on: [redis]
 ```
 
+## Using it with a coding assistant
+
+[AGENTS.md](AGENTS.md) is the brief for agents working on this repository. For agents
+integrating the package into *your* project, the wiki page
+[AI assistants](https://github.com/CorneiZeR/django-redis-aiogram/wiki/AI-assistants)
+carries a paste-in brief, prompts for the usual jobs, and the 1.x habits
+assistants keep reaching for.
+
 ## Turning the bot off per process
 
 Only one process should run the bot, and that is decided by which one runs
