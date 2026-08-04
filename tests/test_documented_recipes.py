@@ -14,6 +14,7 @@ import re
 import fakeredis
 import pytest
 from aiogram import Bot, Dispatcher, F, Router, types
+from aiogram.client.session.base import BaseSession
 from django.test import override_settings
 
 from django_redis_aiogram import bot
@@ -193,3 +194,62 @@ def test_the_page_documents_every_recipe_here():
 def test_the_page_explains_the_test_settings(setting):
     """Both decisions a reader has to make before writing a test."""
     assert setting in PAGE.read_text()
+
+
+class RecordingSession(BaseSession):
+    """Records the API calls a handler makes instead of performing them."""
+
+    def __init__(self):
+        super().__init__()
+        self.calls = []
+
+    async def close(self):
+        """Nothing to close: this session never opened anything."""
+
+    async def make_request(self, bot, method, timeout=None):
+        """Record the call and answer nothing, as a stub should."""
+        self.calls.append(method)
+
+    async def stream_content(self, *args, **kwargs):  # pragma: no cover - never used here
+        """Satisfy the interface; no test downloads a file."""
+        yield b''
+
+
+def test_stubbing_the_session_is_what_catches_a_reply():
+    """feed_update hands the handler a copy bound to the bot, so patching
+    `answer` on the constructed message does nothing — the session is the seam.
+    """
+    router = Router()
+
+    @router.message(F.text == '/orders')
+    async def orders(message):
+        await message.answer('you have 3 open orders')
+
+    dispatcher = Dispatcher()
+    dispatcher.include_router(router)
+    session = RecordingSession()
+    fake = Bot(token='42:x', session=session)
+
+    asyncio.run(dispatcher.feed_update(fake, types.Update(update_id=1, message=a_message('/orders'))))
+
+    assert [type(call).__name__ for call in session.calls] == ['SendMessage']
+    assert session.calls[0].text == 'you have 3 open orders'
+
+
+def test_the_message_the_handler_receives_is_not_the_one_constructed():
+    """The reason the recipe above exists, stated as a test."""
+    received = []
+    router = Router()
+
+    @router.message()
+    async def record(message):
+        received.append(message)
+
+    dispatcher = Dispatcher()
+    dispatcher.include_router(router)
+    original = a_message('/probe')
+
+    asyncio.run(dispatcher.feed_update(Bot(token='42:x'), types.Update(update_id=1, message=original)))
+
+    assert received, 'the handler never ran'
+    assert received[0] is not original, 'patching the original would have worked'

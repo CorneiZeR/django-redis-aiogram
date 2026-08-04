@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.0.0 - unreleased
+## 2.0.0 - 2026-08-04
 
 Upgrading the dependency needs no application-code changes: `telegram_bot`
 still imports and still works in `INSTALLED_APPS`. Settings are a separate
@@ -53,6 +53,33 @@ to `DEFAULT_BOT_PROPERTIES`. See the upgrade notes in the README.
 - `RATE_LIMIT` paces outgoing calls under Telegram's published limits instead
   of waiting to be refused. Budgets are per bot, so a second token gets its own.
 - `close()` releases the FSM storage as well as the bot session and the loop.
+- `MODE` chooses where updates come from: `polling` (default) or `webhook`.
+  Both are supported the same way; the choice can be made at startup through
+  `DJANGO_REDIS_AIOGRAM_MODE`, or for one run with `start_tgbot --mode`.
+- Webhook mode: `django_redis_aiogram.webhook.telegram_webhook` is a view you
+  wire into your own `urls.py`, with `WEBHOOK_URL`, `WEBHOOK_SECRET` and
+  `WEBHOOK_ALLOWED_UPDATES` to configure it, and `manage.py tgbot_webhook
+  set|delete|info` to register it with Telegram. The secret is mandatory: the
+  view refuses to serve without one and check `E027` says so before deployment.
+- `manage.py tgbot_healthcheck` for container orchestration. The consumer
+  publishes a heartbeat every `HEARTBEAT_INTERVAL` seconds with a TTL of three
+  times that, so a dead consumer thread stops looking alive on its own; the
+  command also fails when the queue grows past `HEALTHCHECK_MAX_QUEUE`.
+- `django_redis_aiogram.enums` holds every value the settings accept —
+  `DeliveryKind`, `SerializerKind`, `StorageKind`, `UpdateMode`,
+  `SerializationTag`, `RateLimitKey` — so a project can import the enum instead
+  of spelling a string. The values are frozen: queued payloads carry them.
+- `django_redis_aiogram.exceptions` gives the package one error family.
+  `DjangoRedisAiogramError` catches everything it raises;
+  `SerializationError` and `UnknownApiMethodError` are the two a consumer is
+  likely to name, and both keep their old import paths and base classes.
+- Queued payloads may only name a Telegram API method aiogram exposes. A
+  payload naming anything else is refused when queued and dropped by the
+  consumer, so whoever can write to Redis cannot reach `download_file` or the
+  token.
+- Importing the package costs about a millisecond: aiogram and the pydantic
+  stack under it load on first use of the bot, and a process with `ENABLED=0`
+  never loads them at all.
 
 ### Fixed
 
@@ -94,7 +121,36 @@ to `DEFAULT_BOT_PROPERTIES`. See the upgrade notes in the README.
   with values in `extra` rather than interpolated into the message.
 - `override_settings(TELEGRAM_BOT=...)` now takes effect; settings used to be
   frozen at import.
-- SIGTERM shuts the worker down in order and closes the aiogram session.
+- SIGTERM shuts the worker down in order and closes the aiogram session, and
+  restores the handler it replaced.
+- A pickle payload the configuration refuses is no longer acknowledged and
+  deleted. It stays in the in-flight list with a log line naming the cure, so a
+  missed `ALLOW_PICKLE` during the upgrade window cannot silently destroy the
+  1.x queue it was meant to drain.
+- `ALLOW_PICKLE` is read the same way everywhere. From the environment it
+  arrives as a string, and `'false'` used to be truthy — for the reader, for
+  the writer and for check `E022`.
+- `reclaim()` only gives up crash-safe delivery when the server truly lacks
+  `LMOVE`; `WRONGTYPE` or a permission error no longer disables it for the life
+  of the container, and a Redis that is unreachable at startup is retried
+  instead of ending the consumer thread.
+- The keyspace consumer builds its subscription inside its retry loop, drains
+  the backlog at startup, and keeps its heartbeat fresh even when
+  `BLPOP_TIMEOUT` is longer than the heartbeat interval.
+- Shutdown refuses a send rather than losing it: a call arriving once `close()`
+  has started is reported instead of being scheduled onto a loop that will
+  never run it, and teardown holds the loop lock so it cannot interleave with a
+  send driving the same loop.
+- The shared Redis connection is built at most once and handed out atomically;
+  a `reset()` racing a reader could previously return `None`.
+- A rate limiter is no longer cached per bot, so `override_settings` and a
+  changed `RATE_LIMIT` reach a bot that already exists.
+- Per-chat rate-limit buckets are capped: eviction used to stop at the first
+  bucket still owing wait time, so one busy chat kept the map growing.
+- `manage.py check` survives settings a project got wrong in unusual ways — a
+  non-string key in `TELEGRAM_BOT`, an unhashable member of
+  `WEBHOOK_ALLOWED_UPDATES`, an unreadable `ALLOW_PICKLE` — reporting them
+  rather than raising.
 
 ### Infrastructure
 
@@ -106,6 +162,18 @@ to `DEFAULT_BOT_PROPERTIES`. See the upgrade notes in the README.
 - Releases publish to PyPI through Trusted Publishing.
 - Dependabot, issue and pull request templates, `CONTRIBUTING.md`,
   `SECURITY.md`.
+- An integration suite that runs against a real Redis — `LMOVE` support, the
+  reclaim path, keyspace notifications enabled at startup, a mixed pickle/JSON
+  backlog, FSM state across a restart — plus `scripts/smoke_install.sh`, which
+  installs the built wheel into a throwaway Django project and checks it boots
+  with no credentials. Both run in CI.
+- `ruff` runs with every rule enabled; deliberate exceptions carry their reason
+  on the line. `mypy` covers the package in strict mode.
+- Documentation lives in the wiki, published from `docs/wiki` on push to
+  `master`, with the README kept to a front page. Configuration examples and
+  testing recipes on those pages are executed by the test suite.
+- `AGENTS.md` and the **AI assistants** wiki page: briefs for coding agents
+  working on the package and with it.
 
 ## 1.0.0 - 2023-07-01
 - Initial release

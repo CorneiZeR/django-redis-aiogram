@@ -110,6 +110,56 @@ from django_redis_aiogram import TelegramBot, bot, conf, get_redis, redis_conn, 
 `override_settings`. `redis_conn` is a lazy proxy over `get_redis()`; both hand
 back the one connection.
 
+## Values the settings accept
+
+Every choice a setting offers exists as an enum member, so a project can import
+the value instead of spelling the string:
+
+```python
+from django_redis_aiogram.enums import DeliveryKind, StorageKind, UpdateMode
+
+TELEGRAM_BOT = {
+    'DELIVERY': DeliveryKind.BLPOP,
+    'FSM_STORAGE': StorageKind.REDIS,
+    'MODE': UpdateMode.POLLING,
+}
+```
+
+| | Members |
+| --- | --- |
+| `DeliveryKind` | `BLPOP`, `KEYSPACE` |
+| `SerializerKind` | `JSON`, `PICKLE` |
+| `StorageKind` | `REDIS`, `MEMORY` |
+| `UpdateMode` | `POLLING`, `WEBHOOK` |
+| `RateLimitKey` | the three `RATE_LIMIT` keys |
+| `SerializationTag` | the `__model__`-style markers a queued payload carries |
+
+They are `(str, Enum)`, so a member compares equal to its string and works
+anywhere the string does. `choices(DeliveryKind)` gives the plain-string set,
+which is what the system checks validate against.
+
+The values are **frozen**: queued payloads and stored settings carry them, so a
+member may be renamed but never revalued.
+
+## Errors
+
+```python
+from django_redis_aiogram.exceptions import DjangoRedisAiogramError
+```
+
+| | Raised when |
+| --- | --- |
+| `DjangoRedisAiogramError` | base of everything this package raises |
+| `SerializationError` | a payload cannot be encoded, or cannot be decoded |
+| `UnknownApiMethodError` | a call names something that is not a Telegram API method |
+
+Catching `DjangoRedisAiogramError` catches all of them. The two you are likely
+to name keep the bases they had before the family existed —
+`UnknownApiMethodError` is still a `ValueError`, and the serializer errors are
+still `SerializationError` — so existing `except` clauses keep working.
+Configuration problems remain Django's `ImproperlyConfigured`, since that is
+what `manage.py check` and Django's own machinery expect.
+
 ## Deprecated
 
 `telegram_bot` still imports and still works in `INSTALLED_APPS`, with a
