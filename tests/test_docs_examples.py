@@ -20,7 +20,7 @@ def logging_examples():
     for path in DOCS:
         if not path.is_file():
             continue
-        for match in LOGGING_BLOCK.finditer(path.read_text()):
+        for match in LOGGING_BLOCK.finditer(path.read_text(encoding='utf-8')):
             yield path.name, match.group(1)
 
 

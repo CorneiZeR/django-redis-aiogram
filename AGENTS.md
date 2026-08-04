@@ -35,9 +35,12 @@ pip install -e '.[dev]'
 ruff check . && ruff format --check . && mypy && python -m pytest -q
 ```
 
-Those four are exactly what CI gates on. `pytest` needs no Redis and no token.
+Those four gate every pull request. `pytest` needs no Redis and no token.
 
-Two more suites exist and are not part of that loop:
+CI also runs the two below — integration against a real Redis service, and the
+smoke install — so a change that only passes the loop above can still fail the
+build. Run them locally when you touch delivery, packaging or the public
+surface:
 
 ```shell
 DJANGO_REDIS_AIOGRAM_TEST_REDIS_URL=redis://localhost:6399/0 python -m pytest -m integration

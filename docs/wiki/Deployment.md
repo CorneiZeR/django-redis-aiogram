@@ -23,6 +23,10 @@ services:
     environment:
       DJANGO_REDIS_AIOGRAM_ENABLED: 1
     depends_on: [redis]
+
+  redis:
+    image: redis:7-alpine
+    restart: always
 ```
 
 Note what is **not** set: `back` and `celery_worker` leave `ENABLED` alone.

@@ -31,6 +31,9 @@ Project uses django-redis-aiogram 2.x. Rules:
 - The package is safe to import with no TOKEN and no Redis. Do not add
   placeholder credentials to make imports work, and do not guard imports in
   try/except.
+- `from django_redis_aiogram import bot` loads aiogram (~900 ms), which is the
+  cost of sending and is paid once. Import it in the modules that send, not in a
+  package `__init__` that every process loads.
 - Only the container running `manage.py start_tgbot` runs the bot. Do not set
   DJANGO_REDIS_AIOGRAM_ENABLED=0 on web or Celery processes: it turns their
   sends into no-ops and the messages are dropped.

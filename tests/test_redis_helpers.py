@@ -102,7 +102,11 @@ def test_keyspace_pops_atomically(redis_server):
     KeyspaceDelivery(handler=handler)._on_expired({'data': b'TELEGRAM_BOT_EXP'})
 
     assert competitor_ran, 'the competing drain never ran, so nothing was tested'
-    assert sorted(first + second) == [0, 1, 2], (first, second)
+    # the split is deterministic under an atomic pop: this worker holds 0 while
+    # the competitor drains what is left. A non-atomic drain would hand both of
+    # them the same list, and the union would carry every id twice
+    assert first == [0], first
+    assert second == [1, 2], second
     assert redis_server.llen('TELEGRAM_BOT_MESSAGE') == 0
 
 

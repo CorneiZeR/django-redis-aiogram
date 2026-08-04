@@ -23,18 +23,16 @@ TELEGRAM_BOT = {
 }
 ```
 
-Both may be empty at startup — the package only needs them when something
-actually reaches Telegram or Redis.
-
-That is the whole minimum. Neither value has to be present for the project to
-boot — they are only needed when something actually reaches Telegram or Redis,
-so tests and migrations run fine without them.
+That is the whole minimum, and both values may be empty at startup. The
+package needs them only when something actually reaches Telegram or Redis, so
+tests, migrations and a build all run without them.
 
 ## Configure from the environment
 
 Scalar settings can come from `DJANGO_REDIS_AIOGRAM_<NAME>`:
 
-```shell
+```ini
+# .env
 DJANGO_REDIS_AIOGRAM_TOKEN=123:abc
 DJANGO_REDIS_AIOGRAM_REDIS_URL=redis://redis:6379/0
 DJANGO_REDIS_AIOGRAM_ENABLED=0
@@ -55,9 +53,14 @@ services:
     restart: always
     env_file: .env
     depends_on: [redis]
+
+  redis:
+    image: redis:7-alpine
+    restart: always
 ```
 
-See **[[Deployment]]** for turning the bot off in every other process.
+See **[[Deployment]]** for the whole file, and for turning the bot off in every
+other process.
 
 ## Check the configuration
 

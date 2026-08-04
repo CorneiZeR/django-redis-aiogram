@@ -38,7 +38,7 @@ def test_target_of_reads_the_page_not_the_label():
 @pytest.mark.parametrize('path', PAGES, ids=lambda path: path.name)
 def test_every_link_resolves(path):
     known = page_names()
-    broken = [link for link in LINK.findall(path.read_text()) if target_of(link) not in known]
+    broken = [link for link in LINK.findall(path.read_text(encoding='utf-8')) if target_of(link) not in known]
     assert not broken, f'{path.name} links to missing pages: {broken}'
 
 
@@ -52,7 +52,9 @@ def test_piped_links_name_the_page_first(path):
     """
     known = page_names()
     reversed_links = [
-        link for link in LINK.findall(path.read_text()) if '|' in link and link.split('|')[0].strip() not in known
+        link
+        for link in LINK.findall(path.read_text(encoding='utf-8'))
+        if '|' in link and link.split('|')[0].strip() not in known
     ]
     assert not reversed_links, f'{path.name} has label-first links: {reversed_links}'
 
@@ -65,7 +67,7 @@ def test_readme_wiki_links_resolve():
     """The README links into the wiki with ../../wiki/<page>; a rename there
     breaks them silently."""
     known = page_names()
-    targets = README_WIKI_LINK.findall(README.read_text())
+    targets = README_WIKI_LINK.findall(README.read_text(encoding='utf-8'))
     assert targets, 'no wiki links found in the README'
     broken = [target for target in targets if target not in known]
     assert not broken, f'README links to missing wiki pages: {broken}'
@@ -77,7 +79,7 @@ def test_home_and_sidebar_exist():
 
 
 def test_the_sidebar_lists_every_page():
-    sidebar = (WIKI / '_Sidebar.md').read_text()
+    sidebar = (WIKI / '_Sidebar.md').read_text(encoding='utf-8')
     listed = {target_of(link) for link in LINK.findall(sidebar)}
     missing = page_names() - listed - {'_Sidebar'}
     assert not missing, f'pages missing from the sidebar: {sorted(missing)}'
@@ -150,14 +152,16 @@ def test_an_unclosed_fence_hides_everything_after_it():
 
 
 def test_the_readme_stays_a_front_page():
-    lines = README.read_text().splitlines()
+    lines = README.read_text(encoding='utf-8').splitlines()
     assert len(lines) <= README_BUDGET, f'the README is {len(lines)} lines; anything this long belongs in a wiki page'
 
 
 def test_no_readme_section_duplicates_a_wiki_page():
     """A section named after a page is that page's material coming back."""
     pages = {normalised(name) for name in page_names()} - {'home', '_sidebar'}
-    duplicated = [title for title in sections(visible(README.read_text())) if normalised(title) in pages]
+    duplicated = [
+        title for title in sections(visible(README.read_text(encoding='utf-8'))) if normalised(title) in pages
+    ]
 
     assert not duplicated, f'these belong in the wiki, not the README: {duplicated}'
 
@@ -169,7 +173,7 @@ def test_the_readme_links_to_every_page():
     treats spaces as dashes, so `../../wiki/rate-limits` reaches the page and has
     to count as reaching it.
     """
-    linked = {normalised(target) for target in README_WIKI_LINK.findall(visible(README.read_text()))}
+    linked = {normalised(target) for target in README_WIKI_LINK.findall(visible(README.read_text(encoding='utf-8')))}
     pages = {normalised(name) for name in page_names()}
     missing = pages - linked - {normalised('Home'), normalised('_Sidebar')}
 
@@ -180,7 +184,7 @@ def test_a_link_spelled_the_way_github_accepts_it_counts(tmp_path, monkeypatch):
     """Otherwise the test demands one spelling of a link that has several."""
     readme = tmp_path / 'README.md'
     rows = '\n'.join(f'[{name}](../../wiki/{normalised(name)})' for name in page_names() if name != '_Sidebar')
-    readme.write_text(rows + '\n')
+    readme.write_text(rows + '\n', encoding='utf-8')
     monkeypatch.setattr('tests.test_wiki.README', readme)
 
     test_the_readme_links_to_every_page()
@@ -190,7 +194,7 @@ def a_readme(tmp_path, monkeypatch, body: str):
     """Point the checks at a README of our own, through the name they read."""
     readme = tmp_path / 'README.md'
     rows = '\n'.join(f'[{name}](../../wiki/{normalised(name)})' for name in page_names() if name != '_Sidebar')
-    readme.write_text(rows + '\n' + body)
+    readme.write_text(rows + '\n' + body, encoding='utf-8')
     monkeypatch.setattr('tests.test_wiki.README', readme)
     return readme
 
@@ -213,9 +217,9 @@ def test_a_duplicate_heading_outside_a_fence_is_caught(tmp_path, monkeypatch):
 def test_a_link_only_inside_a_fence_does_not_count(tmp_path, monkeypatch):
     """Reading raw text here would call an unreachable page linked."""
     readme = a_readme(tmp_path, monkeypatch, '')
-    text = readme.read_text()
+    text = readme.read_text(encoding='utf-8')
     row = next(line for line in text.splitlines() if '../../wiki/webhook)' in line)
-    readme.write_text(text.replace(row + '\n', '') + '```\n' + row + '\n```\n')
+    readme.write_text(text.replace(row + '\n', '') + '```\n' + row + '\n```\n', encoding='utf-8')
 
     with pytest.raises(AssertionError, match='does not link to'):
         test_the_readme_links_to_every_page()
@@ -223,9 +227,9 @@ def test_a_link_only_inside_a_fence_does_not_count(tmp_path, monkeypatch):
 
 def test_a_link_only_inside_a_comment_does_not_count(tmp_path, monkeypatch):
     readme = a_readme(tmp_path, monkeypatch, '')
-    text = readme.read_text()
+    text = readme.read_text(encoding='utf-8')
     row = next(line for line in text.splitlines() if '../../wiki/api)' in line)
-    readme.write_text(text.replace(row + '\n', '') + f'<!-- {row} -->\n')
+    readme.write_text(text.replace(row + '\n', '') + f'<!-- {row} -->\n', encoding='utf-8')
 
     with pytest.raises(AssertionError, match='does not link to'):
         test_the_readme_links_to_every_page()

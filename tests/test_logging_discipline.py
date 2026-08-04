@@ -41,7 +41,7 @@ class LoggingUse(ast.NodeVisitor):
     @classmethod
     def read(cls, path: Path) -> 'LoggingUse':
         use = cls()
-        use.visit(ast.parse(path.read_text()))
+        use.visit(ast.parse(path.read_text(encoding='utf-8')))
         return use
 
     def visit_Import(self, node: ast.Import) -> None:
@@ -209,7 +209,7 @@ NOT_OURS = [
 
 def walk(source, tmp_path):
     module = tmp_path / 'sample.py'
-    module.write_text(source)
+    module.write_text(source, encoding='utf-8')
     return LoggingUse.read(module)
 
 

@@ -123,7 +123,7 @@ def test_draining_the_queue_without_a_thread(redis_server):
 
 
 PAGE = pathlib.Path(__file__).resolve().parent.parent / 'docs' / 'wiki' / 'Testing.md'
-SNIPPETS = re.findall(r'```python\n(.*?)```', PAGE.read_text(), re.DOTALL)
+SNIPPETS = re.findall(r'```python\n(.*?)```', PAGE.read_text(encoding='utf-8'), re.DOTALL)
 
 
 def imported_from_the_package(tree: ast.Module) -> dict[str, object]:
@@ -178,7 +178,7 @@ def test_every_package_attribute_a_snippet_uses_exists(snippet):
 
 def test_the_page_documents_every_recipe_here():
     """A recipe that leaves the page should leave this file with it."""
-    text = PAGE.read_text()
+    text = PAGE.read_text(encoding='utf-8')
     for needle in (
         'fakeredis',
         'django_redis_aiogram.client.get_redis',
@@ -193,7 +193,7 @@ def test_the_page_documents_every_recipe_here():
 @pytest.mark.parametrize('setting', ['FSM_STORAGE', 'ENABLED'])
 def test_the_page_explains_the_test_settings(setting):
     """Both decisions a reader has to make before writing a test."""
-    assert setting in PAGE.read_text()
+    assert setting in PAGE.read_text(encoding='utf-8')
 
 
 class RecordingSession(BaseSession):

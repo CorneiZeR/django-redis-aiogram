@@ -54,6 +54,9 @@ connection in place.
 When the payload is not the point, replace the call:
 
 ```python
+from django_redis_aiogram import bot
+
+
 def test_approval_notifies(monkeypatch):
     sent = []
     monkeypatch.setattr(bot, 'send', lambda **kwargs: sent.append(kwargs))
@@ -103,10 +106,12 @@ def test_start_greets():
 
 ## Testing that the filters route
 
-Feed a dispatcher an update when the filter is the thing under test:
+Feed a dispatcher an update when the filter is the thing under test. `a_message` is the builder from the section above:
 
 ```python
-from aiogram import Bot, Dispatcher, F, Router
+import asyncio
+
+from aiogram import Bot, Dispatcher, F, Router, types
 
 
 def test_only_text_reaches_the_echo():
