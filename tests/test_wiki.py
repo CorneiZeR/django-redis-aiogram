@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 
 import pytest
+import tomllib
 
 ROOT = Path(__file__).resolve().parent.parent
 WIKI = ROOT / 'docs' / 'wiki'
@@ -60,7 +61,11 @@ def test_piped_links_name_the_page_first(path):
 
 
 README = ROOT / 'README.md'
-README_WIKI_LINK = re.compile(r'\]\(\.\./\.\./wiki/([^)#]+)')
+PYPROJECT = ROOT / 'pyproject.toml'
+# absolute, because the README is also the PyPI description and PyPI does not
+# rewrite relative links — ../../wiki/<page> resolves to pypi.org/wiki/<page>
+WIKI_URL = 'https://github.com/CorneiZeR/django-redis-aiogram/wiki/'
+README_WIKI_LINK = re.compile(rf'\]\({re.escape(WIKI_URL)}([^)#]+)')
 
 
 def test_readme_wiki_links_resolve():
@@ -143,7 +148,7 @@ def test_visible_drops_what_is_not_rendered():
 
 def test_an_unclosed_fence_hides_everything_after_it():
     """Which is what GitHub renders: the rest of the file becomes code."""
-    text = '## Real\n```\n## Never closed\n[API](../../wiki/API)\n'
+    text = '## Real\n```\n## Never closed\n[API](https://github.com/CorneiZeR/django-redis-aiogram/wiki/API)\n'
 
     rendered = visible(text)
 
@@ -183,7 +188,7 @@ def test_the_readme_links_to_every_page():
 def test_a_link_spelled_the_way_github_accepts_it_counts(tmp_path, monkeypatch):
     """Otherwise the test demands one spelling of a link that has several."""
     readme = tmp_path / 'README.md'
-    rows = '\n'.join(f'[{name}](../../wiki/{normalised(name)})' for name in page_names() if name != '_Sidebar')
+    rows = '\n'.join(f'[{name}]({WIKI_URL}{normalised(name)})' for name in page_names() if name != '_Sidebar')
     readme.write_text(rows + '\n', encoding='utf-8')
     monkeypatch.setattr('tests.test_wiki.README', readme)
 
@@ -193,7 +198,7 @@ def test_a_link_spelled_the_way_github_accepts_it_counts(tmp_path, monkeypatch):
 def a_readme(tmp_path, monkeypatch, body: str):
     """Point the checks at a README of our own, through the name they read."""
     readme = tmp_path / 'README.md'
-    rows = '\n'.join(f'[{name}](../../wiki/{normalised(name)})' for name in page_names() if name != '_Sidebar')
+    rows = '\n'.join(f'[{name}]({WIKI_URL}{normalised(name)})' for name in page_names() if name != '_Sidebar')
     readme.write_text(rows + '\n' + body, encoding='utf-8')
     monkeypatch.setattr('tests.test_wiki.README', readme)
     return readme
@@ -218,7 +223,7 @@ def test_a_link_only_inside_a_fence_does_not_count(tmp_path, monkeypatch):
     """Reading raw text here would call an unreachable page linked."""
     readme = a_readme(tmp_path, monkeypatch, '')
     text = readme.read_text(encoding='utf-8')
-    row = next(line for line in text.splitlines() if '../../wiki/webhook)' in line)
+    row = next(line for line in text.splitlines() if f'{WIKI_URL}webhook)' in line)
     readme.write_text(text.replace(row + '\n', '') + '```\n' + row + '\n```\n', encoding='utf-8')
 
     with pytest.raises(AssertionError, match='does not link to'):
@@ -228,8 +233,26 @@ def test_a_link_only_inside_a_fence_does_not_count(tmp_path, monkeypatch):
 def test_a_link_only_inside_a_comment_does_not_count(tmp_path, monkeypatch):
     readme = a_readme(tmp_path, monkeypatch, '')
     text = readme.read_text(encoding='utf-8')
-    row = next(line for line in text.splitlines() if '../../wiki/api)' in line)
+    row = next(line for line in text.splitlines() if f'{WIKI_URL}api)' in line)
     readme.write_text(text.replace(row + '\n', '') + f'<!-- {row} -->\n', encoding='utf-8')
 
     with pytest.raises(AssertionError, match='does not link to'):
         test_the_readme_links_to_every_page()
+
+
+def test_the_readme_has_no_relative_links():
+    """The README is also the PyPI long description. PyPI serves it from
+    pypi.org and does not rewrite links, so a relative one points at a page
+    that does not exist there — which is how 2.0.0 shipped a documentation
+    table of dead links.
+    """
+    relative = re.findall(r'\]\((?!https?://|#)([^)]+)\)', README.read_text(encoding='utf-8'))
+
+    assert not relative, f'relative links break on the PyPI page: {relative}'
+
+
+def test_the_documentation_url_is_declared():
+    """PyPI builds its sidebar from project.urls, not from the description."""
+    urls = tomllib.loads(PYPROJECT.read_text(encoding='utf-8'))['project']['urls']
+
+    assert urls['Documentation'] == WIKI_URL.rstrip('/')

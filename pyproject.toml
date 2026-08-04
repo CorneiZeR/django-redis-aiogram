@@ -46,6 +46,7 @@ dev = [
 
 [project.urls]
 Homepage = "https://github.com/CorneiZeR/django-redis-aiogram"
+Documentation = "https://github.com/CorneiZeR/django-redis-aiogram/wiki"
 Changelog = "https://github.com/CorneiZeR/django-redis-aiogram/blob/master/CHANGELOG.md"
 Issues = "https://github.com/CorneiZeR/django-redis-aiogram/issues"
 
