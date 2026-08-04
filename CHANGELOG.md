@@ -73,13 +73,16 @@ to `DEFAULT_BOT_PROPERTIES`. See the upgrade notes in the README.
   `DjangoRedisAiogramError` catches everything it raises;
   `SerializationError` and `UnknownApiMethodError` are the two a consumer is
   likely to name, and both keep their old import paths and base classes.
-- Queued payloads may only name a Telegram API method aiogram exposes. A
-  payload naming anything else is refused when queued and dropped by the
-  consumer, so whoever can write to Redis cannot reach `download_file` or the
-  token.
-- Importing the package costs about a millisecond: aiogram and the pydantic
-  stack under it load on first use of the bot, and a process with `ENABLED=0`
-  never loads them at all.
+- Queued payloads may only name a Telegram API method aiogram exposes, and not
+  `set_webhook`, `delete_webhook`, `log_out` or `close` — those administer the
+  deployment rather than send. A payload naming anything else is refused when
+  queued and dropped by the consumer, so whoever can write to Redis cannot
+  reach `download_file` or the token.
+- `import django_redis_aiogram` costs about a millisecond. Naming `bot` is what
+  loads aiogram and the pydantic stack under it, so a process with `ENABLED=0`
+  — a migration container, CI — never loads them at all. The `telegram_bot`
+  shim resolves its exports the same way, so a project still on the 1.x name
+  pays for aiogram only where it sends.
 
 ### Fixed
 
