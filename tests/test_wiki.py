@@ -4,7 +4,6 @@ import re
 from pathlib import Path
 
 import pytest
-import tomllib
 
 ROOT = Path(__file__).resolve().parent.parent
 WIKI = ROOT / 'docs' / 'wiki'
@@ -252,7 +251,10 @@ def test_the_readme_has_no_relative_links():
 
 
 def test_the_documentation_url_is_declared():
-    """PyPI builds its sidebar from project.urls, not from the description."""
-    urls = tomllib.loads(PYPROJECT.read_text(encoding='utf-8'))['project']['urls']
+    """PyPI builds its sidebar from project.urls, not from the description.
 
-    assert urls['Documentation'] == WIKI_URL.rstrip('/')
+    Read as text rather than through tomllib, which the 3.10 floor lacks.
+    """
+    declared = f'Documentation = "{WIKI_URL.rstrip("/")}"'
+
+    assert declared in PYPROJECT.read_text(encoding='utf-8')
