@@ -32,7 +32,7 @@ def stub_bot(sent=None, first_send=None):
             if first_send is not None:
                 first_send.set()
 
-        class session:
+        class session:  # noqa: N801 - it stands in for bot.session, which aiogram spells lowercase
             @staticmethod
             async def close():
                 pass
@@ -334,4 +334,5 @@ def test_close_refuses_to_tear_down_a_running_loop(caplog):
     assert instance._loop is not None
     assert instance._bot is not None
     instance.close(drain_timeout=0.1)
-    assert instance._loop is None and instance._bot is None
+    assert instance._loop is None
+    assert instance._bot is None

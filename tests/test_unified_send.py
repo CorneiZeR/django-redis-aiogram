@@ -48,7 +48,8 @@ def test_disabled_send_is_a_noop(monkeypatch):
     """Neither route may build a bot or reach for a connection."""
 
     def forbidden():
-        raise AssertionError("a disabled send reached for Redis")
+        msg = "a disabled send reached for Redis"
+        raise AssertionError(msg)
 
     monkeypatch.setattr("django_redis_aiogram.client.get_redis", forbidden)
 

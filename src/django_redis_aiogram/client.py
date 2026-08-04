@@ -1,9 +1,16 @@
+"""The bot object Django code talks to.
+
+One facade over an aiogram ``Bot``, ``Dispatcher`` and ``Router``, built lazily
+so that importing the package costs nothing in the processes — web workers, cron
+jobs, the test suite — that only ever queue a message.
+"""
+
 import asyncio
 import logging
 import threading
 import weakref
 from asyncio import AbstractEventLoop
-from collections.abc import Coroutine
+from collections.abc import Coroutine, Mapping
 from typing import Any
 
 from aiogram import Bot, Dispatcher, Router, exceptions
@@ -12,11 +19,13 @@ from aiogram.dispatcher.event.handler import CallbackType
 from aiogram.fsm.storage.base import BaseStorage
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.storage.redis import RedisStorage
+from aiogram.types import Update
 from django.core.exceptions import ImproperlyConfigured
 from django.utils.module_loading import import_string
+from redis import Redis
 
 from django_redis_aiogram.api import check_function
-from django_redis_aiogram.delivery import KEYSPACE_DELIVERY
+from django_redis_aiogram.enums import DeliveryKind, StorageKind
 from django_redis_aiogram.redis import get_redis
 from django_redis_aiogram.serializers import get_serializer
 from django_redis_aiogram.settings import SETTINGS_NAME, coerce_bool, conf
@@ -24,8 +33,9 @@ from django_redis_aiogram.throttling import RateLimiter, get_rate_limiter
 
 logger = logging.getLogger("django_redis_aiogram")
 
-MEMORY_STORAGE = "memory"
-REDIS_STORAGE = "redis"
+#: the pre-2.2 spellings, kept importable; StorageKind is the name to use now
+MEMORY_STORAGE = StorageKind.MEMORY
+REDIS_STORAGE = StorageKind.REDIS
 
 # run_until_complete is not reentrant, and the loop — not the bot — is what
 # cannot be entered twice. Two bots handed the same loop must share one lock.
@@ -34,6 +44,7 @@ _loop_locks_guard = threading.Lock()
 
 
 def loop_lock(loop: AbstractEventLoop) -> threading.Lock:
+    """Return the one lock that everything driving ``loop`` has to hold."""
     with _loop_locks_guard:
         lock = _loop_locks.get(loop)
         if lock is None:
@@ -42,37 +53,39 @@ def loop_lock(loop: AbstractEventLoop) -> threading.Lock:
 
 
 def build_default_properties() -> DefaultBotProperties:
-    """Bot-wide defaults such as parse_mode.
+    """Build the bot-wide defaults such as parse_mode.
 
     aiogram applies these to every call, which is why unset fields carry a
     ``Default`` sentinel rather than None.
     """
-    properties = conf["DEFAULT_BOT_PROPERTIES"]
+    properties: Mapping[str, Any] = conf["DEFAULT_BOT_PROPERTIES"]
     try:
         return DefaultBotProperties(**properties)
     except TypeError as error:
-        raise ImproperlyConfigured(f"{SETTINGS_NAME}['DEFAULT_BOT_PROPERTIES']: {error}") from None
+        msg = f"{SETTINGS_NAME}['DEFAULT_BOT_PROPERTIES']: {error}"
+        raise ImproperlyConfigured(msg) from None
 
 
 def build_storage() -> BaseStorage:
-    """FSM storage: 'redis', 'memory', or a dotted path to a BaseStorage."""
-    name = conf["FSM_STORAGE"]
-    if name == MEMORY_STORAGE:
+    """Build the FSM storage: 'redis', 'memory', or a dotted path to a BaseStorage."""
+    name: str = conf["FSM_STORAGE"]
+    if name == StorageKind.MEMORY:
         return MemoryStorage()
-    if name == REDIS_STORAGE:
+    if name == StorageKind.REDIS:
         url = str(conf["REDIS_URL"] or "").strip()
         if not url:
-            raise ImproperlyConfigured(f"{SETTINGS_NAME}['REDIS_URL'] is required for the redis FSM storage.")
+            msg = f"{SETTINGS_NAME}['REDIS_URL'] is required for the redis FSM storage."
+            raise ImproperlyConfigured(msg)
         return RedisStorage.from_url(url)
 
     try:
         storage_class = import_string(name)
     except ImportError as error:
-        raise ImproperlyConfigured(f"{SETTINGS_NAME}['FSM_STORAGE'] cannot be imported: {error}") from error
+        msg = f"{SETTINGS_NAME}['FSM_STORAGE'] cannot be imported: {error}"
+        raise ImproperlyConfigured(msg) from error
     if not (isinstance(storage_class, type) and issubclass(storage_class, BaseStorage)):
-        raise ImproperlyConfigured(
-            f"{SETTINGS_NAME}['FSM_STORAGE'] must point to a BaseStorage subclass, got {name!r}."
-        )
+        msg = f"{SETTINGS_NAME}['FSM_STORAGE'] must point to a BaseStorage subclass, got {name!r}."
+        raise ImproperlyConfigured(msg)
     return storage_class()
 
 
@@ -90,6 +103,7 @@ class TelegramBot:
         max_retries: int | None = None,
         loop: AbstractEventLoop | None = None,
     ) -> None:
+        """Record the overrides; nothing aiogram or Redis owns is built here."""
         self._max_retries = max_retries
         self._loop = loop
         self._bot: Bot | None = None
@@ -123,12 +137,14 @@ class TelegramBot:
 
     @property
     def max_retries(self) -> int:
+        """How many rate-limited attempts a send gets before it is given up on."""
         if self._max_retries is not None:
             return self._max_retries
         return int(conf["MAX_RETRIES"])
 
     @property
     def loop(self) -> AbstractEventLoop:
+        """The event loop every send and the dispatcher run on."""
         if self._loop is None:
             # two first sends from different web threads would otherwise each
             # build one, and loop_lock would then serialize nothing: the two
@@ -140,10 +156,12 @@ class TelegramBot:
 
     @property
     def bot(self) -> Bot:
+        """The aiogram ``Bot``, which is the first thing that needs a token."""
         if self._bot is None:
             token = conf["TOKEN"]
             if not token:
-                raise ImproperlyConfigured(f"{SETTINGS_NAME}['TOKEN'] is required to talk to Telegram.")
+                msg = f"{SETTINGS_NAME}['TOKEN'] is required to talk to Telegram."
+                raise ImproperlyConfigured(msg)
             with self._build_guard:
                 if self._bot is None:
                     self._bot = Bot(token=token, default=build_default_properties())
@@ -151,6 +169,7 @@ class TelegramBot:
 
     @property
     def dispatcher(self) -> Dispatcher:
+        """The aiogram ``Dispatcher``, holding the configured FSM storage."""
         if self._dispatcher is None:
             # two concurrent first requests would otherwise build one each, and
             # the router would attach to whichever was discarded
@@ -165,7 +184,8 @@ class TelegramBot:
         return self._router
 
     @property
-    def redis_conn(self) -> Any:
+    def redis_conn(self) -> Redis:
+        """The connection every part of this package shares, opened on first use."""
         return get_redis()
 
     @property
@@ -200,7 +220,7 @@ class TelegramBot:
 
         self.loop.run_until_complete(poll())
 
-    def feed_update(self, update: Any) -> None:
+    def feed_update(self, update: Update) -> None:
         """Hand one update to the dispatcher and wait for the handlers.
 
         Webhook mode calls this from a request thread. It waits rather than
@@ -287,9 +307,7 @@ class TelegramBot:
                     if self.rate_limiter is not None:
                         await self.rate_limiter.acquire(call_kwargs.get("chat_id"))
                     await getattr(self.bot, function)(**call_kwargs)
-                    logger.info("message sent", extra={"tg_function": function})
-                    return
-                except exceptions.TelegramRetryAfter as error:
+                except exceptions.TelegramRetryAfter as error:  # noqa: PERF203 - retrying is what the loop is for
                     last_error = error
                     logger.warning(
                         "rate limited by telegram",
@@ -305,6 +323,9 @@ class TelegramBot:
                     logger.exception("send failed", extra={"tg_function": function})
                     if conf["RAISE_EXCEPTION"]:
                         raise
+                    return
+                else:
+                    logger.info("message sent", extra={"tg_function": function})
                     return
 
             # exhausting the retries used to return silently
@@ -331,6 +352,7 @@ class TelegramBot:
 
     @staticmethod
     def _log_task_failure(task: "asyncio.Task[None]") -> None:
+        """Report what a finished send raised, since nobody awaits these tasks."""
         if task.cancelled():
             return
         error = task.exception()
@@ -400,7 +422,7 @@ class TelegramBot:
             loop.call_soon_threadsafe(start)
         except RuntimeError:
             coroutine.close()
-            logger.error("send dropped: the event loop is closed")
+            logger.exception("send dropped: the event loop is closed")
 
     def _drain(self, timeout: float) -> None:
         """Let scheduled sends finish, cancelling whatever outlasts the timeout."""
@@ -444,70 +466,72 @@ class TelegramBot:
             conf["REDIS_MESSAGES_KEY"],
             get_serializer().dumps({"function": function, **kwargs}),
         )
-        if conf["DELIVERY"] == KEYSPACE_DELIVERY:
+        if conf["DELIVERY"] == DeliveryKind.KEYSPACE:
             connection.set(conf["REDIS_EXP_KEY"], "1", ex=conf["REDIS_EXP_TIME"])
 
     def message(self, *args: Any, **kwargs: Any) -> CallbackType:
-        """Decorator for the 'message' observer."""
+        """Return a decorator registering a handler for the 'message' observer."""
         return self._add_router(*args, event_name="message", **kwargs)
 
     def edited_message(self, *args: Any, **kwargs: Any) -> CallbackType:
-        """Decorator for the 'edited_message' observer."""
+        """Return a decorator registering a handler for the 'edited_message' observer."""
         return self._add_router(*args, event_name="edited_message", **kwargs)
 
     def channel_post(self, *args: Any, **kwargs: Any) -> CallbackType:
-        """Decorator for the 'channel_post' observer."""
+        """Return a decorator registering a handler for the 'channel_post' observer."""
         return self._add_router(*args, event_name="channel_post", **kwargs)
 
     def edited_channel_post(self, *args: Any, **kwargs: Any) -> CallbackType:
-        """Decorator for the 'edited_channel_post' observer."""
+        """Return a decorator registering a handler for the 'edited_channel_post' observer."""
         return self._add_router(*args, event_name="edited_channel_post", **kwargs)
 
     def inline_query(self, *args: Any, **kwargs: Any) -> CallbackType:
-        """Decorator for the 'inline_query' observer."""
+        """Return a decorator registering a handler for the 'inline_query' observer."""
         return self._add_router(*args, event_name="inline_query", **kwargs)
 
     def chosen_inline_result(self, *args: Any, **kwargs: Any) -> CallbackType:
-        """Decorator for the 'chosen_inline_result' observer."""
+        """Return a decorator registering a handler for the 'chosen_inline_result' observer."""
         return self._add_router(*args, event_name="chosen_inline_result", **kwargs)
 
     def callback_query(self, *args: Any, **kwargs: Any) -> CallbackType:
-        """Decorator for the 'callback_query' observer."""
+        """Return a decorator registering a handler for the 'callback_query' observer."""
         return self._add_router(*args, event_name="callback_query", **kwargs)
 
     def shipping_query(self, *args: Any, **kwargs: Any) -> CallbackType:
-        """Decorator for the 'shipping_query' observer."""
+        """Return a decorator registering a handler for the 'shipping_query' observer."""
         return self._add_router(*args, event_name="shipping_query", **kwargs)
 
     def pre_checkout_query(self, *args: Any, **kwargs: Any) -> CallbackType:
-        """Decorator for the 'pre_checkout_query' observer."""
+        """Return a decorator registering a handler for the 'pre_checkout_query' observer."""
         return self._add_router(*args, event_name="pre_checkout_query", **kwargs)
 
     def poll(self, *args: Any, **kwargs: Any) -> CallbackType:
-        """Decorator for the 'poll' observer."""
+        """Return a decorator registering a handler for the 'poll' observer."""
         return self._add_router(*args, event_name="poll", **kwargs)
 
     def poll_answer(self, *args: Any, **kwargs: Any) -> CallbackType:
-        """Decorator for the 'poll_answer' observer."""
+        """Return a decorator registering a handler for the 'poll_answer' observer."""
         return self._add_router(*args, event_name="poll_answer", **kwargs)
 
     def my_chat_member(self, *args: Any, **kwargs: Any) -> CallbackType:
-        """Decorator for the 'my_chat_member' observer."""
+        """Return a decorator registering a handler for the 'my_chat_member' observer."""
         return self._add_router(*args, event_name="my_chat_member", **kwargs)
 
     def chat_member(self, *args: Any, **kwargs: Any) -> CallbackType:
-        """Decorator for the 'chat_member' observer."""
+        """Return a decorator registering a handler for the 'chat_member' observer."""
         return self._add_router(*args, event_name="chat_member", **kwargs)
 
     def chat_join_request(self, *args: Any, **kwargs: Any) -> CallbackType:
-        """Decorator for the 'chat_join_request' observer."""
+        """Return a decorator registering a handler for the 'chat_join_request' observer."""
         return self._add_router(*args, event_name="chat_join_request", **kwargs)
 
     def error(self, *args: Any, **kwargs: Any) -> CallbackType:
-        """Decorator for the 'error' observer."""
+        """Return a decorator registering a handler for the 'error' observer."""
         return self._add_router(*args, event_name="error", **kwargs)
 
     def _add_router(self, *args: Any, event_name: str, **kwargs: Any) -> CallbackType:
+        """Build the decorator every observer method above returns."""
+
         def wrapper(callback: CallbackType) -> CallbackType:
             observer = self._router.observers[event_name]
             observer.register(callback, *args, **kwargs)
@@ -516,4 +540,5 @@ class TelegramBot:
         return wrapper
 
     def __repr__(self) -> str:
+        """Say whether the aiogram bot behind this facade has been built yet."""
         return f"<TelegramBot bot={'built' if self._bot else 'lazy'}>"
