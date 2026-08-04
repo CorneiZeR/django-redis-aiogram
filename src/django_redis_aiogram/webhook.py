@@ -97,9 +97,13 @@ def telegram_webhook(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911 - a
     try:
         payload = json.loads(request.body)
         update = Update.model_validate(payload, context={'bot': telegram})
-    except (json.JSONDecodeError, UnicodeDecodeError, ValidationError, TypeError):
-        # not something Telegram sent, or not something this aiogram understands
-        logger.exception('webhook could not read an update')
+    except (json.JSONDecodeError, UnicodeDecodeError, ValidationError, TypeError) as error:
+        # the body is whoever posted it, so the type is all that goes in the log:
+        # a traceback here would spread unvalidated input through the handlers
+        logger.warning(
+            'webhook could not read an update',
+            extra={'tg_error': type(error).__name__},
+        )
         return HttpResponse(status=400)
 
     try:

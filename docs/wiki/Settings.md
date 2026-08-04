@@ -59,6 +59,18 @@ def default_kwargs(function: str) -> dict:
     return {'send_photo': {'caption': 'Photo'}}.get(function, {})
 ```
 
+## Updates
+
+These decide how updates reach the bot. They have nothing to do with the queue,
+which carries outbound messages in both modes — see **[[Webhook]]**.
+
+| Setting | Default | Description |
+| ------- | ------- | ----------- |
+| `MODE` | `'polling'` | Where updates come from: `'polling'` or `'webhook'` |
+| `WEBHOOK_URL` | `''` | Where Telegram posts updates; required when `MODE` is `'webhook'` |
+| `WEBHOOK_SECRET` | `''` | Required with `WEBHOOK_URL`; the view compares it with the header Telegram echoes |
+| `WEBHOOK_ALLOWED_UPDATES` | `()` | Update types to receive; empty means Telegram's default set |
+
 ## Queue
 
 | Setting | Default | Description |
@@ -69,10 +81,6 @@ def default_kwargs(function: str) -> dict:
 | `BLPOP_TIMEOUT` | `5` | How often the consumer checks for shutdown |
 | `HEARTBEAT_INTERVAL` | `10` | Seconds between the consumer's reports; the key lives three times as long |
 | `HEALTHCHECK_MAX_QUEUE` | `0` | Longest queue still considered healthy; the check fails only above it, and `0` disables it |
-| `MODE` | `'polling'` | Where updates come from: `'polling'` or `'webhook'` |
-| `WEBHOOK_URL` | `''` | Where Telegram posts updates; required when `MODE` is `'webhook'` |
-| `WEBHOOK_SECRET` | `''` | Required with `WEBHOOK_URL`; the view compares it with the header Telegram echoes |
-| `WEBHOOK_ALLOWED_UPDATES` | `()` | Update types to receive; empty means Telegram's default set |
 | `SERIALIZER` | `'json'` | `'json'` or `'pickle'` — see **[[Serialization]]** |
 | `ALLOW_PICKLE` | `False` | Migration-only opt-in: `loads()` unpickles without restriction, so enable it for the upgrade window and only on a queue nothing untrusted can write |
 | `REDIS_EXP_KEY` | `'TELEGRAM_BOT_EXP'` | `keyspace` delivery only |

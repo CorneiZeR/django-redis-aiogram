@@ -96,6 +96,7 @@ def test_routing_through_a_dispatcher():
 def test_a_catch_all_registered_earlier_swallows_the_update():
     """The ordering caveat on the page — tests/fake_app holds a catch-all."""
     seen = []
+    before = list(bot.router.observers['message'].handlers)
 
     @bot.message(F.text == '/late')
     async def late(message):  # pragma: no cover - the point is that it is not called
@@ -104,9 +105,19 @@ def test_a_catch_all_registered_earlier_swallows_the_update():
     dispatcher = Dispatcher()
     dispatcher.include_router(bot.router)
 
-    asyncio.run(dispatcher.feed_update(Bot(token='42:x'), types.Update(update_id=2, message=a_message('/late'))))
+    observers = bot.router.observers['message'].handlers
+    try:
+        asyncio.run(dispatcher.feed_update(Bot(token='42:x'), types.Update(update_id=2, message=a_message('/late'))))
 
-    assert seen == [], 'a later handler received an update the catch-all should have taken'
+        assert seen == [], 'a later handler received an update the catch-all should have taken'
+    finally:
+        # bot.router is the shared singleton. A handler left registered would
+        # answer updates in every test after this one, and a router left
+        # attached makes the next include_router() raise
+        observers[:] = [handler for handler in observers if handler.callback is not late]
+        bot.router._parent_router = None  # the public setter refuses None
+
+    assert observers == before, 'the recipe left the shared router changed'
 
 
 @override_settings(TELEGRAM_BOT={'DELIVERY': 'blpop'})
@@ -123,7 +134,7 @@ def test_draining_the_queue_without_a_thread(redis_server):
 
 
 PAGE = pathlib.Path(__file__).resolve().parent.parent / 'docs' / 'wiki' / 'Testing.md'
-SNIPPETS = re.findall(r'```python\n(.*?)```', PAGE.read_text(), re.DOTALL)
+SNIPPETS = re.findall(r'```python\n(.*?)```', PAGE.read_text(encoding='utf-8'), re.DOTALL)
 
 
 def imported_from_the_package(tree: ast.Module) -> dict[str, object]:
@@ -178,7 +189,7 @@ def test_every_package_attribute_a_snippet_uses_exists(snippet):
 
 def test_the_page_documents_every_recipe_here():
     """A recipe that leaves the page should leave this file with it."""
-    text = PAGE.read_text()
+    text = PAGE.read_text(encoding='utf-8')
     for needle in (
         'fakeredis',
         'django_redis_aiogram.client.get_redis',
@@ -193,7 +204,7 @@ def test_the_page_documents_every_recipe_here():
 @pytest.mark.parametrize('setting', ['FSM_STORAGE', 'ENABLED'])
 def test_the_page_explains_the_test_settings(setting):
     """Both decisions a reader has to make before writing a test."""
-    assert setting in PAGE.read_text()
+    assert setting in PAGE.read_text(encoding='utf-8')
 
 
 class RecordingSession(BaseSession):

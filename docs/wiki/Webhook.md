@@ -51,6 +51,9 @@ mode that worker no longer polls.
 **1. Configure it.**
 
 ```python
+# settings.py
+import os
+
 TELEGRAM_BOT = {
     'TOKEN': os.environ['TELEGRAM_BOT_TOKEN'],
     'REDIS_URL': os.environ['REDIS_URL'],
@@ -149,5 +152,6 @@ the dispatcher. Redis carries outbound messages only, in both modes.
 ## Health
 
 `tgbot_healthcheck` reads the consumer's heartbeat, so in webhook mode it
-answers for the `--no-polling` worker rather than for the web process. See
+answers for the `start_tgbot` worker rather than for the web process — the
+worker still runs the queue consumer, it just does not poll. See
 **[[Deployment]]**.

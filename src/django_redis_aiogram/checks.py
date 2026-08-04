@@ -13,7 +13,6 @@ from dataclasses import dataclass, fields
 from functools import partial
 from typing import Any
 
-from aiogram.fsm.storage.base import BaseStorage
 from django.core.checks import CheckMessage, Error
 from django.core.checks import Warning as CheckWarning
 from django.core.exceptions import ImproperlyConfigured
@@ -143,6 +142,9 @@ def _importable_storage(key: str) -> list[Problem]:
         return []
     if '.' not in value:
         return [Problem(f"must be 'redis', 'memory', or a dotted path, got {value!r}.")]
+    # deferred like the other aiogram imports: a disabled boot must not pay for it
+    from aiogram.fsm.storage.base import BaseStorage  # noqa: PLC0415 - as above
+
     try:
         storage = import_string(value)
     except ImportError as error:
@@ -258,13 +260,22 @@ def _known_keys(_key: str) -> list[Problem]:
     ]
 
 
+def _bot_is_enabled() -> bool:
+    """Whether the bot is on, coerced the way startup and sending coerce it."""
+    try:
+        return coerce_bool(conf['ENABLED'], f"{SETTINGS_NAME}['ENABLED']")
+    except ImproperlyConfigured:
+        # unreadable is E001's finding; assume on, so the credential warnings show
+        return True
+
+
 def _filled_in_when_enabled(key: str, *, hint: str) -> list[Problem]:
     """Warn, never error, when an enabled bot has nothing to connect with.
 
     A project may legitimately boot without credentials — during migrations or
     image builds — so this must not be able to fail ``manage.py check``.
     """
-    if not conf['ENABLED'] or str(conf.get(key) or '').strip():
+    if not _bot_is_enabled() or str(conf.get(key) or '').strip():
         return []
     return [Problem('is empty while the bot is enabled.', hint=hint)]
 

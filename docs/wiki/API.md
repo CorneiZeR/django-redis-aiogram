@@ -6,14 +6,22 @@ The shared instance is what you normally use:
 from django_redis_aiogram import bot
 ```
 
-`bot` is a `TelegramBot`. Building one is cheap and needs no credentials —
-everything expensive appears on first use — so importing it anywhere is safe,
-including in a process that never talks to Telegram.
+`bot` is a `TelegramBot`. Building one needs no credentials — everything that
+does appears on first use — so importing it anywhere is safe, including in a
+process that never talks to Telegram.
 
-The package import itself costs about a millisecond: aiogram and the pydantic
-stack under it (~900 ms) load on the first *use* of the bot, not on import. A
-process with `ENABLED=0` — a migration container, CI — never loads them at
-all.
+`import django_redis_aiogram` costs about a millisecond, because the package
+resolves its exports on attribute access. Naming `bot` is what loads aiogram and
+the pydantic stack under it (~900 ms), so `from django_redis_aiogram import bot`
+pays that once, at the moment of import. Put it in the modules that send —
+router modules, the views and tasks that call `bot.send()` — and a process that
+imports none of them never loads aiogram at all.
+
+`ENABLED=0` covers the package's own boot: no autodiscover, so no `tg_router`
+module is imported, and no checks are registered. It does not un-import
+anything. A module that names `bot` at import time still loads aiogram in a
+disabled process — the send is a no-op, the import is not free. Move it inside
+the function if that matters.
 
 ## What the instance holds
 

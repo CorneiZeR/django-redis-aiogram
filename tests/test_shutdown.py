@@ -233,10 +233,17 @@ def test_shutdown_leaves_tasks_it_does_not_own_alone():
         loop.call_soon_threadsafe(create_foreign_task, loop)
         assert created.wait(5), 'the foreign task was never created'
 
+    task = foreign[0]
+    cancels = []
+    original_cancel = task.cancel
+    # spied rather than inferred: a stopped loop reports nothing as cancelled
+    task.cancel = lambda *args, **kwargs: cancels.append(True) or original_cancel(*args, **kwargs)  # type: ignore[method-assign]
+
     instance._bot = stub_bot()
     instance.close(drain_timeout=0.1)
 
-    assert not foreign[0].cancelled(), 'shutdown cancelled a task belonging to someone else'
+    assert cancels == [], 'shutdown cancelled a task belonging to someone else'
+    assert not task.cancelled()
 
 
 @override_settings(TELEGRAM_BOT=SETTINGS)

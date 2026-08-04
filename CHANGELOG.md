@@ -73,13 +73,18 @@ to `DEFAULT_BOT_PROPERTIES`. See the upgrade notes in the README.
   `DjangoRedisAiogramError` catches everything it raises;
   `SerializationError` and `UnknownApiMethodError` are the two a consumer is
   likely to name, and both keep their old import paths and base classes.
-- Queued payloads may only name a Telegram API method aiogram exposes. A
-  payload naming anything else is refused when queued and dropped by the
-  consumer, so whoever can write to Redis cannot reach `download_file` or the
-  token.
-- Importing the package costs about a millisecond: aiogram and the pydantic
-  stack under it load on first use of the bot, and a process with `ENABLED=0`
-  never loads them at all.
+- Queued payloads may only name a Telegram API method aiogram exposes, and not
+  `set_webhook`, `delete_webhook`, `log_out` or `close` — those administer the
+  deployment rather than send. A payload naming anything else is refused when
+  queued and dropped by the consumer, so whoever can write to Redis cannot
+  reach `download_file` or the token.
+- `import django_redis_aiogram` costs about a millisecond. Naming `bot` is what
+  loads aiogram and the pydantic stack under it, and `ENABLED=0` keeps the
+  package's own boot from naming it: no autodiscover, so no `tg_router` module
+  is imported, and no checks are registered. A migration container or a CI run
+  that imports nothing which sends never loads aiogram at all. The
+  `telegram_bot` shim resolves its exports the same way, so a project still on
+  the 1.x name pays for aiogram only where it sends.
 
 ### Fixed
 
@@ -156,9 +161,9 @@ to `DEFAULT_BOT_PROPERTIES`. See the upgrade notes in the README.
 
 - Test suite covering lazy import, the `ENABLED` flag, serialization
   round-trips, delivery, checks and the shim.
-- CI across Python 3.10–3.13 and Django 5.2/6.0 with ruff, mypy and pytest,
-  plus a job pinning the lowest supported dependency versions and a
-  non-blocking one on Python 3.14.
+- CI across Python 3.10–3.14 and Django 5.2/6.0 with ruff, mypy and pytest,
+  plus a job pinning the lowest supported dependency versions. Every version the
+  package advertises has to pass before a merge.
 - Releases publish to PyPI through Trusted Publishing.
 - Dependabot, issue and pull request templates, `CONTRIBUTING.md`,
   `SECURITY.md`.

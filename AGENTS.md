@@ -35,9 +35,12 @@ pip install -e '.[dev]'
 ruff check . && ruff format --check . && mypy && python -m pytest -q
 ```
 
-Those four are exactly what CI gates on. `pytest` needs no Redis and no token.
+Those four gate every pull request. `pytest` needs no Redis and no token.
 
-Two more suites exist and are not part of that loop:
+CI also runs the two below — integration against a real Redis service, and the
+smoke install — so a change that only passes the loop above can still fail the
+build. Run them locally when you touch delivery, packaging or the public
+surface:
 
 ```shell
 DJANGO_REDIS_AIOGRAM_TEST_REDIS_URL=redis://localhost:6399/0 python -m pytest -m integration
@@ -91,7 +94,8 @@ and vice versa.
 ## Documentation
 
 Wiki pages live in `docs/wiki/` and are edited in the same pull request as the
-code they describe. Links are `[[Page-Name|Link text]]`, page first;
+code they describe. Links are `[[Page-Name]]`, or `[[Page-Name|Link text]]`
+with the page first when the label differs;
 `tests/test_wiki.py` checks that every link resolves, that the sidebar lists
 every page, and that the README's wiki links are not stale. Configuration
 examples in the docs are executed by `tests/test_docs_examples.py` and

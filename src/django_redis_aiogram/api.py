@@ -15,11 +15,17 @@ from aiogram import Bot
 
 from django_redis_aiogram.exceptions import UnknownApiMethodError
 
+#: API methods a queued payload must never reach. They are administrative, not
+#: sends: set_webhook would point updates at someone else's URL, and log_out or
+#: close ends the session for the whole deployment.
+DENIED_METHODS = frozenset({'set_webhook', 'delete_webhook', 'log_out', 'close'})
+
 
 def _api_methods() -> frozenset[str]:
     """Return the Bot attributes that correspond to a Telegram API method."""
     api = {re.sub(r'(?<!^)(?=[A-Z])', '_', name).lower() for name in aiogram.methods.__all__}
-    return frozenset(api & {name for name in dir(Bot) if not name.startswith('_')})
+    public = {name for name in dir(Bot) if not name.startswith('_')}
+    return frozenset(api & public) - DENIED_METHODS
 
 
 API_METHODS = _api_methods()

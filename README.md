@@ -64,9 +64,10 @@ bot.send(chat_id=CHAT_ID, text='Order approved')
 python manage.py start_tgbot
 ```
 
-A router module, a call, and one process running the bot. Everything else —
-webhooks instead of polling, rate limits, per-process opt-out, healthchecks — is
-configuration, and it is documented rather than required.
+A router module, a call, and one process running the bot. Everything else — rate
+limits, per-process opt-out, healthchecks — is configuration, and it is
+documented rather than required. Webhook mode is the one alternative that also
+asks for a URL route; [Webhook](../../wiki/Webhook) has the four steps.
 
 ## Documentation
 

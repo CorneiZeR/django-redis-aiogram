@@ -46,9 +46,9 @@ other half — it builds the wheel, installs it into a throwaway project and
 checks that Django boots with no credentials at all.
 
 CI splits those up: `ruff`, `ruff format` and `mypy` run once on Python 3.13,
-while `pytest` runs across Python 3.10–3.13 × Django 5.2/6.0, plus a job pinning
-the lowest supported versions of every dependency. Python 3.14 runs too but
-cannot block a merge, since its dependency wheels still lag.
+while `pytest` runs across Python 3.10–3.14 × Django 5.2/6.0, plus a job pinning
+the lowest supported versions of every dependency. Every version the package
+advertises has to pass before a merge.
 
 ## What the tests care about
 
@@ -90,7 +90,8 @@ repositories. `.coderabbit.yaml` points it at the invariants above.
 
 Wiki pages live in `docs/wiki/`. Edit them there, in the same pull request as
 the code they describe; a push to `master` publishes them to the wiki. Links
-between pages use `[[Page-Name|Link text]]` — the page comes first — and tests
+between pages use `[[Page-Name]]`, or `[[Page-Name|Link text]]` when the label
+differs from the page name — the page always comes first — and tests
 check that they all resolve and that none is written the other way round.
 
 ## Commits
