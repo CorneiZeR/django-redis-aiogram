@@ -12,13 +12,15 @@ import re
 
 from aiogram import Bot
 
+from django_redis_aiogram.exceptions import UnknownApiMethodError
+
 
 def _api_methods() -> frozenset[str]:
     """Bot attributes that correspond to a Telegram API method."""
     import aiogram.methods
 
-    api = {re.sub(r'(?<!^)(?=[A-Z])', '_', name).lower() for name in aiogram.methods.__all__}
-    return frozenset(api & {name for name in dir(Bot) if not name.startswith('_')})
+    api = {re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower() for name in aiogram.methods.__all__}
+    return frozenset(api & {name for name in dir(Bot) if not name.startswith("_")})
 
 
 API_METHODS = _api_methods()
@@ -27,9 +29,5 @@ API_METHODS = _api_methods()
 def check_function(function: str) -> str:
     """Return ``function`` if it names a Telegram API method, else raise."""
     if function not in API_METHODS:
-        raise ValueError(
-            f'{function!r} is not a Telegram API method. Queued payloads may only '
-            f'name one of the {len(API_METHODS)} methods aiogram exposes for the '
-            f'Bot API; see the Serialization page.'
-        )
+        raise UnknownApiMethodError(function, len(API_METHODS))
     return function

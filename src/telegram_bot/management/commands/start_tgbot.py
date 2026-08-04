@@ -2,4 +2,4 @@
 
 from django_redis_aiogram.management.commands.start_tgbot import Command
 
-__all__ = ('Command',)
+__all__ = ("Command",)

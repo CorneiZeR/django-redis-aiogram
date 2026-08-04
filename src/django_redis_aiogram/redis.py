@@ -17,11 +17,9 @@ def get_redis() -> Redis:
     if _connection is None:
         with _lock:
             if _connection is None:
-                url = conf['REDIS_URL']
+                url = conf["REDIS_URL"]
                 if not url:
-                    raise ImproperlyConfigured(
-                        f"{SETTINGS_NAME}['REDIS_URL'] is required to talk to Redis."
-                    )
+                    raise ImproperlyConfigured(f"{SETTINGS_NAME}['REDIS_URL'] is required to talk to Redis.")
                 _connection = Redis.from_url(url)
     return _connection
 
@@ -37,12 +35,12 @@ def reset_redis() -> None:
 
 def as_bytes(value: bytes | str) -> bytes:
     """Redis hands back str when the URL enables decode_responses."""
-    return value if isinstance(value, bytes) else value.encode('utf-8')
+    return value if isinstance(value, bytes) else value.encode("utf-8")
 
 
 def get_db_index() -> int:
     """Return the database number encoded in REDIS_URL."""
-    return int(get_redis().connection_pool.connection_kwargs.get('db', 0) or 0)
+    return int(get_redis().connection_pool.connection_kwargs.get("db", 0) or 0)
 
 
 class RedisProxy:
@@ -56,8 +54,8 @@ class RedisProxy:
         return getattr(get_redis(), item)
 
     def __repr__(self) -> str:
-        state = 'connected' if _connection is not None else 'not connected'
-        return f'<RedisProxy {state}>'
+        state = "connected" if _connection is not None else "not connected"
+        return f"<RedisProxy {state}>"
 
 
 redis_conn = RedisProxy()
@@ -68,4 +66,4 @@ def _reset_on_setting_change(sender: Any, setting: str, **kwargs: Any) -> None:
         reset_redis()
 
 
-setting_changed.connect(_reset_on_setting_change, dispatch_uid='django_redis_aiogram.redis')
+setting_changed.connect(_reset_on_setting_change, dispatch_uid="django_redis_aiogram.redis")

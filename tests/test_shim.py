@@ -12,50 +12,46 @@ import pytest
 import django_redis_aiogram
 
 SHIM_MODULES = [
-    'telegram_bot.telegram_bot',
-    'telegram_bot.settings',
-    'telegram_bot.redis',
-    'telegram_bot.defaults',
-    'telegram_bot.checks',
-    'telegram_bot.signals',
-    'telegram_bot.apps',
-    'telegram_bot.management.commands.start_tgbot',
+    "telegram_bot.telegram_bot",
+    "telegram_bot.settings",
+    "telegram_bot.redis",
+    "telegram_bot.defaults",
+    "telegram_bot.checks",
+    "telegram_bot.signals",
+    "telegram_bot.apps",
+    "telegram_bot.management.commands.start_tgbot",
 ]
 
 
 def test_importing_the_shim_warns():
-    stale = [
-        name
-        for name in list(sys.modules)
-        if name == 'telegram_bot' or name.startswith('telegram_bot.')
-    ]
+    stale = [name for name in list(sys.modules) if name == "telegram_bot" or name.startswith("telegram_bot.")]
     for name in stale:
         del sys.modules[name]
-    with pytest.warns(DeprecationWarning, match='django_redis_aiogram'):
-        importlib.import_module('telegram_bot')
+    with pytest.warns(DeprecationWarning, match="django_redis_aiogram"):
+        importlib.import_module("telegram_bot")
 
 
 def test_the_singleton_is_shared():
     """A second bot instance would silently own a different router."""
     with warnings.catch_warnings():
-        warnings.simplefilter('ignore', DeprecationWarning)
+        warnings.simplefilter("ignore", DeprecationWarning)
         import telegram_bot
 
     assert telegram_bot.bot is django_redis_aiogram.bot
     assert telegram_bot.conf is django_redis_aiogram.conf
 
 
-@pytest.mark.parametrize('name', SHIM_MODULES)
+@pytest.mark.parametrize("name", SHIM_MODULES)
 def test_legacy_module_paths_resolve(name):
     with warnings.catch_warnings():
-        warnings.simplefilter('ignore', DeprecationWarning)
+        warnings.simplefilter("ignore", DeprecationWarning)
         module = importlib.import_module(name)
     assert module is not None
 
 
 def test_legacy_class_import():
     with warnings.catch_warnings():
-        warnings.simplefilter('ignore', DeprecationWarning)
+        warnings.simplefilter("ignore", DeprecationWarning)
         from telegram_bot.telegram_bot import TelegramBot
 
     assert TelegramBot is django_redis_aiogram.TelegramBot
@@ -63,7 +59,7 @@ def test_legacy_class_import():
 
 def test_legacy_command_import():
     with warnings.catch_warnings():
-        warnings.simplefilter('ignore', DeprecationWarning)
+        warnings.simplefilter("ignore", DeprecationWarning)
         from telegram_bot.management.commands.start_tgbot import Command
 
     from django_redis_aiogram.management.commands.start_tgbot import Command as Original
@@ -104,22 +100,20 @@ def test_installed_apps_entry_still_boots():
         assert 'check_settings' in registered, registered
         print('ok')
     """)
-    result = subprocess.run(
-        [sys.executable, '-c', script], capture_output=True, text=True, check=False
-    )
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
-    assert 'ok' in result.stdout
+    assert "ok" in result.stdout
 
 
 def test_legacy_app_config_targets_the_old_label():
     with warnings.catch_warnings():
-        warnings.simplefilter('ignore', DeprecationWarning)
+        warnings.simplefilter("ignore", DeprecationWarning)
         from telegram_bot.apps import TelegramBotAppConfig
 
     from django_redis_aiogram.apps import TelegramBotAppConfig as Base
 
     assert issubclass(TelegramBotAppConfig, Base)
-    assert TelegramBotAppConfig.name == 'telegram_bot'
+    assert TelegramBotAppConfig.name == "telegram_bot"
 
 
 def test_both_app_labels_can_be_installed_together():
@@ -154,11 +148,9 @@ def test_both_app_labels_can_be_installed_together():
         assert len(registered) == 1, registered
         print('ok')
     """)
-    result = subprocess.run(
-        [sys.executable, '-c', script], capture_output=True, text=True, check=False
-    )
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
-    assert 'ok' in result.stdout
+    assert "ok" in result.stdout
 
 
 def test_the_package_ships_type_information():
@@ -171,14 +163,14 @@ def test_the_package_ships_type_information():
     import telegram_bot
 
     for package in (django_redis_aiogram, telegram_bot):
-        marker = pathlib.Path(str(package.__file__)).parent / 'py.typed'
-        assert marker.is_file(), f'{package.__name__} ships no py.typed'
+        marker = pathlib.Path(str(package.__file__)).parent / "py.typed"
+        assert marker.is_file(), f"{package.__name__} ships no py.typed"
 
 
-@pytest.mark.parametrize('name', ['start_tgbot', 'tgbot_healthcheck', 'tgbot_webhook'])
+@pytest.mark.parametrize("name", ["start_tgbot", "tgbot_healthcheck", "tgbot_webhook"])
 def test_every_management_command_is_reachable_under_the_old_name(name):
     """A 1.x project has `telegram_bot` in INSTALLED_APPS, so it looks there."""
-    shim = importlib.import_module(f'telegram_bot.management.commands.{name}')
-    real = importlib.import_module(f'django_redis_aiogram.management.commands.{name}')
+    shim = importlib.import_module(f"telegram_bot.management.commands.{name}")
+    real = importlib.import_module(f"django_redis_aiogram.management.commands.{name}")
 
     assert shim.Command is real.Command

@@ -21,14 +21,14 @@ KEY = StorageKey(bot_id=42, chat_id=1, user_id=1)
 
 
 def test_state_written_before_a_restart_is_there_after(server, redis_url):
-    with override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': redis_url}):
+    with override_settings(TELEGRAM_BOT={"TOKEN": "42:x", "REDIS_URL": redis_url}):
         before = TelegramBot()
         storage = before.dispatcher.storage
-        assert isinstance(storage, RedisStorage), 'redis is the documented default'
+        assert isinstance(storage, RedisStorage), "redis is the documented default"
 
         async def write() -> None:
-            await storage.set_state(KEY, 'awaiting_photo')
-            await storage.set_data(KEY, {'order': 7})
+            await storage.set_state(KEY, "awaiting_photo")
+            await storage.set_data(KEY, {"order": 7})
 
         before.loop.run_until_complete(write())
         before.close()  # the whole container goes away
@@ -44,25 +44,23 @@ def test_state_written_before_a_restart_is_there_after(server, redis_url):
         state, data = after.loop.run_until_complete(read())
         after.close()
 
-    assert state == 'awaiting_photo', 'the dialogue was reset by the restart'
-    assert data == {'order': 7}
+    assert state == "awaiting_photo", "the dialogue was reset by the restart"
+    assert data == {"order": 7}
 
 
 def test_memory_storage_loses_it_which_is_why_redis_is_the_default(server, redis_url):
     """The 1.x behaviour, kept as an option and shown to be the wrong default."""
-    with override_settings(
-        TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': redis_url, 'FSM_STORAGE': 'memory'}
-    ):
+    with override_settings(TELEGRAM_BOT={"TOKEN": "42:x", "REDIS_URL": redis_url, "FSM_STORAGE": "memory"}):
         before = TelegramBot()
         assert isinstance(before.dispatcher.storage, MemoryStorage)
-        before.loop.run_until_complete(before.dispatcher.storage.set_state(KEY, 'awaiting_photo'))
+        before.loop.run_until_complete(before.dispatcher.storage.set_state(KEY, "awaiting_photo"))
         before.close()
 
         after = TelegramBot()
         state = after.loop.run_until_complete(after.dispatcher.storage.get_state(KEY))
         after.close()
 
-    assert state is None, 'memory storage kept state across a restart, which it cannot'
+    assert state is None, "memory storage kept state across a restart, which it cannot"
 
 
 def test_closing_releases_the_storage_client(server, redis_url):
@@ -76,15 +74,15 @@ def test_closing_releases_the_storage_client(server, redis_url):
     """
 
     def addresses() -> set[str]:
-        return {str(client['addr']) for client in server.client_list()}
+        return {str(client["addr"]) for client in server.client_list()}
 
-    with override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': redis_url}):
+    with override_settings(TELEGRAM_BOT={"TOKEN": "42:x", "REDIS_URL": redis_url}):
         before = addresses()
         instance = TelegramBot()
-        instance.loop.run_until_complete(instance.dispatcher.storage.set_state(KEY, 'x'))
+        instance.loop.run_until_complete(instance.dispatcher.storage.set_state(KEY, "x"))
 
         opened = addresses() - before
-        assert opened, 'the storage never opened a connection of its own'
+        assert opened, "the storage never opened a connection of its own"
 
         instance.close()
 
@@ -93,4 +91,4 @@ def test_closing_releases_the_storage_client(server, redis_url):
             time.sleep(0.05)
 
     left_open = opened & addresses()
-    assert not left_open, f'close() left the storage connection open: {left_open}'
+    assert not left_open, f"close() left the storage connection open: {left_open}"

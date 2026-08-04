@@ -3,7 +3,7 @@
 ```python
 from django_redis_aiogram import bot
 
-bot.send(chat_id=CHAT_ID, text='hello')
+bot.send(chat_id=CHAT_ID, text="hello")
 ```
 
 `send()` picks the route: inside the bot container it calls Telegram directly,
@@ -15,8 +15,8 @@ is checked against that allowlist, so a queued payload cannot reach anything
 else on the bot:
 
 ```python
-bot.send('send_photo', chat_id=CHAT_ID, photo=URL, caption='look')
-bot.send('send_chat_action', chat_id=CHAT_ID, action='typing')
+bot.send("send_photo", chat_id=CHAT_ID, photo=URL, caption="look")
+bot.send("send_chat_action", chat_id=CHAT_ID, action="typing")
 ```
 
 ## Choosing the route yourself
@@ -38,12 +38,12 @@ from aiogram import types
 
 markup = types.InlineKeyboardMarkup(
     inline_keyboard=[
-        [types.InlineKeyboardButton(text='Approve', callback_data='approve:42')],
-        [types.InlineKeyboardButton(text='Open', web_app=types.WebAppInfo(url=URL))],
+        [types.InlineKeyboardButton(text="Approve", callback_data="approve:42")],
+        [types.InlineKeyboardButton(text="Open", web_app=types.WebAppInfo(url=URL))],
     ]
 )
 
-bot.send(chat_id=CHAT_ID, text='Review this', reply_markup=markup)
+bot.send(chat_id=CHAT_ID, text="Review this", reply_markup=markup)
 ```
 
 Keyboards survive the queue intact, including through a JSON round trip.
@@ -53,8 +53,8 @@ Keyboards survive the queue intact, including through a JSON round trip.
 `file_id` and URLs are the cheapest thing to send, and always safe to queue:
 
 ```python
-bot.send('send_photo', chat_id=CHAT_ID, photo='https://example.test/a.png')
-bot.send('send_document', chat_id=CHAT_ID, document=EXISTING_FILE_ID)
+bot.send("send_photo", chat_id=CHAT_ID, photo="https://example.test/a.png")
+bot.send("send_document", chat_id=CHAT_ID, document=EXISTING_FILE_ID)
 ```
 
 Actual uploads work too:
@@ -62,8 +62,8 @@ Actual uploads work too:
 ```python
 from aiogram.types import BufferedInputFile, FSInputFile, URLInputFile
 
-bot.send('send_document', chat_id=CHAT_ID, document=FSInputFile('/app/media/report.pdf'))
-bot.send('send_photo', chat_id=CHAT_ID, photo=BufferedInputFile(data, filename='chart.png'))
+bot.send("send_document", chat_id=CHAT_ID, document=FSInputFile("/app/media/report.pdf"))
+bot.send("send_photo", chat_id=CHAT_ID, photo=BufferedInputFile(data, filename="chart.png"))
 ```
 
 `FSInputFile` carries a path, so the file has to exist in the **bot container**
@@ -78,7 +78,7 @@ raised in your view. For direct calls, `RAISE_EXCEPTION` propagates them:
 from aiogram.exceptions import TelegramBadRequest
 
 try:
-    bot.send_raw(chat_id=CHAT_ID, text='**broken*', parse_mode='Markdown')
+    bot.send_raw(chat_id=CHAT_ID, text="**broken*", parse_mode="Markdown")
 except TelegramBadRequest:
     ...
 ```

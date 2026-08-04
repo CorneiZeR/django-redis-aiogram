@@ -14,12 +14,12 @@ import os
 
 INSTALLED_APPS = [
     ...,
-    'django_redis_aiogram',
+    "django_redis_aiogram",
 ]
 
 TELEGRAM_BOT = {
-    'TOKEN': os.environ.get('TELEGRAM_BOT_TOKEN', ''),
-    'REDIS_URL': os.environ.get('REDIS_URL', ''),
+    "TOKEN": os.environ.get("TELEGRAM_BOT_TOKEN", ""),
+    "REDIS_URL": os.environ.get("REDIS_URL", ""),
 }
 ```
 

@@ -11,13 +11,13 @@ import os
 import pytest
 
 # the marker is registered in pyproject.toml, and each module carries it itself
-REDIS_URL = os.environ.get('DJANGO_REDIS_AIOGRAM_TEST_REDIS_URL', '')
+REDIS_URL = os.environ.get("DJANGO_REDIS_AIOGRAM_TEST_REDIS_URL", "")
 
 
-@pytest.fixture(scope='session')
+@pytest.fixture(scope="session")
 def redis_url():
     if not REDIS_URL:
-        pytest.skip('set DJANGO_REDIS_AIOGRAM_TEST_REDIS_URL to run the integration suite')
+        pytest.skip("set DJANGO_REDIS_AIOGRAM_TEST_REDIS_URL to run the integration suite")
     return REDIS_URL
 
 
@@ -50,5 +50,5 @@ def server(redis_url):
 @pytest.fixture
 def version(server):
     """The server's Redis version as a tuple, for skipping what it cannot do."""
-    raw = str(server.info('server')['redis_version'])
-    return tuple(int(part) for part in raw.split('.')[:2])
+    raw = str(server.info("server")["redis_version"])
+    return tuple(int(part) for part in raw.split(".")[:2])

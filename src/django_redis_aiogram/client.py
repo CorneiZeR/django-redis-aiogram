@@ -22,16 +22,14 @@ from django_redis_aiogram.serializers import get_serializer
 from django_redis_aiogram.settings import SETTINGS_NAME, coerce_bool, conf
 from django_redis_aiogram.throttling import RateLimiter, get_rate_limiter
 
-logger = logging.getLogger('django_redis_aiogram')
+logger = logging.getLogger("django_redis_aiogram")
 
-MEMORY_STORAGE = 'memory'
-REDIS_STORAGE = 'redis'
+MEMORY_STORAGE = "memory"
+REDIS_STORAGE = "redis"
 
 # run_until_complete is not reentrant, and the loop — not the bot — is what
 # cannot be entered twice. Two bots handed the same loop must share one lock.
-_loop_locks: 'weakref.WeakKeyDictionary[AbstractEventLoop, threading.Lock]' = (
-    weakref.WeakKeyDictionary()
-)
+_loop_locks: "weakref.WeakKeyDictionary[AbstractEventLoop, threading.Lock]" = weakref.WeakKeyDictionary()
 _loop_locks_guard = threading.Lock()
 
 
@@ -49,7 +47,7 @@ def build_default_properties() -> DefaultBotProperties:
     aiogram applies these to every call, which is why unset fields carry a
     ``Default`` sentinel rather than None.
     """
-    properties = conf['DEFAULT_BOT_PROPERTIES']
+    properties = conf["DEFAULT_BOT_PROPERTIES"]
     try:
         return DefaultBotProperties(**properties)
     except TypeError as error:
@@ -58,23 +56,19 @@ def build_default_properties() -> DefaultBotProperties:
 
 def build_storage() -> BaseStorage:
     """FSM storage: 'redis', 'memory', or a dotted path to a BaseStorage."""
-    name = conf['FSM_STORAGE']
+    name = conf["FSM_STORAGE"]
     if name == MEMORY_STORAGE:
         return MemoryStorage()
     if name == REDIS_STORAGE:
-        url = str(conf['REDIS_URL'] or '').strip()
+        url = str(conf["REDIS_URL"] or "").strip()
         if not url:
-            raise ImproperlyConfigured(
-                f"{SETTINGS_NAME}['REDIS_URL'] is required for the redis FSM storage."
-            )
+            raise ImproperlyConfigured(f"{SETTINGS_NAME}['REDIS_URL'] is required for the redis FSM storage.")
         return RedisStorage.from_url(url)
 
     try:
         storage_class = import_string(name)
     except ImportError as error:
-        raise ImproperlyConfigured(
-            f"{SETTINGS_NAME}['FSM_STORAGE'] cannot be imported: {error}"
-        ) from error
+        raise ImproperlyConfigured(f"{SETTINGS_NAME}['FSM_STORAGE'] cannot be imported: {error}") from error
     if not (isinstance(storage_class, type) and issubclass(storage_class, BaseStorage)):
         raise ImproperlyConfigured(
             f"{SETTINGS_NAME}['FSM_STORAGE'] must point to a BaseStorage subclass, got {name!r}."
@@ -113,7 +107,7 @@ class TelegramBot:
     @property
     def enabled(self) -> bool:
         """Whether this process should reach Telegram or Redis at all."""
-        return coerce_bool(conf['ENABLED'], f"{SETTINGS_NAME}['ENABLED']")
+        return coerce_bool(conf["ENABLED"], f"{SETTINGS_NAME}['ENABLED']")
 
     @property
     def rate_limiter(self) -> RateLimiter | None:
@@ -123,7 +117,7 @@ class TelegramBot:
         different token gets its own.
         """
         if not self._rate_limiter_built:
-            self._rate_limiter = get_rate_limiter(str(conf['TOKEN'] or ''))
+            self._rate_limiter = get_rate_limiter(str(conf["TOKEN"] or ""))
             self._rate_limiter_built = True
         return self._rate_limiter
 
@@ -131,7 +125,7 @@ class TelegramBot:
     def max_retries(self) -> int:
         if self._max_retries is not None:
             return self._max_retries
-        return int(conf['MAX_RETRIES'])
+        return int(conf["MAX_RETRIES"])
 
     @property
     def loop(self) -> AbstractEventLoop:
@@ -147,11 +141,9 @@ class TelegramBot:
     @property
     def bot(self) -> Bot:
         if self._bot is None:
-            token = conf['TOKEN']
+            token = conf["TOKEN"]
             if not token:
-                raise ImproperlyConfigured(
-                    f"{SETTINGS_NAME}['TOKEN'] is required to talk to Telegram."
-                )
+                raise ImproperlyConfigured(f"{SETTINGS_NAME}['TOKEN'] is required to talk to Telegram.")
             with self._build_guard:
                 if self._bot is None:
                     self._bot = Bot(token=token, default=build_default_properties())
@@ -231,7 +223,7 @@ class TelegramBot:
         # waiting outside the lock, so the next request is not held up by ours
         future.result()
 
-    def send(self, function: str = 'send_message', **kwargs: Any) -> None:
+    def send(self, function: str = "send_message", **kwargs: Any) -> None:
         """Deliver a message the way this process can.
 
         Inside the bot container that means calling Telegram directly; anywhere
@@ -257,7 +249,7 @@ class TelegramBot:
                 if loop.is_running():
                     # run_until_complete and loop.close() both raise on a running
                     # loop; leaving everything in place keeps close() retryable
-                    logger.warning('skipping close: stop polling before closing the bot')
+                    logger.warning("skipping close: stop polling before closing the bot")
                     return
                 # a send from another thread may be driving this loop; the lock
                 # keeps the teardown from interleaving with it
@@ -280,11 +272,11 @@ class TelegramBot:
             # a closed bot can be built again, so this must not stick
             self._closing = False
 
-    def send_raw(self, function: str = 'send_message', **kwargs: Any) -> None:
+    def send_raw(self, function: str = "send_message", **kwargs: Any) -> None:
         """Call an aiogram bot method, retrying on Telegram rate limits."""
         check_function(function)
         if not self.enabled:
-            logger.debug('send skipped: bot disabled', extra={'tg_function': function})
+            logger.debug("send skipped: bot disabled", extra={"tg_function": function})
             return
 
         async def send() -> None:
@@ -293,40 +285,40 @@ class TelegramBot:
             while retries <= self.max_retries:
                 try:
                     if self.rate_limiter is not None:
-                        await self.rate_limiter.acquire(call_kwargs.get('chat_id'))
+                        await self.rate_limiter.acquire(call_kwargs.get("chat_id"))
                     await getattr(self.bot, function)(**call_kwargs)
-                    logger.info('message sent', extra={'tg_function': function})
+                    logger.info("message sent", extra={"tg_function": function})
                     return
                 except exceptions.TelegramRetryAfter as error:
                     last_error = error
                     logger.warning(
-                        'rate limited by telegram',
+                        "rate limited by telegram",
                         extra={
-                            'tg_function': function,
-                            'tg_retry_after': error.retry_after,
-                            'tg_retries': retries,
+                            "tg_function": function,
+                            "tg_retry_after": error.retry_after,
+                            "tg_retries": retries,
                         },
                     )
                     retries += 1
                     await asyncio.sleep(error.retry_after)
                 except Exception:
-                    logger.exception('send failed', extra={'tg_function': function})
-                    if conf['RAISE_EXCEPTION']:
+                    logger.exception("send failed", extra={"tg_function": function})
+                    if conf["RAISE_EXCEPTION"]:
                         raise
                     return
 
             # exhausting the retries used to return silently
             logger.error(
-                'giving up on message',
-                extra={'tg_function': function, 'tg_max_retries': self.max_retries},
+                "giving up on message",
+                extra={"tg_function": function, "tg_max_retries": self.max_retries},
             )
-            if conf['RAISE_EXCEPTION'] and last_error is not None:
+            if conf["RAISE_EXCEPTION"] and last_error is not None:
                 raise last_error
 
-        call_kwargs = {**conf['DEFAULT_KWARGS'](function), **kwargs}
+        call_kwargs = {**conf["DEFAULT_KWARGS"](function), **kwargs}
         self._schedule(send())
 
-    def _register(self, task: 'asyncio.Task[None]') -> None:
+    def _register(self, task: "asyncio.Task[None]") -> None:
         """Track a send so :meth:`close` can wait for it.
 
         Registration happens when the task is created, not when it starts
@@ -338,12 +330,12 @@ class TelegramBot:
         task.add_done_callback(self._log_task_failure)
 
     @staticmethod
-    def _log_task_failure(task: 'asyncio.Task[None]') -> None:
+    def _log_task_failure(task: "asyncio.Task[None]") -> None:
         if task.cancelled():
             return
         error = task.exception()
         if error is not None:
-            logger.error('scheduled send failed', exc_info=error)
+            logger.error("scheduled send failed", exc_info=error)
 
     def _schedule(self, coroutine: Coroutine[Any, Any, None]) -> None:
         """Run a coroutine on the bot loop from whichever thread we are on.
@@ -355,7 +347,7 @@ class TelegramBot:
         if self._closing:
             # the loop is being torn down, so nothing would ever run this
             coroutine.close()
-            logger.error('send refused: the bot is shutting down')
+            logger.error("send refused: the bot is shutting down")
             return
 
         try:
@@ -377,7 +369,7 @@ class TelegramBot:
             # teardown while this thread waited for it
             if self._closing or loop.is_closed():
                 coroutine.close()
-                logger.error('send refused: the event loop was closed')
+                logger.error("send refused: the event loop was closed")
                 return
             if loop.is_running():
                 # decided under the lock: seen from outside it, a loop another
@@ -400,7 +392,7 @@ class TelegramBot:
             if self._closing:
                 # close() began after this was queued; the loop will not run it
                 coroutine.close()
-                logger.error('send dropped: the bot started shutting down')
+                logger.error("send dropped: the bot started shutting down")
                 return
             self._register(loop.create_task(coroutine))
 
@@ -408,7 +400,7 @@ class TelegramBot:
             loop.call_soon_threadsafe(start)
         except RuntimeError:
             coroutine.close()
-            logger.error('send dropped: the event loop is closed')
+            logger.error("send dropped: the event loop is closed")
 
     def _drain(self, timeout: float) -> None:
         """Let scheduled sends finish, cancelling whatever outlasts the timeout."""
@@ -417,7 +409,7 @@ class TelegramBot:
             return
         if loop.is_running():
             # cannot drive it from here; the caller is expected to stop polling first
-            logger.warning('skipping drain: the event loop is still running')
+            logger.warning("skipping drain: the event loop is still running")
             return
 
         # only this bot's sends: cancelling unrelated tasks on the loop is not
@@ -426,7 +418,7 @@ class TelegramBot:
         if not pending:
             return
 
-        logger.info('draining in-flight sends', extra={'tg_pending': len(pending)})
+        logger.info("draining in-flight sends", extra={"tg_pending": len(pending)})
         loop.run_until_complete(asyncio.wait(pending, timeout=timeout))
 
         dropped = [task for task in pending if not task.done()]
@@ -436,84 +428,84 @@ class TelegramBot:
             task.cancel()
         loop.run_until_complete(asyncio.gather(*dropped, return_exceptions=True))
         logger.warning(
-            'dropped in-flight sends at shutdown',
-            extra={'tg_dropped': len(dropped), 'tg_drain_timeout': timeout},
+            "dropped in-flight sends at shutdown",
+            extra={"tg_dropped": len(dropped), "tg_drain_timeout": timeout},
         )
 
-    def send_redis(self, function: str = 'send_message', **kwargs: Any) -> None:
+    def send_redis(self, function: str = "send_message", **kwargs: Any) -> None:
         """Queue a message in Redis for the bot worker to deliver."""
         check_function(function)
         if not self.enabled:
-            logger.debug('queueing skipped: bot disabled', extra={'tg_function': function})
+            logger.debug("queueing skipped: bot disabled", extra={"tg_function": function})
             return
 
         connection = get_redis()
         connection.rpush(
-            conf['REDIS_MESSAGES_KEY'],
-            get_serializer().dumps({'function': function, **kwargs}),
+            conf["REDIS_MESSAGES_KEY"],
+            get_serializer().dumps({"function": function, **kwargs}),
         )
-        if conf['DELIVERY'] == KEYSPACE_DELIVERY:
-            connection.set(conf['REDIS_EXP_KEY'], '1', ex=conf['REDIS_EXP_TIME'])
+        if conf["DELIVERY"] == KEYSPACE_DELIVERY:
+            connection.set(conf["REDIS_EXP_KEY"], "1", ex=conf["REDIS_EXP_TIME"])
 
     def message(self, *args: Any, **kwargs: Any) -> CallbackType:
         """Decorator for the 'message' observer."""
-        return self._add_router(*args, event_name='message', **kwargs)
+        return self._add_router(*args, event_name="message", **kwargs)
 
     def edited_message(self, *args: Any, **kwargs: Any) -> CallbackType:
         """Decorator for the 'edited_message' observer."""
-        return self._add_router(*args, event_name='edited_message', **kwargs)
+        return self._add_router(*args, event_name="edited_message", **kwargs)
 
     def channel_post(self, *args: Any, **kwargs: Any) -> CallbackType:
         """Decorator for the 'channel_post' observer."""
-        return self._add_router(*args, event_name='channel_post', **kwargs)
+        return self._add_router(*args, event_name="channel_post", **kwargs)
 
     def edited_channel_post(self, *args: Any, **kwargs: Any) -> CallbackType:
         """Decorator for the 'edited_channel_post' observer."""
-        return self._add_router(*args, event_name='edited_channel_post', **kwargs)
+        return self._add_router(*args, event_name="edited_channel_post", **kwargs)
 
     def inline_query(self, *args: Any, **kwargs: Any) -> CallbackType:
         """Decorator for the 'inline_query' observer."""
-        return self._add_router(*args, event_name='inline_query', **kwargs)
+        return self._add_router(*args, event_name="inline_query", **kwargs)
 
     def chosen_inline_result(self, *args: Any, **kwargs: Any) -> CallbackType:
         """Decorator for the 'chosen_inline_result' observer."""
-        return self._add_router(*args, event_name='chosen_inline_result', **kwargs)
+        return self._add_router(*args, event_name="chosen_inline_result", **kwargs)
 
     def callback_query(self, *args: Any, **kwargs: Any) -> CallbackType:
         """Decorator for the 'callback_query' observer."""
-        return self._add_router(*args, event_name='callback_query', **kwargs)
+        return self._add_router(*args, event_name="callback_query", **kwargs)
 
     def shipping_query(self, *args: Any, **kwargs: Any) -> CallbackType:
         """Decorator for the 'shipping_query' observer."""
-        return self._add_router(*args, event_name='shipping_query', **kwargs)
+        return self._add_router(*args, event_name="shipping_query", **kwargs)
 
     def pre_checkout_query(self, *args: Any, **kwargs: Any) -> CallbackType:
         """Decorator for the 'pre_checkout_query' observer."""
-        return self._add_router(*args, event_name='pre_checkout_query', **kwargs)
+        return self._add_router(*args, event_name="pre_checkout_query", **kwargs)
 
     def poll(self, *args: Any, **kwargs: Any) -> CallbackType:
         """Decorator for the 'poll' observer."""
-        return self._add_router(*args, event_name='poll', **kwargs)
+        return self._add_router(*args, event_name="poll", **kwargs)
 
     def poll_answer(self, *args: Any, **kwargs: Any) -> CallbackType:
         """Decorator for the 'poll_answer' observer."""
-        return self._add_router(*args, event_name='poll_answer', **kwargs)
+        return self._add_router(*args, event_name="poll_answer", **kwargs)
 
     def my_chat_member(self, *args: Any, **kwargs: Any) -> CallbackType:
         """Decorator for the 'my_chat_member' observer."""
-        return self._add_router(*args, event_name='my_chat_member', **kwargs)
+        return self._add_router(*args, event_name="my_chat_member", **kwargs)
 
     def chat_member(self, *args: Any, **kwargs: Any) -> CallbackType:
         """Decorator for the 'chat_member' observer."""
-        return self._add_router(*args, event_name='chat_member', **kwargs)
+        return self._add_router(*args, event_name="chat_member", **kwargs)
 
     def chat_join_request(self, *args: Any, **kwargs: Any) -> CallbackType:
         """Decorator for the 'chat_join_request' observer."""
-        return self._add_router(*args, event_name='chat_join_request', **kwargs)
+        return self._add_router(*args, event_name="chat_join_request", **kwargs)
 
     def error(self, *args: Any, **kwargs: Any) -> CallbackType:
         """Decorator for the 'error' observer."""
-        return self._add_router(*args, event_name='error', **kwargs)
+        return self._add_router(*args, event_name="error", **kwargs)
 
     def _add_router(self, *args: Any, event_name: str, **kwargs: Any) -> CallbackType:
         def wrapper(callback: CallbackType) -> CallbackType:
@@ -524,4 +516,4 @@ class TelegramBot:
         return wrapper
 
     def __repr__(self) -> str:
-        return f'<TelegramBot bot={"built" if self._bot else "lazy"}>'
+        return f"<TelegramBot bot={'built' if self._bot else 'lazy'}>"

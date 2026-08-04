@@ -48,8 +48,8 @@ to — the reader refuses pickled payloads unless told otherwise:
 
 ```python
 TELEGRAM_BOT = {
-    'SERIALIZER': 'pickle',
-    'ALLOW_PICKLE': True,
+    "SERIALIZER": "pickle",
+    "ALLOW_PICKLE": True,
 }
 ```
 
@@ -91,7 +91,7 @@ default** — unpickling queue data is code execution. If the queue still holds
 
 ```python
 TELEGRAM_BOT = {
-    'ALLOW_PICKLE': True,  # remove once the queue has drained
+    "ALLOW_PICKLE": True,  # remove once the queue has drained
 }
 ```
 
@@ -100,8 +100,8 @@ refuses would discard every message, which is what `E022` reports:
 
 ```python
 TELEGRAM_BOT = {
-    'SERIALIZER': 'pickle',
-    'ALLOW_PICKLE': True,
+    "SERIALIZER": "pickle",
+    "ALLOW_PICKLE": True,
 }
 ```
 

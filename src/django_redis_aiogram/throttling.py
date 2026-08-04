@@ -28,14 +28,14 @@ from django_redis_aiogram.defaults import DEFAULTS
 Clock = Callable[[], float]
 Sleeper = Callable[[float], Awaitable[None]]
 
-OVERALL_PER_SECOND = 'overall_per_second'
-PER_CHAT_PER_SECOND = 'per_chat_per_second'
-GROUP_PER_MINUTE = 'group_per_minute'
+OVERALL_PER_SECOND = "overall_per_second"
+PER_CHAT_PER_SECOND = "per_chat_per_second"
+GROUP_PER_MINUTE = "group_per_minute"
 
 KNOWN_RATE_LIMIT_KEYS = frozenset({OVERALL_PER_SECOND, PER_CHAT_PER_SECOND, GROUP_PER_MINUTE})
 
 # the shipped limits live in defaults.py; duplicating them here would drift
-RATE_LIMIT_DEFAULTS: dict[str, float] = dict(DEFAULTS['RATE_LIMIT'])
+RATE_LIMIT_DEFAULTS: dict[str, float] = dict(DEFAULTS["RATE_LIMIT"])
 
 # chats a bot talks to at once; beyond this the idle ones are dropped
 MAX_TRACKED_CHATS = 4096
@@ -60,7 +60,7 @@ class TokenBucket:
         sleep: Sleeper = asyncio.sleep,
     ) -> None:
         if rate <= 0:
-            raise ValueError('rate must be positive')
+            raise ValueError("rate must be positive")
         self.rate = rate
         self.capacity = capacity if capacity is not None else max(rate, 1.0)
         self._clock = clock
@@ -158,12 +158,8 @@ class RateLimiter:
         while len(chats) > MAX_TRACKED_CHATS:
             # stopping at the first busy bucket left the map uncapped: one chat
             # that keeps sending pinned everything behind it
-            candidates = [
-                chats.popitem(last=False) for _ in range(min(EVICTION_CANDIDATES, len(chats)))
-            ]
-            evict = next(
-                (index for index, (_, bucket) in enumerate(candidates) if bucket.is_idle()), 0
-            )
+            candidates = [chats.popitem(last=False) for _ in range(min(EVICTION_CANDIDATES, len(chats)))]
+            evict = next((index for index, (_, bucket) in enumerate(candidates) if bucket.is_idle()), 0)
             del candidates[evict]
             for key, bucket in reversed(candidates):
                 chats[key] = bucket
@@ -185,9 +181,7 @@ class RateLimiter:
             with self._lock:
                 per_chat = self._for(self._chats, key, self._per_chat_rate)
                 group = (
-                    self._for(self._groups, key, self._group_rate, self._group_capacity)
-                    if self.is_group(key)
-                    else None
+                    self._for(self._groups, key, self._group_rate, self._group_capacity) if self.is_group(key) else None
                 )
             buckets.extend(bucket for bucket in (per_chat, group) if bucket is not None)
 
@@ -211,15 +205,13 @@ def build_rate_limiter() -> RateLimiter | None:
 
     from django_redis_aiogram.settings import SETTINGS_NAME, conf
 
-    limits = conf['RATE_LIMIT']
+    limits = conf["RATE_LIMIT"]
     if not limits:
         return None
 
     unknown = sorted(str(key) for key in limits if key not in KNOWN_RATE_LIMIT_KEYS)
     if unknown:
-        raise ImproperlyConfigured(
-            f"{SETTINGS_NAME}['RATE_LIMIT'] has unknown keys: {', '.join(unknown)}."
-        )
+        raise ImproperlyConfigured(f"{SETTINGS_NAME}['RATE_LIMIT'] has unknown keys: {', '.join(unknown)}.")
     return RateLimiter(**limits)
 
 
@@ -257,4 +249,4 @@ def _reset_on_setting_change(sender: Any, setting: str, **kwargs: Any) -> None:
         reset_rate_limiters()
 
 
-setting_changed.connect(_reset_on_setting_change, dispatch_uid='django_redis_aiogram.throttling')
+setting_changed.connect(_reset_on_setting_change, dispatch_uid="django_redis_aiogram.throttling")

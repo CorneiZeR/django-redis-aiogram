@@ -34,7 +34,7 @@ This reproduces the 1.x mechanism: `send_redis` also writes a key with a TTL,
 and the consumer subscribes to the expiry event for that key.
 
 ```python
-TELEGRAM_BOT = {'DELIVERY': 'keyspace'}
+TELEGRAM_BOT = {"DELIVERY": "keyspace"}
 ```
 
 Two things to know:

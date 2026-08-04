@@ -10,9 +10,9 @@ from aiogram import types, F
 from django_redis_aiogram import bot
 
 
-@bot.message(F.text.startswith('/start'))
+@bot.message(F.text.startswith("/start"))
 async def start_handler(message: types.Message) -> None:
-    await message.answer('hi')
+    await message.answer("hi")
 
 
 @bot.message(F.text)
@@ -36,15 +36,15 @@ Handlers are `async`, so use Django's async ORM API, or wrap synchronous code:
 from asgiref.sync import sync_to_async
 
 
-@bot.callback_query(F.data.startswith('approve:'))
+@bot.callback_query(F.data.startswith("approve:"))
 async def approve(query: types.CallbackQuery) -> None:
-    order = await Order.objects.filter(pk=query.data.split(':')[1]).afirst()
+    order = await Order.objects.filter(pk=query.data.split(":")[1]).afirst()
     if order is None:
-        await query.answer('gone')
+        await query.answer("gone")
         return
 
     await sync_to_async(order.approve)()
-    await query.answer('done')
+    await query.answer("done")
 ```
 
 Calling the synchronous ORM directly raises `SynchronousOnlyOperation`.
@@ -64,17 +64,17 @@ class Wizard(StatesGroup):
     waiting_for_address = State()
 
 
-@bot.message(Command('setup'))
+@bot.message(Command("setup"))
 async def setup(message: types.Message, state: FSMContext) -> None:
     await state.set_state(Wizard.waiting_for_address)
-    await message.answer('Send me the address')
+    await message.answer("Send me the address")
 
 
 @bot.message(Wizard.waiting_for_address)
 async def got_address(message: types.Message, state: FSMContext) -> None:
     await state.update_data(address=message.text)
     await state.clear()
-    await message.answer('Saved')
+    await message.answer("Saved")
 ```
 
 Switch storage with `FSM_STORAGE` — `'memory'` for tests, or a dotted path to
@@ -87,10 +87,10 @@ avoids users getting stuck in a validation loop:
 from aiogram.filters import Command
 
 
-@bot.message(Command('cancel'))
+@bot.message(Command("cancel"))
 async def cancel(message: types.Message, state: FSMContext) -> None:
     await state.clear()
-    await message.answer('Cancelled')
+    await message.answer("Cancelled")
 ```
 
 ## Importing routers explicitly

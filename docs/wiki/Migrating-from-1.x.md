@@ -18,7 +18,7 @@ end of life, and aiogram 3.30 needs Python 3.10.
 ## 1. Rename the app and the imports
 
 ```python
-INSTALLED_APPS = ['django_redis_aiogram']
+INSTALLED_APPS = ["django_redis_aiogram"]
 ```
 
 ```python
@@ -38,13 +38,13 @@ like this to keep `manage.py test` working, delete it:
 
 ```python
 # no longer needed
-TG_BOT_KEY = os.getenv('TG_BOT_KEY') or '0:placeholder'
+TG_BOT_KEY = os.getenv("TG_BOT_KEY") or "0:placeholder"
 ```
 
 Instead, switch the bot off where it does not belong:
 
 ```python
-TELEGRAM_BOT = {'ENABLED': os.getenv('RUN_BOT') == '1'}
+TELEGRAM_BOT = {"ENABLED": os.getenv("RUN_BOT") == "1"}
 ```
 
 or per container with `DJANGO_REDIS_AIOGRAM_ENABLED`. See **[[Deployment]]**.
@@ -58,15 +58,15 @@ or per container with `DJANGO_REDIS_AIOGRAM_ENABLED`. See **[[Deployment]]**.
 # before
 def default_kwargs(function):
     return {
-        'send_message': {'parse_mode': 'HTML'},
-        'send_photo': {'parse_mode': 'Markdown'},
+        "send_message": {"parse_mode": "HTML"},
+        "send_photo": {"parse_mode": "Markdown"},
     }.get(function, {})
 ```
 
 ```python
 # after
 TELEGRAM_BOT = {
-    'DEFAULT_BOT_PROPERTIES': {'parse_mode': 'HTML'},
+    "DEFAULT_BOT_PROPERTIES": {"parse_mode": "HTML"},
 }
 ```
 
@@ -140,7 +140,7 @@ Then, in a shell on a non-bot process:
 from django_redis_aiogram import bot
 
 bot.enabled  # False where you disabled it
-bot.send(chat_id=YOUR_ID, text='upgrade check')
+bot.send(chat_id=YOUR_ID, text="upgrade check")
 ```
 
 and confirm the bot container logs `message sent`.

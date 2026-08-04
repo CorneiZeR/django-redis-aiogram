@@ -2,4 +2,4 @@
 
 from django_redis_aiogram.checks import check_settings
 
-__all__ = ('check_settings',)
+__all__ = ("check_settings",)

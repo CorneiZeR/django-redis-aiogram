@@ -16,19 +16,19 @@ from django_redis_aiogram.delivery import (
 from django_redis_aiogram.serializers import JsonSerializer, PickleSerializer
 
 
-@override_settings(TELEGRAM_BOT={'DELIVERY': 'blpop'})
+@override_settings(TELEGRAM_BOT={"DELIVERY": "blpop"})
 def test_get_delivery_blpop():
     assert isinstance(get_delivery(handler=lambda **kwargs: None), BlpopDelivery)
 
 
-@override_settings(TELEGRAM_BOT={'DELIVERY': 'keyspace'})
+@override_settings(TELEGRAM_BOT={"DELIVERY": "keyspace"})
 def test_get_delivery_keyspace():
     assert isinstance(get_delivery(handler=lambda **kwargs: None), KeyspaceDelivery)
 
 
-@override_settings(TELEGRAM_BOT={'DELIVERY': 'smoke-signals'})
+@override_settings(TELEGRAM_BOT={"DELIVERY": "smoke-signals"})
 def test_get_delivery_rejects_unknown():
-    with pytest.raises(ValueError, match='Unknown delivery'):
+    with pytest.raises(ValueError, match="Unknown delivery"):
         get_delivery(handler=lambda **kwargs: None)
 
 
@@ -43,7 +43,7 @@ def drain(delivery, expected, timeout=5):
     thread.join(timeout=timeout)
     # a consumer still stuck here would otherwise be a passing test with a
     # leaked thread
-    assert not thread.is_alive(), 'the consumer did not stop'
+    assert not thread.is_alive(), "the consumer did not stop"
     return thread
 
 
@@ -53,51 +53,45 @@ class RecordingBlpop(BlpopDelivery):
         super().__init__(handler=lambda **kwargs: self.handled.append(kwargs))
 
 
-@override_settings(TELEGRAM_BOT={'DELIVERY': 'blpop', 'BLPOP_TIMEOUT': 1})
+@override_settings(TELEGRAM_BOT={"DELIVERY": "blpop", "BLPOP_TIMEOUT": 1})
 def test_blpop_delivers_queued_messages(redis_server):
-    redis_server.rpush(
-        'TELEGRAM_BOT_MESSAGE', JsonSerializer().dumps({'function': 'send_message', 'chat_id': 7})
-    )
+    redis_server.rpush("TELEGRAM_BOT_MESSAGE", JsonSerializer().dumps({"function": "send_message", "chat_id": 7}))
     delivery = RecordingBlpop()
     drain(delivery, expected=1)
-    assert delivery.handled == [{'function': 'send_message', 'chat_id': 7}]
+    assert delivery.handled == [{"function": "send_message", "chat_id": 7}]
 
 
-@override_settings(TELEGRAM_BOT={'DELIVERY': 'blpop', 'BLPOP_TIMEOUT': 1})
+@override_settings(TELEGRAM_BOT={"DELIVERY": "blpop", "BLPOP_TIMEOUT": 1})
 def test_blpop_drains_a_backlog(redis_server):
     """A worker that was down must still find its messages waiting."""
     for index in range(3):
         redis_server.rpush(
-            'TELEGRAM_BOT_MESSAGE',
-            JsonSerializer().dumps({'function': 'send_message', 'chat_id': index}),
+            "TELEGRAM_BOT_MESSAGE",
+            JsonSerializer().dumps({"function": "send_message", "chat_id": index}),
         )
     delivery = RecordingBlpop()
     drain(delivery, expected=3)
-    assert [item['chat_id'] for item in delivery.handled] == [0, 1, 2]
+    assert [item["chat_id"] for item in delivery.handled] == [0, 1, 2]
 
 
-@override_settings(TELEGRAM_BOT={'DELIVERY': 'blpop', 'BLPOP_TIMEOUT': 1, 'ALLOW_PICKLE': True})
+@override_settings(TELEGRAM_BOT={"DELIVERY": "blpop", "BLPOP_TIMEOUT": 1, "ALLOW_PICKLE": True})
 def test_blpop_accepts_legacy_pickle(redis_server):
-    redis_server.rpush(
-        'TELEGRAM_BOT_MESSAGE', PickleSerializer().dumps({'function': 'send_message', 'chat_id': 9})
-    )
+    redis_server.rpush("TELEGRAM_BOT_MESSAGE", PickleSerializer().dumps({"function": "send_message", "chat_id": 9}))
     delivery = RecordingBlpop()
     drain(delivery, expected=1)
-    assert delivery.handled[0]['chat_id'] == 9
+    assert delivery.handled[0]["chat_id"] == 9
 
 
-@override_settings(TELEGRAM_BOT={'DELIVERY': 'blpop', 'BLPOP_TIMEOUT': 1})
+@override_settings(TELEGRAM_BOT={"DELIVERY": "blpop", "BLPOP_TIMEOUT": 1})
 def test_undecodable_message_is_dropped_not_fatal(redis_server):
-    redis_server.rpush('TELEGRAM_BOT_MESSAGE', b'{"__model__": "os", "data": {}}')
-    redis_server.rpush(
-        'TELEGRAM_BOT_MESSAGE', JsonSerializer().dumps({'function': 'send_message', 'chat_id': 1})
-    )
+    redis_server.rpush("TELEGRAM_BOT_MESSAGE", b'{"__model__": "os", "data": {}}')
+    redis_server.rpush("TELEGRAM_BOT_MESSAGE", JsonSerializer().dumps({"function": "send_message", "chat_id": 1}))
     delivery = RecordingBlpop()
     drain(delivery, expected=1)
-    assert [item['chat_id'] for item in delivery.handled] == [1]
+    assert [item["chat_id"] for item in delivery.handled] == [1]
 
 
-@override_settings(TELEGRAM_BOT={'DELIVERY': 'blpop', 'BLPOP_TIMEOUT': 1})
+@override_settings(TELEGRAM_BOT={"DELIVERY": "blpop", "BLPOP_TIMEOUT": 1})
 def test_failing_handler_does_not_kill_the_consumer(redis_server):
     calls = []
 
@@ -108,56 +102,52 @@ def test_failing_handler_does_not_kill_the_consumer(redis_server):
 
         def _handle(self, **kwargs):
             calls.append(kwargs)
-            raise RuntimeError('boom')
+            raise RuntimeError("boom")
 
     for index in range(2):
         redis_server.rpush(
-            'TELEGRAM_BOT_MESSAGE',
-            JsonSerializer().dumps({'function': 'send_message', 'chat_id': index}),
+            "TELEGRAM_BOT_MESSAGE",
+            JsonSerializer().dumps({"function": "send_message", "chat_id": index}),
         )
     delivery = Exploding()
     drain(delivery, expected=2)
     assert len(calls) == 2
 
 
-@override_settings(TELEGRAM_BOT={'DELIVERY': 'keyspace'})
+@override_settings(TELEGRAM_BOT={"DELIVERY": "keyspace"})
 def test_keyspace_handler_drains_the_list(redis_server):
     handled = []
     delivery = KeyspaceDelivery(handler=lambda **kwargs: handled.append(kwargs))
-    redis_server.rpush(
-        'TELEGRAM_BOT_MESSAGE', JsonSerializer().dumps({'function': 'send_message', 'chat_id': 3})
-    )
-    delivery._on_expired({'data': b'TELEGRAM_BOT_EXP'})
-    assert handled == [{'function': 'send_message', 'chat_id': 3}]
-    assert redis_server.llen('TELEGRAM_BOT_MESSAGE') == 0
+    redis_server.rpush("TELEGRAM_BOT_MESSAGE", JsonSerializer().dumps({"function": "send_message", "chat_id": 3}))
+    delivery._on_expired({"data": b"TELEGRAM_BOT_EXP"})
+    assert handled == [{"function": "send_message", "chat_id": 3}]
+    assert redis_server.llen("TELEGRAM_BOT_MESSAGE") == 0
 
 
-@override_settings(TELEGRAM_BOT={'DELIVERY': 'keyspace'})
+@override_settings(TELEGRAM_BOT={"DELIVERY": "keyspace"})
 def test_keyspace_ignores_other_keys(redis_server):
     handled = []
     delivery = KeyspaceDelivery(handler=lambda **kwargs: handled.append(kwargs))
-    redis_server.rpush(
-        'TELEGRAM_BOT_MESSAGE', JsonSerializer().dumps({'function': 'send_message', 'chat_id': 3})
-    )
-    delivery._on_expired({'data': b'SOMETHING_ELSE'})
+    redis_server.rpush("TELEGRAM_BOT_MESSAGE", JsonSerializer().dumps({"function": "send_message", "chat_id": 3}))
+    delivery._on_expired({"data": b"SOMETHING_ELSE"})
     assert handled == []
     # an unrelated expiry must not consume the queue either
-    assert redis_server.llen('TELEGRAM_BOT_MESSAGE') == 1
+    assert redis_server.llen("TELEGRAM_BOT_MESSAGE") == 1
 
 
-@override_settings(TELEGRAM_BOT={'DELIVERY': 'blpop'})
+@override_settings(TELEGRAM_BOT={"DELIVERY": "blpop"})
 def test_send_redis_does_not_write_an_expiry_key(redis_server):
-    TelegramBot().send_redis(chat_id=1, text='hi')
-    assert redis_server.llen('TELEGRAM_BOT_MESSAGE') == 1
-    assert redis_server.get('TELEGRAM_BOT_EXP') is None
+    TelegramBot().send_redis(chat_id=1, text="hi")
+    assert redis_server.llen("TELEGRAM_BOT_MESSAGE") == 1
+    assert redis_server.get("TELEGRAM_BOT_EXP") is None
 
 
-@override_settings(TELEGRAM_BOT={'DELIVERY': 'keyspace', 'REDIS_EXP_TIME': 5})
+@override_settings(TELEGRAM_BOT={"DELIVERY": "keyspace", "REDIS_EXP_TIME": 5})
 def test_send_redis_sets_an_expiring_key_for_keyspace(redis_server):
-    TelegramBot().send_redis(chat_id=1, text='hi')
-    assert redis_server.llen('TELEGRAM_BOT_MESSAGE') == 1
+    TelegramBot().send_redis(chat_id=1, text="hi")
+    assert redis_server.llen("TELEGRAM_BOT_MESSAGE") == 1
     # 1.x passed 'EX' as the value and the TTL positionally, so the key never expired properly
-    assert 0 < redis_server.ttl('TELEGRAM_BOT_EXP') <= 5
+    assert 0 < redis_server.ttl("TELEGRAM_BOT_EXP") <= 5
 
 
 def test_schedule_hops_to_the_loop_thread():
@@ -188,7 +178,7 @@ def test_schedule_hops_to_the_loop_thread():
         done.set()
 
     instance._schedule(coroutine())
-    assert done.wait(5), 'coroutine never ran on the loop thread'
+    assert done.wait(5), "coroutine never ran on the loop thread"
     assert ran_on == [thread.ident]
 
     loop.call_soon_threadsafe(loop.stop)
@@ -209,7 +199,7 @@ def test_schedule_runs_inline_when_no_loop_is_running():
     instance.close()
 
 
-@override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'RATE_LIMIT': None})
+@override_settings(TELEGRAM_BOT={"TOKEN": "42:x", "RATE_LIMIT": None})
 def test_concurrent_send_raw_from_web_threads(monkeypatch):
     """gunicorn gthread runs several request threads; run_until_complete on a
     shared loop is not reentrant, so unsynchronised sends crash with
@@ -242,7 +232,7 @@ def test_concurrent_send_raw_from_web_threads(monkeypatch):
     def send(index):
         try:
             ready.wait()
-            instance.send_raw(chat_id=index, text='hi')
+            instance.send_raw(chat_id=index, text="hi")
         except Exception as error:
             errors.append(error)
 
@@ -254,15 +244,15 @@ def test_concurrent_send_raw_from_web_threads(monkeypatch):
 
     # wait on the sends themselves: a join timeout is a scheduling guess, and a
     # busy CI runner turned that guess into a flake
-    assert all_sent.wait(30), f'only {len(sent)} of {expected} sends completed'
+    assert all_sent.wait(30), f"only {len(sent)} of {expected} sends completed"
     assert [thread for thread in threads if thread.is_alive()] == []
     assert errors == []
-    assert sorted(item['chat_id'] for item in sent) == list(range(expected))
+    assert sorted(item["chat_id"] for item in sent) == list(range(expected))
     instance._bot = None
     instance.close()
 
 
-@override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'FSM_STORAGE': 'memory', 'RATE_LIMIT': None})
+@override_settings(TELEGRAM_BOT={"TOKEN": "42:x", "FSM_STORAGE": "memory", "RATE_LIMIT": None})
 def test_sends_that_all_see_a_stopped_loop_are_serialised():
     """The window the lock exists for.
 
@@ -307,7 +297,7 @@ def test_sends_that_all_see_a_stopped_loop_are_serialised():
     def send(index):
         try:
             ready.wait()
-            instance.send_raw(chat_id=index, text='hi')
+            instance.send_raw(chat_id=index, text="hi")
         except Exception as error:
             errors.append(error)
 
@@ -318,14 +308,14 @@ def test_sends_that_all_see_a_stopped_loop_are_serialised():
         thread.join(timeout=30)
 
     assert errors == [], errors
-    assert sorted(item['chat_id'] for item in sent) == list(range(expected))
+    assert sorted(item["chat_id"] for item in sent) == list(range(expected))
 
     instance._loop = instance._loop._loop  # unwrap, so close() drives the real one
     instance._bot = None
     instance.close()
 
 
-@override_settings(TELEGRAM_BOT={'DELIVERY': 'blpop', 'BLPOP_TIMEOUT': 0})
+@override_settings(TELEGRAM_BOT={"DELIVERY": "blpop", "BLPOP_TIMEOUT": 0})
 def test_a_zero_blpop_timeout_is_clamped(redis_server, monkeypatch):
     """0 means "block for ever" to a real Redis, and stop() would never be seen.
 
@@ -342,14 +332,12 @@ def test_a_zero_blpop_timeout_is_clamped(redis_server, monkeypatch):
         def __getattr__(self, name):
             return getattr(redis_server, name)
 
-    monkeypatch.setattr('django_redis_aiogram.delivery.get_redis', lambda: Spy())
+    monkeypatch.setattr("django_redis_aiogram.delivery.get_redis", lambda: Spy())
     # one message, so the consumer actually reaches the blocking call
-    redis_server.rpush(
-        'TELEGRAM_BOT_MESSAGE', JsonSerializer().dumps({'function': 'send_message', 'chat_id': 1})
-    )
+    redis_server.rpush("TELEGRAM_BOT_MESSAGE", JsonSerializer().dumps({"function": "send_message", "chat_id": 1}))
     drain(RecordingBlpop(), expected=1, timeout=2)
 
-    assert timeouts, 'the consumer never blocked on the queue'
+    assert timeouts, "the consumer never blocked on the queue"
     assert min(timeouts) >= 1, timeouts
 
 
@@ -360,8 +348,8 @@ def rate_limited_bot(attempts):
         async def send_message(self, **kwargs):
             attempts.append(kwargs)
             raise exceptions.TelegramRetryAfter(
-                method=SendMessage(chat_id=1, text='x'),
-                message='Too Many Requests',
+                method=SendMessage(chat_id=1, text="x"),
+                message="Too Many Requests",
                 retry_after=0,
             )
 
@@ -373,31 +361,29 @@ def rate_limited_bot(attempts):
     return AlwaysRetryAfter()
 
 
-@override_settings(
-    TELEGRAM_BOT={'TOKEN': '42:x', 'FSM_STORAGE': 'memory', 'MAX_RETRIES': 2, 'RATE_LIMIT': None}
-)
+@override_settings(TELEGRAM_BOT={"TOKEN": "42:x", "FSM_STORAGE": "memory", "MAX_RETRIES": 2, "RATE_LIMIT": None})
 def test_exhausting_the_retries_is_logged(caplog):
     """1.x gave up silently: no log, no exception, the message just vanished."""
     instance = TelegramBot()
     attempts = []
     instance._bot = rate_limited_bot(attempts)
 
-    with caplog.at_level('ERROR', logger='django_redis_aiogram'):
-        instance.send_raw(chat_id=1, text='x')
+    with caplog.at_level("ERROR", logger="django_redis_aiogram"):
+        instance.send_raw(chat_id=1, text="x")
 
-    assert len(attempts) == 3, 'MAX_RETRIES=2 means the first try plus two retries'
-    assert 'giving up on message' in caplog.text
+    assert len(attempts) == 3, "MAX_RETRIES=2 means the first try plus two retries"
+    assert "giving up on message" in caplog.text
     instance._bot = None
     instance.close()
 
 
 @override_settings(
     TELEGRAM_BOT={
-        'TOKEN': '42:x',
-        'FSM_STORAGE': 'memory',
-        'MAX_RETRIES': 1,
-        'RAISE_EXCEPTION': True,
-        'RATE_LIMIT': None,
+        "TOKEN": "42:x",
+        "FSM_STORAGE": "memory",
+        "MAX_RETRIES": 1,
+        "RAISE_EXCEPTION": True,
+        "RATE_LIMIT": None,
     }
 )
 def test_exhausting_the_retries_raises_when_asked_to():
@@ -406,13 +392,13 @@ def test_exhausting_the_retries_raises_when_asked_to():
     instance._bot = rate_limited_bot([])
 
     with pytest.raises(exceptions.TelegramRetryAfter):
-        instance.send_raw(chat_id=1, text='x')
+        instance.send_raw(chat_id=1, text="x")
 
     instance._bot = None
     instance.close()
 
 
-@override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'FSM_STORAGE': 'memory'})
+@override_settings(TELEGRAM_BOT={"TOKEN": "42:x", "FSM_STORAGE": "memory"})
 def test_concurrent_first_sends_share_one_event_loop(monkeypatch):
     """Two loops means loop_lock hands the senders locks for different loops,
     and one of the loops is leaked."""
@@ -426,7 +412,7 @@ def test_concurrent_first_sends_share_one_event_loop(monkeypatch):
         created.append(loop)
         return loop
 
-    monkeypatch.setattr(asyncio, 'new_event_loop', slow_new_event_loop)
+    monkeypatch.setattr(asyncio, "new_event_loop", slow_new_event_loop)
 
     seen = []
     ready = threading.Barrier(4, timeout=10)
@@ -441,7 +427,7 @@ def test_concurrent_first_sends_share_one_event_loop(monkeypatch):
     for thread in threads:
         thread.join(timeout=10)
 
-    assert len(created) == 1, f'{len(created)} event loops were built'
+    assert len(created) == 1, f"{len(created)} event loops were built"
     assert len({id(loop) for loop in seen}) == 1
     for loop in created:
         loop.close()

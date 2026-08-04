@@ -7,11 +7,11 @@ from django.core.signals import setting_changed
 
 from django_redis_aiogram.defaults import DEFAULTS
 
-SETTINGS_NAME = 'TELEGRAM_BOT'
-ENV_PREFIX = 'DJANGO_REDIS_AIOGRAM_'
+SETTINGS_NAME = "TELEGRAM_BOT"
+ENV_PREFIX = "DJANGO_REDIS_AIOGRAM_"
 
-_TRUTHY = frozenset({'1', 'true', 'yes', 'on'})
-_FALSY = frozenset({'0', 'false', 'no', 'off'})
+_TRUTHY = frozenset({"1", "true", "yes", "on"})
+_FALSY = frozenset({"0", "false", "no", "off"})
 
 _MISSING = object()
 
@@ -23,9 +23,7 @@ def parse_bool(value: str, source: str) -> bool:
         return True
     if normalized in _FALSY:
         return False
-    raise ImproperlyConfigured(
-        f'{source} must be one of {sorted(_TRUTHY | _FALSY)}, got {value!r}.'
-    )
+    raise ImproperlyConfigured(f"{source} must be one of {sorted(_TRUTHY | _FALSY)}, got {value!r}.")
 
 
 def coerce_bool(value: Any, source: str) -> bool:
@@ -40,7 +38,7 @@ def coerce_bool(value: Any, source: str) -> bool:
         return bool(value)
     if isinstance(value, str):
         return parse_bool(value, source)
-    raise ImproperlyConfigured(f'{source} must be a boolean, got {type(value).__name__}.')
+    raise ImproperlyConfigured(f"{source} must be a boolean, got {type(value).__name__}.")
 
 
 def _from_env(key: str, default: Any) -> Any:
@@ -59,7 +57,7 @@ def _from_env(key: str, default: Any) -> Any:
         try:
             return int(raw)
         except ValueError:
-            raise ImproperlyConfigured(f'{name} must be an integer, got {raw!r}.') from None
+            raise ImproperlyConfigured(f"{name} must be an integer, got {raw!r}.") from None
     if isinstance(default, str):
         return raw
     return _MISSING
@@ -81,9 +79,7 @@ class Settings(Mapping[str, Any]):
 
         overrides = getattr(settings, SETTINGS_NAME, None) or {}
         if not isinstance(overrides, Mapping):
-            raise ImproperlyConfigured(
-                f'{SETTINGS_NAME} must be a mapping, got {type(overrides).__name__}.'
-            )
+            raise ImproperlyConfigured(f"{SETTINGS_NAME} must be a mapping, got {type(overrides).__name__}.")
         resolved = dict(DEFAULTS)
         for key, default in DEFAULTS.items():
             if key in overrides:
@@ -116,8 +112,8 @@ class Settings(Mapping[str, Any]):
         return len(self.resolved)
 
     def __repr__(self) -> str:
-        state = 'unresolved' if self._cache is None else f'{len(self._cache)} keys'
-        return f'<{type(self).__name__} {state}>'
+        state = "unresolved" if self._cache is None else f"{len(self._cache)} keys"
+        return f"<{type(self).__name__} {state}>"
 
 
 conf = Settings()
@@ -129,4 +125,4 @@ def _reset_on_setting_change(sender: Any, setting: str, **kwargs: Any) -> None:
 
 
 # dispatch_uid keeps autoreload from stacking duplicate receivers
-setting_changed.connect(_reset_on_setting_change, dispatch_uid='django_redis_aiogram.settings')
+setting_changed.connect(_reset_on_setting_change, dispatch_uid="django_redis_aiogram.settings")

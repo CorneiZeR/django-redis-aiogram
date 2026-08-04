@@ -6,16 +6,16 @@ structlog backend can index and filter them.
 
 ```python
 LOGGING = {
-    'version': 1,
-    'disable_existing_loggers': False,
-    'handlers': {
-        'console': {'class': 'logging.StreamHandler'},
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {"class": "logging.StreamHandler"},
     },
-    'loggers': {
-        'django_redis_aiogram': {
-            'handlers': ['console'],
-            'level': 'INFO',
-            'propagate': False,
+    "loggers": {
+        "django_redis_aiogram": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
         },
     },
 }
@@ -69,14 +69,14 @@ handler.setFormatter(
         foreign_pre_chain=[structlog.stdlib.ExtraAdder()],
     )
 )
-logging.getLogger('django_redis_aiogram').addHandler(handler)
+logging.getLogger("django_redis_aiogram").addHandler(handler)
 ```
 
 With it in place the `tg_` fields arrive as event keys:
 
 ```python
-logger = logging.getLogger('django_redis_aiogram')
-logger.warning('rate limited by telegram', extra={'tg_function': 'send_message'})
+logger = logging.getLogger("django_redis_aiogram")
+logger.warning("rate limited by telegram", extra={"tg_function": "send_message"})
 # -> {"event": "rate limited by telegram", "tg_function": "send_message", ...}
 ```
 

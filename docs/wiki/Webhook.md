@@ -7,7 +7,7 @@ Both are supported the same way, and one setting says which one this deployment
 uses:
 
 ```python
-TELEGRAM_BOT = {'MODE': 'webhook'}  # or 'polling', the default
+TELEGRAM_BOT = {"MODE": "webhook"}  # or 'polling', the default
 ```
 
 Scalars can come from the environment, so the choice can be made at startup
@@ -52,11 +52,11 @@ mode that worker no longer polls.
 
 ```python
 TELEGRAM_BOT = {
-    'TOKEN': os.environ['TELEGRAM_BOT_TOKEN'],
-    'REDIS_URL': os.environ['REDIS_URL'],
-    'MODE': 'webhook',
-    'WEBHOOK_URL': 'https://example.com/tg/9c1f2b7a/',
-    'WEBHOOK_SECRET': os.environ['TELEGRAM_WEBHOOK_SECRET'],
+    "TOKEN": os.environ["TELEGRAM_BOT_TOKEN"],
+    "REDIS_URL": os.environ["REDIS_URL"],
+    "MODE": "webhook",
+    "WEBHOOK_URL": "https://example.com/tg/9c1f2b7a/",
+    "WEBHOOK_SECRET": os.environ["TELEGRAM_WEBHOOK_SECRET"],
 }
 ```
 
@@ -78,7 +78,7 @@ from django.urls import path
 from django_redis_aiogram.webhook import telegram_webhook
 
 urlpatterns = [
-    path('tg/9c1f2b7a/', telegram_webhook),
+    path("tg/9c1f2b7a/", telegram_webhook),
 ]
 ```
 

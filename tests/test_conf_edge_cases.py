@@ -12,23 +12,23 @@ from django_redis_aiogram import settings as settings_module
 from django_redis_aiogram.settings import Settings, conf
 
 
-@override_settings(TELEGRAM_BOT=['not', 'a', 'mapping'])
+@override_settings(TELEGRAM_BOT=["not", "a", "mapping"])
 def test_non_mapping_settings_are_reported_clearly():
-    with pytest.raises(ImproperlyConfigured, match='must be a mapping'):
-        _ = conf['TOKEN']
+    with pytest.raises(ImproperlyConfigured, match="must be a mapping"):
+        _ = conf["TOKEN"]
 
 
-@override_settings(TELEGRAM_BOT='TOKEN=abc')
+@override_settings(TELEGRAM_BOT="TOKEN=abc")
 def test_string_settings_are_reported_clearly():
-    with pytest.raises(ImproperlyConfigured, match='must be a mapping'):
-        _ = conf['TOKEN']
+    with pytest.raises(ImproperlyConfigured, match="must be a mapping"):
+        _ = conf["TOKEN"]
 
 
 @pytest.mark.parametrize(
-    'module,uid',
+    "module,uid",
     [
-        ('django_redis_aiogram.settings', 'django_redis_aiogram.settings'),
-        ('django_redis_aiogram.redis', 'django_redis_aiogram.redis'),
+        ("django_redis_aiogram.settings", "django_redis_aiogram.settings"),
+        ("django_redis_aiogram.redis", "django_redis_aiogram.redis"),
     ],
 )
 def test_reset_receiver_is_deduplicated(module, uid):
@@ -50,4 +50,4 @@ def test_settings_module_is_not_shadowed_by_the_conf_object():
 
 def test_settings_survive_an_empty_override():
     with override_settings(TELEGRAM_BOT=None):
-        assert isinstance(Settings()['MAX_RETRIES'], int)
+        assert isinstance(Settings()["MAX_RETRIES"], int)

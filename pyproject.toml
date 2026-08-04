@@ -66,14 +66,41 @@ markers = [
 ]
 
 [tool.ruff]
-line-length = 100
+line-length = 120
+target-version = "py310"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
+select = ["ALL"]
+ignore = [
+    "D203",   # incorrect-blank-line-before-class is incompatible with D211
+    "D213",   # multi-line-summary-second-line is incompatible with D212
+    "COM812", # trailing commas are the formatter's job
+    "CPY001", # no per-file copyright headers; LICENSE covers the project
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["django_redis_aiogram", "telegram_bot"]
+
+[tool.ruff.lint.flake8-annotations]
+# Any is unavoidable for **kwargs passthroughs into aiogram bot methods
+allow-star-arg-any = true
+
+[tool.ruff.lint.extend-per-file-ignores]
+"tests/**" = [
+    "S101",    # asserts are the point of a test
+    "S105",    # hardcoded test secrets
+    "S106",    # hardcoded test passwords
+    "SLF001",  # tests reach into private members deliberately
+    "PLR2004", # magic values in assertions
+    "ANN",     # annotations are not required in tests
+    "ARG",     # unused fixture and mock arguments
+    "D",       # test names are the documentation
+]
 
 [tool.ruff.format]
-quote-style = "single"
+quote-style = "double"
+docstring-code-format = true
 
 [tool.mypy]
 python_version = "3.10"

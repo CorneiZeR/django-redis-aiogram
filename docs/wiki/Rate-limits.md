@@ -11,10 +11,10 @@ than sending too fast and being refused.
 
 ```python
 TELEGRAM_BOT = {
-    'RATE_LIMIT': {
-        'overall_per_second': 30,
-        'per_chat_per_second': 1,
-        'group_per_minute': 20,
+    "RATE_LIMIT": {
+        "overall_per_second": 30,
+        "per_chat_per_second": 1,
+        "group_per_minute": 20,
     },
 }
 ```

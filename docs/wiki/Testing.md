@@ -9,7 +9,7 @@ assert, or noise you want gone?
 ```python
 # settings/test.py
 TELEGRAM_BOT = {
-    'FSM_STORAGE': 'memory',  # no Redis for dialogue state
+    "FSM_STORAGE": "memory",  # no Redis for dialogue state
 }
 ```
 
@@ -34,15 +34,15 @@ from django_redis_aiogram import bot
 from django_redis_aiogram.serializers import loads
 
 
-@override_settings(TELEGRAM_BOT={'REDIS_URL': 'redis://localhost:6379/0'})
+@override_settings(TELEGRAM_BOT={"REDIS_URL": "redis://localhost:6379/0"})
 def test_approval_notifies_the_reviewer(monkeypatch):
     server = fakeredis.FakeRedis()
-    monkeypatch.setattr('django_redis_aiogram.client.get_redis', lambda: server)
+    monkeypatch.setattr("django_redis_aiogram.client.get_redis", lambda: server)
 
     approve(order)  # your code, which calls bot.send(...)
 
-    queued = [loads(raw) for raw in server.lrange('TELEGRAM_BOT_MESSAGE', 0, -1)]
-    assert queued == [{'function': 'send_message', 'chat_id': 42, 'text': 'Order approved'}]
+    queued = [loads(raw) for raw in server.lrange("TELEGRAM_BOT_MESSAGE", 0, -1)]
+    assert queued == [{"function": "send_message", "chat_id": 42, "text": "Order approved"}]
 ```
 
 Patch `django_redis_aiogram.client.get_redis` — the name the sending code looks
@@ -56,11 +56,11 @@ When the payload is not the point, replace the call:
 ```python
 def test_approval_notifies(monkeypatch):
     sent = []
-    monkeypatch.setattr(bot, 'send', lambda **kwargs: sent.append(kwargs))
+    monkeypatch.setattr(bot, "send", lambda **kwargs: sent.append(kwargs))
 
     approve(order)
 
-    assert sent == [{'chat_id': 42, 'text': 'Order approved'}]
+    assert sent == [{"chat_id": 42, "text": "Order approved"}]
 ```
 
 ## Testing a handler
@@ -81,24 +81,24 @@ def a_message(text):
     return types.Message(
         message_id=1,
         date=datetime.datetime.now(datetime.timezone.utc),
-        chat=types.Chat(id=42, type='private'),
+        chat=types.Chat(id=42, type="private"),
         text=text,
     )
 
 
 def test_start_greets():
-    message = a_message('/start')
+    message = a_message("/start")
     replies = []
 
     async def answer(text, **kwargs):
         replies.append(text)
 
     # aiogram models refuse plain attribute assignment
-    object.__setattr__(message, 'answer', answer)
+    object.__setattr__(message, "answer", answer)
 
     asyncio.run(start_handler(message))
 
-    assert replies == ['Hello 42']
+    assert replies == ["Hello 42"]
 ```
 
 ## Testing that the filters route
@@ -113,20 +113,16 @@ def test_only_text_reaches_the_echo():
     seen = []
     router = Router()
 
-    @router.message(F.text == '/probe')
+    @router.message(F.text == "/probe")
     async def probe(message):
         seen.append(message.text)
 
     dispatcher = Dispatcher()
     dispatcher.include_router(router)
 
-    asyncio.run(
-        dispatcher.feed_update(
-            Bot(token='42:x'), types.Update(update_id=1, message=a_message('/probe'))
-        )
-    )
+    asyncio.run(dispatcher.feed_update(Bot(token="42:x"), types.Update(update_id=1, message=a_message("/probe"))))
 
-    assert seen == ['/probe']
+    assert seen == ["/probe"]
 ```
 
 `Bot(token='42:x')` opens no connection on its own — nothing here reaches
@@ -147,13 +143,13 @@ from django_redis_aiogram import bot
 from django_redis_aiogram.delivery import BlpopDelivery
 
 # with get_redis patched to fakeredis as above
-bot.send_redis(chat_id=42, text='hi')
+bot.send_redis(chat_id=42, text="hi")
 
 handled = []
 delivery = BlpopDelivery(handler=lambda **payload: handled.append(payload))
 delivery.consume_pending()  # drains the list without blocking
 
-assert handled == [{'function': 'send_message', 'chat_id': 42, 'text': 'hi'}]
+assert handled == [{"function": "send_message", "chat_id": 42, "text": "hi"}]
 ```
 
 `consume_pending()` returns as soon as the list is empty, so it needs no thread

@@ -27,11 +27,11 @@ pip install django-redis-aiogram
 # settings.py
 import os
 
-INSTALLED_APPS = [..., 'django_redis_aiogram']
+INSTALLED_APPS = [..., "django_redis_aiogram"]
 
 TELEGRAM_BOT = {
-    'TOKEN': os.environ.get('TELEGRAM_BOT_TOKEN', ''),
-    'REDIS_URL': os.environ.get('REDIS_URL', ''),
+    "TOKEN": os.environ.get("TELEGRAM_BOT_TOKEN", ""),
+    "REDIS_URL": os.environ.get("REDIS_URL", ""),
 }
 ```
 
@@ -48,16 +48,16 @@ from aiogram import F, types
 from django_redis_aiogram import bot
 
 
-@bot.message(F.text == '/start')
+@bot.message(F.text == "/start")
 async def start(message: types.Message) -> None:
-    await message.answer('hi')
+    await message.answer("hi")
 ```
 
 ```python
 # anywhere else in the project
 from django_redis_aiogram import bot
 
-bot.send(chat_id=CHAT_ID, text='Order approved')
+bot.send(chat_id=CHAT_ID, text="Order approved")
 ```
 
 ```shell

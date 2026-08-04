@@ -33,7 +33,7 @@ open the door for the upgrade window only, then close it again:
 
 ```python
 TELEGRAM_BOT = {
-    'ALLOW_PICKLE': True,  # remove once the queue has drained
+    "ALLOW_PICKLE": True,  # remove once the queue has drained
 }
 ```
 
