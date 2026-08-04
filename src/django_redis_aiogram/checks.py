@@ -260,6 +260,27 @@ def _known_keys(_key: str) -> list[Problem]:
     ]
 
 
+def _a_pop_inside_the_deadline(key: str) -> list[Problem]:
+    """Warn when BLPOP is asked to wait longer than a read is allowed to take.
+
+    The consumer caps the pop rather than letting it raise, so the setting would
+    otherwise be quietly ignored.
+    """
+    try:
+        asked = int(conf[key])
+        deadline = int(conf['REDIS_TIMEOUT'])
+    except (TypeError, ValueError):
+        return []  # E014 and E030 own the type complaints
+    if asked < deadline:
+        return []
+    return [
+        Problem(
+            f'is {asked}, which the read deadline caps at {max(1, deadline - 1)}.',
+            hint=f"Raise {SETTINGS_NAME}['REDIS_TIMEOUT'] above it, or lower this.",
+        )
+    ]
+
+
 def _bot_is_enabled() -> bool:
     """Whether the bot is on, coerced the way startup and sending coerce it."""
     try:
@@ -297,6 +318,8 @@ CHECKS: tuple[Check, ...] = (
     Check('E012', 'MAX_RETRIES', partial(_an_integer, minimum=1)),
     Check('E013', 'REDIS_EXP_TIME', partial(_an_integer, minimum=1)),
     Check('E014', 'BLPOP_TIMEOUT', partial(_an_integer, minimum=1)),
+    Check('E030', 'REDIS_TIMEOUT', partial(_an_integer, minimum=1)),
+    Check('W004', 'BLPOP_TIMEOUT', _a_pop_inside_the_deadline),
     Check('E023', 'HEARTBEAT_INTERVAL', partial(_an_integer, minimum=1)),
     Check('E024', 'HEALTHCHECK_MAX_QUEUE', partial(_an_integer, minimum=0)),
     Check('E028', 'MODE', partial(_a_string, allowed=MODE_CHOICES)),

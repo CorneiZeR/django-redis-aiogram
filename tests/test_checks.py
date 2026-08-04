@@ -98,7 +98,7 @@ DOCUMENTED = re.compile('`([EW]\\d{3})`(?:\\s*[\u2013-]\\s*`([EW]\\d{3})`)?')
 
 # Every id the checks can emit. Two settings dicts are needed: a wrong type
 # stops a check before it can reach its value-level complaint.
-EXPECTED_IDS = {f'E{code:03d}' for code in range(1, 30)} | {'W001', 'W002', 'W003'}
+EXPECTED_IDS = {f'E{code:03d}' for code in range(1, 31)} | {'W001', 'W002', 'W003', 'W004'}
 
 WRONG_TYPES = {
     'ENABLED': 'yes',
@@ -117,6 +117,7 @@ WRONG_TYPES = {
     'MAX_RETRIES': 'ten',
     'REDIS_EXP_TIME': 'five',
     'BLPOP_TIMEOUT': 'five',
+    'REDIS_TIMEOUT': 'five',
     'HEARTBEAT_INTERVAL': 'ten',
     'HEALTHCHECK_MAX_QUEUE': 'lots',
     'WEBHOOK_URL': 42,
@@ -141,6 +142,9 @@ WRONG_VALUES = {
     'WEBHOOK_URL': 'http://example.test/tg/',
     'WEBHOOK_SECRET': '',
     'MODE': 'sideways',
+    # a pop asked to wait longer than a read may take, which the consumer caps
+    'BLPOP_TIMEOUT': 30,
+    'REDIS_TIMEOUT': 5,
     'WEBHOOK_ALLOWED_UPDATES': 'message',
 }
 

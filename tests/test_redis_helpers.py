@@ -11,8 +11,9 @@ from redis import Redis
 
 from django_redis_aiogram import TelegramBot
 from django_redis_aiogram.delivery import BlpopDelivery, KeyspaceDelivery
-from django_redis_aiogram.redis import as_bytes, get_db_index, get_redis, reset_redis
+from django_redis_aiogram.redis import as_bytes, get_db_index, get_redis, read_timeout, reset_redis
 from django_redis_aiogram.serializers import JsonSerializer, loads
+from django_redis_aiogram.settings import conf
 
 
 @pytest.mark.parametrize(
@@ -133,14 +134,16 @@ def test_the_connection_is_built_once_and_reused(monkeypatch):
     """
     built = []
     closed = []
+    deadlines = []
 
     class Stub:
         def close(self):
             closed.append(self)
 
-    def from_url(cls, url):
+    def from_url(cls, url, **kwargs):
         # a fresh object each time, so "the same client" cannot pass by accident
         built.append(url)
+        deadlines.append(kwargs)
         return Stub()
 
     monkeypatch.setattr(Redis, 'from_url', classmethod(from_url))
@@ -162,6 +165,9 @@ def test_the_connection_is_built_once_and_reused(monkeypatch):
 
     assert second is not first, 'reset_redis kept the closed client'
     assert len(built) == 2, built
+    # a client with no deadline hangs for ever on a server that stopped
+    # answering, which is what redis-py 5.0 does by default
+    assert all(kwargs['socket_timeout'] and kwargs['socket_connect_timeout'] for kwargs in deadlines), deadlines
 
 
 def test_get_reads_the_slot_exactly_once_on_the_fast_path():
@@ -188,3 +194,47 @@ def test_get_reads_the_slot_exactly_once_on_the_fast_path():
     object.__setattr__(holder, '_client', sentinel)
 
     assert holder.get() is sentinel, 'get() re-read the slot and met the reset'
+
+
+@override_settings(TELEGRAM_BOT={'REDIS_URL': 'redis://localhost:6379/0', 'REDIS_TIMEOUT': 7})
+def test_the_shared_client_is_bounded_in_time(monkeypatch):
+    """redis-py only started defaulting to a read deadline in 8.0; on the 5.0
+    floor a server that stops answering blocks the caller until it is killed."""
+    seen = {}
+
+    def from_url(cls, url, **kwargs):
+        seen.update(kwargs)
+        return fakeredis.FakeRedis()
+
+    monkeypatch.setattr(Redis, 'from_url', classmethod(from_url))
+    reset_redis()
+    get_redis()
+    reset_redis()
+
+    assert seen['socket_timeout'] == 7
+    assert seen['socket_connect_timeout'] == 7
+
+
+@override_settings(TELEGRAM_BOT={'REDIS_TIMEOUT': 'seven'})
+def test_an_unreadable_deadline_does_not_reach_the_socket():
+    """E030 reports it; until then the call must not build a broken client."""
+    with pytest.raises((TypeError, ValueError)):
+        read_timeout()
+
+
+@pytest.mark.parametrize(
+    ('blpop', 'deadline', 'expected'),
+    [
+        (5, 5, 4),  # the defaults: the pop yields a second to the deadline
+        (30, 5, 4),  # asked for more than a read may take, so capped (W004 warns)
+        (2, 60, 2),  # comfortably inside, left alone
+        (1, 1, 1),  # never below one, which Redis reads as "block for ever"
+    ],
+)
+def test_the_pop_never_outlasts_the_read_deadline(blpop, deadline, expected):
+    """A pop asked to wait longer than the socket will wait for an answer turns
+    an idle round into an exception, once per round, for ever."""
+    settings = {'BLPOP_TIMEOUT': blpop, 'REDIS_TIMEOUT': deadline, 'HEARTBEAT_INTERVAL': 3600}
+    with override_settings(TELEGRAM_BOT=settings):
+        interval = max(1, int(conf['HEARTBEAT_INTERVAL']))
+        assert max(1, min(int(conf['BLPOP_TIMEOUT']), interval, read_timeout() - 1)) == expected
