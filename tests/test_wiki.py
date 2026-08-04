@@ -83,3 +83,163 @@ def test_the_sidebar_lists_every_page():
     listed = {target_of(link) for link in LINK.findall(sidebar)}
     missing = page_names() - listed - {'_Sidebar'}
     assert not missing, f'pages missing from the sidebar: {sorted(missing)}'
+
+
+#: the README is a front page, not the documentation. It was 351 lines of
+#: material the wiki already carried, and it drifted from those pages.
+README_BUDGET = 140
+#: `## Title`, with the three leading spaces markdown still renders as a heading
+ATX = re.compile(r'^ {0,3}#{1,6}\s+(.+?)\s*$', re.M)
+#: `Title` underlined with `===` or `---`, which renders as one too
+SETEXT = re.compile(r'^ {0,3}(\S.*?)\s*\n {0,3}(?:=+|-+)\s*$', re.M)
+#: a fence opens with at least three of either marker, indented up to three
+#: spaces, and runs to a matching close or to the end of the file
+FENCE = re.compile(
+    r'^ {0,3}(?P<mark>`{3,}|~{3,}).*?(?:^ {0,3}(?P=mark)[`~]*[ \t]*$|\Z)', re.M | re.S
+)
+COMMENT = re.compile(r'<!--.*?-->', re.S)
+
+
+def visible(text: str) -> str:
+    """What a reader actually sees.
+
+    A heading inside a fenced block is not a section, and a link inside one is
+    not a link — so neither may satisfy the checks below, in either direction.
+    """
+    return COMMENT.sub('', FENCE.sub('', text))
+
+
+def sections(text: str) -> list[str]:
+    """Every heading a reader sees, in either of the two markdown spellings."""
+    return ATX.findall(text) + SETEXT.findall(text)
+
+
+def normalised(title: str) -> str:
+    """`## Rate  limits ##` and `## Rate-limits` name the same page."""
+    return '-'.join(re.sub(r'\s*#+\s*$', '', title).split()).lower()
+
+
+def test_normalised_reads_the_heading_forms_markdown_allows():
+    """Written out, because each of these once slipped past the check below."""
+    assert normalised('Delivery') == 'delivery'
+    assert normalised('Delivery ##') == 'delivery'
+    assert normalised('  Rate   limits  ') == 'rate-limits'
+    assert normalised('Rate-limits') == 'rate-limits'
+
+
+def test_visible_drops_what_is_not_rendered():
+    text = (
+        '## Real\n'
+        '```\n## Fenced\n```\n'
+        '~~~\n### Tilde fenced\n~~~\n'
+        '   ```\n## Indented fence\n   ```\n'
+        '````\n## Long marker\n````\n'
+        '<!-- ## Commented -->\n'
+        '  ### Indented heading\n'
+        'Underlined\n=========\n'
+    )
+
+    # every heading form counts as a section, and no fence style does
+    assert sorted(sections(visible(text))) == ['Indented heading', 'Real', 'Underlined']
+
+
+def test_an_unclosed_fence_hides_everything_after_it():
+    """Which is what GitHub renders: the rest of the file becomes code."""
+    text = '## Real\n```\n## Never closed\n[API](../../wiki/API)\n'
+
+    rendered = visible(text)
+
+    assert sections(rendered) == ['Real']
+    assert README_WIKI_LINK.findall(rendered) == []
+
+
+def test_the_readme_stays_a_front_page():
+    lines = README.read_text().splitlines()
+    assert len(lines) <= README_BUDGET, (
+        f'the README is {len(lines)} lines; anything this long belongs in a wiki page'
+    )
+
+
+def test_no_readme_section_duplicates_a_wiki_page():
+    """A section named after a page is that page's material coming back."""
+    pages = {normalised(name) for name in page_names()} - {'home', '_sidebar'}
+    duplicated = [
+        title for title in sections(visible(README.read_text())) if normalised(title) in pages
+    ]
+
+    assert not duplicated, f'these belong in the wiki, not the README: {duplicated}'
+
+
+def test_the_readme_links_to_every_page():
+    """A new page nobody can find from the front page is a page nobody reads.
+
+    Both sides are normalised: GitHub resolves a wiki link case-insensitively and
+    treats spaces as dashes, so `../../wiki/rate-limits` reaches the page and has
+    to count as reaching it.
+    """
+    linked = {
+        normalised(target) for target in README_WIKI_LINK.findall(visible(README.read_text()))
+    }
+    pages = {normalised(name) for name in page_names()}
+    missing = pages - linked - {normalised('Home'), normalised('_Sidebar')}
+
+    assert not missing, f'pages the README does not link to: {sorted(missing)}'
+
+
+def test_a_link_spelled_the_way_github_accepts_it_counts(tmp_path, monkeypatch):
+    """Otherwise the test demands one spelling of a link that has several."""
+    readme = tmp_path / 'README.md'
+    rows = '\n'.join(
+        f'[{name}](../../wiki/{normalised(name)})' for name in page_names() if name != '_Sidebar'
+    )
+    readme.write_text(rows + '\n')
+    monkeypatch.setattr('tests.test_wiki.README', readme)
+
+    test_the_readme_links_to_every_page()
+
+
+def a_readme(tmp_path, monkeypatch, body: str):
+    """Point the checks at a README of our own, through the name they read."""
+    readme = tmp_path / 'README.md'
+    rows = '\n'.join(
+        f'[{name}](../../wiki/{normalised(name)})' for name in page_names() if name != '_Sidebar'
+    )
+    readme.write_text(rows + '\n' + body)
+    monkeypatch.setattr('tests.test_wiki.README', readme)
+    return readme
+
+
+def test_a_duplicate_heading_inside_a_fence_is_not_a_section(tmp_path, monkeypatch):
+    """Driving the check itself, so it fails if it goes back to raw text."""
+    a_readme(tmp_path, monkeypatch, '```\n## Delivery\n```\n<!-- ## Troubleshooting -->\n')
+
+    test_no_readme_section_duplicates_a_wiki_page()
+
+
+def test_a_duplicate_heading_outside_a_fence_is_caught(tmp_path, monkeypatch):
+    """The other half: the check must still do its job."""
+    a_readme(tmp_path, monkeypatch, '## Delivery\n\nTwo consumers are available.\n')
+
+    with pytest.raises(AssertionError, match='belong in the wiki'):
+        test_no_readme_section_duplicates_a_wiki_page()
+
+
+def test_a_link_only_inside_a_fence_does_not_count(tmp_path, monkeypatch):
+    """Reading raw text here would call an unreachable page linked."""
+    readme = a_readme(tmp_path, monkeypatch, '')
+    text = readme.read_text()
+    row = next(line for line in text.splitlines() if '../../wiki/webhook)' in line)
+    readme.write_text(text.replace(row + '\n', '') + '```\n' + row + '\n```\n')
+
+    with pytest.raises(AssertionError, match='does not link to'):
+        test_the_readme_links_to_every_page()
+
+
+def test_a_link_only_inside_a_comment_does_not_count(tmp_path, monkeypatch):
+    readme = a_readme(tmp_path, monkeypatch, '')
+    text = readme.read_text()
+    row = next(line for line in text.splitlines() if '../../wiki/api)' in line)
+    readme.write_text(text.replace(row + '\n', '') + f'<!-- {row} -->\n')
+
+    with pytest.raises(AssertionError, match='does not link to'):
+        test_the_readme_links_to_every_page()
