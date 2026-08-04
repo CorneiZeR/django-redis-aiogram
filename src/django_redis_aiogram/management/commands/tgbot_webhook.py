@@ -61,7 +61,7 @@ class Command(BaseCommand):
         bot.loop.run_until_complete(bot.bot.delete_webhook(drop_pending_updates=options["drop_pending"]))
         self.stdout.write(self.style.SUCCESS("webhook deleted; polling can start again"))
 
-    def _info(self, options: dict[str, Any]) -> None:  # noqa: ARG002 - one signature, so handle() can dispatch
+    def _info(self, _options: dict[str, Any]) -> None:
         info = bot.loop.run_until_complete(bot.bot.get_webhook_info())
         if not info.url:
             self.stdout.write("no webhook registered; this bot is polled")

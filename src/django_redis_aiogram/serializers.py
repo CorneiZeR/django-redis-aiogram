@@ -39,10 +39,46 @@ from aiogram.types.input_file import (
 from django.core.exceptions import ImproperlyConfigured
 
 from django_redis_aiogram.enums import SerializationTag, SerializerKind
-from django_redis_aiogram.exceptions import DjangoRedisAiogramError
+from django_redis_aiogram.exceptions import DjangoRedisAiogramError, SerializationError
+from django_redis_aiogram.settings import SETTINGS_NAME, coerce_bool, conf
 
-# SerializationError now lives in exceptions; the alias keeps its 2.0 import path alive
-from django_redis_aiogram.exceptions import SerializationError as SerializationError  # noqa: PLC0414 - re-export
+#: the module's public surface; listing SerializationError keeps its 2.0 import path alive
+__all__ = [
+    "JSON_SERIALIZER",
+    "PICKLE_SERIALIZER",
+    "SERIALIZERS",
+    "TAG_BYTES",
+    "TAG_DATE",
+    "TAG_DATETIME",
+    "TAG_DECIMAL",
+    "TAG_DEFAULT",
+    "TAG_INPUT_FILE",
+    "TAG_MODEL",
+    "BytesCodec",
+    "DateCodec",
+    "DatetimeCodec",
+    "DecimalCodec",
+    "DefaultSentinelCodec",
+    "InputFileCodec",
+    "JsonSerializer",
+    "ModelCodec",
+    "NonMappingPayloadError",
+    "PickleReadRefusedError",
+    "PickleSerializer",
+    "PickleWriteRefusedError",
+    "SerializationError",
+    "Serializer",
+    "TypeCodec",
+    "UnknownInputFileKindError",
+    "UnknownModelError",
+    "UnknownSerializerError",
+    "UnsupportedInputFileError",
+    "decode",
+    "encode",
+    "get_serializer",
+    "loads",
+    "looks_like_json",
+]
 
 # The 2.0 module constants, now aliases of the enum members that carry the same strings
 TAG_MODEL = SerializationTag.MODEL
@@ -432,9 +468,6 @@ SERIALIZERS: dict[SerializerKind, type[Serializer]] = {
 
 def get_serializer() -> Serializer:
     """Build the serializer that the ``SERIALIZER`` setting names."""
-    # importing settings reads Django settings, which must not happen at import time
-    from django_redis_aiogram.settings import SETTINGS_NAME, coerce_bool, conf  # noqa: PLC0415 - import-time safety
-
     name = conf["SERIALIZER"]
     if name == PICKLE_SERIALIZER and not coerce_bool(conf["ALLOW_PICKLE"], f"{SETTINGS_NAME}['ALLOW_PICKLE']"):
         # check E022 reports this, but a WSGI process never runs the checks
@@ -457,9 +490,6 @@ def loads(raw: bytes) -> dict[str, Any]:
     Detection is what lets a running deployment switch to JSON without draining
     the queue first.
     """
-    # importing settings reads Django settings, which must not happen at import time
-    from django_redis_aiogram.settings import SETTINGS_NAME, coerce_bool, conf  # noqa: PLC0415 - import-time safety
-
     if looks_like_json(raw):
         return JsonSerializer().loads(raw)
     # from the environment this arrives as a string, and 'false' is truthy

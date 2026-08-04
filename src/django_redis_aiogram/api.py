@@ -10,6 +10,7 @@ before handing it anywhere, without importing the client.
 
 import re
 
+import aiogram.methods
 from aiogram import Bot
 
 from django_redis_aiogram.exceptions import UnknownApiMethodError
@@ -17,8 +18,6 @@ from django_redis_aiogram.exceptions import UnknownApiMethodError
 
 def _api_methods() -> frozenset[str]:
     """Return the Bot attributes that correspond to a Telegram API method."""
-    import aiogram.methods  # noqa: PLC0415 - scoped here: only this call needs the submodule namespace
-
     api = {re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower() for name in aiogram.methods.__all__}
     return frozenset(api & {name for name in dir(Bot) if not name.startswith("_")})
 
