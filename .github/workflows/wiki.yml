@@ -24,7 +24,7 @@ jobs:
     if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # the push below uses an explicit token, so the checkout does not
           # need to leave a usable credential in .git/config
