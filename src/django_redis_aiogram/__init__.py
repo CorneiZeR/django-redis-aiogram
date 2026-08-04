@@ -9,7 +9,7 @@ attribute access instead (PEP 562).
 import threading
 from typing import TYPE_CHECKING, Any
 
-__version__ = '2.1.1'
+__version__ = '2.2.0'
 
 __all__ = ('TelegramBot', '__version__', 'bot', 'conf', 'get_redis', 'redis_conn')
 

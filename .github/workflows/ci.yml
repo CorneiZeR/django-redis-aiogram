@@ -67,13 +67,25 @@ jobs:
           python-version: '3.10'
           cache: pip
           cache-dependency-path: pyproject.toml
-      - run: pip install -e '.[dev]' 'django==5.2.0' 'aiogram==3.30.0' 'redis==5.0.0'
+      - run: pip install -e '.[dev]' 'django==5.2.0' 'aiogram==3.30.0' 'redis==6.2.0'
       - run: python -m pytest -q
 
   integration:
     # fakeredis agrees with everything, so it cannot answer whether LMOVE exists,
     # whether CONFIG SET is refused, or whether FSM state survives a restart
+    name: integration (${{ matrix.deps }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # both ends of the supported range against a real server. Running only
+        # the latest is what let a broken redis floor ship: the unit suite uses
+        # fakeredis, which has the aclose() that redis-py 5.0 lacked
+        include:
+          - deps: latest
+            pins: ''
+          - deps: floors
+            pins: "'django==5.2.0' 'aiogram==3.30.0' 'redis==6.2.0'"
     services:
       redis:
         image: redis:7
@@ -92,7 +104,7 @@ jobs:
           python-version: '3.13'
           cache: pip
           cache-dependency-path: pyproject.toml
-      - run: pip install -e '.[dev]'
+      - run: pip install -e '.[dev]' ${{ matrix.pins }}
       - run: python -m pytest -q -m integration tests/integration
         env:
           DJANGO_REDIS_AIOGRAM_TEST_REDIS_URL: redis://localhost:6379/0

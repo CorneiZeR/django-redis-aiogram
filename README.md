@@ -37,7 +37,7 @@ TELEGRAM_BOT = {
 
 Both may be empty. Nothing connects or validates credentials at import time, so
 tests and migrations run without them. Requires Python 3.10–3.14, Django 5.2+,
-aiogram 3.30+, redis 5.0+.
+aiogram 3.30+, redis 6.2+.
 
 ## Use it
 

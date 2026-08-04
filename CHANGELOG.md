@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.2.0 - 2026-08-04
+
+### Changed
+
+- **The redis floor is `>=6.2`**, up from `>=5.0`. The old floor promised
+  support the package did not have: aiogram's `RedisStorage` calls `aclose()`,
+  which redis-py added in 5.0.1, and aiogram's own extra asks for `>=6.2.0`. So
+  `FSM_STORAGE: 'redis'` — the default — raised `AttributeError` on redis-py
+  5.0.x, 6.0 and 6.1 while the metadata said those worked. Upgrading redis-py to
+  6.2 or newer is the whole migration; `pip` does it on its own unless the
+  version is pinned.
+
+### Infrastructure
+
+- The integration suite runs against a real Redis at **both ends** of the
+  supported range, not only the newest. Running only the newest is what let a
+  broken floor ship: `test-floors` installs the floors but the unit suite uses
+  fakeredis, which has the `aclose()` redis-py 5.0 lacked, so the one
+  combination that mattered — floors plus a real server — was never run.
+
 ## 2.1.1 - 2026-08-04
 
 ### Fixed
