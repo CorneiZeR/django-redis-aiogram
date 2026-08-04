@@ -303,6 +303,6 @@ CHECKS: tuple[Check, ...] = (
 )
 
 
-def check_settings(**kwargs: Any) -> list[CheckMessage]:  # noqa: ARG001 - Django passes app_configs and databases
+def check_settings(**kwargs: Any) -> list[CheckMessage]:
     """Run every registered check and return everything it reported."""
     return [message for check in CHECKS for message in check.run()]

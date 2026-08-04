@@ -256,7 +256,7 @@ class FakeBotApi:
             last_error_message="wrong response from the webhook",
         )
 
-    class session:  # noqa: N801 - stands in for aiogram's bot.session attribute
+    class session:
         @staticmethod
         async def close():
             pass
@@ -401,7 +401,7 @@ def test_concurrent_first_requests_share_one_dispatcher(monkeypatch):
         try:
             ready.wait()
             assert post(an_update(f"/probe{index}", update_id=index)).status_code == 200
-        except Exception as error:  # noqa: BLE001 - a thread cannot fail the test; the main thread re-raises
+        except Exception as error:
             errors.append(error)
 
     threads = [threading.Thread(target=deliver, args=(index,)) for index in range(4)]

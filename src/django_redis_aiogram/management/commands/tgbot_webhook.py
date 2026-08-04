@@ -28,7 +28,7 @@ class Command(BaseCommand):
             help="discard the updates Telegram queued while no webhook was registered",
         )
 
-    def handle(self, *args: Any, **options: Any) -> None:  # noqa: ARG002 - *args is BaseCommand's signature
+    def handle(self, *args: Any, **options: Any) -> None:
         """Run the chosen action, and close the bot whichever way it ends."""
         if not bot.enabled:
             msg = (

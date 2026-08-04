@@ -35,7 +35,7 @@ def test_the_singleton_is_shared():
     """A second bot instance would silently own a different router."""
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        import telegram_bot  # noqa: PLC0415 - the import is what warns, so it happens here
+        import telegram_bot
 
     assert telegram_bot.bot is django_redis_aiogram.bot
     assert telegram_bot.conf is django_redis_aiogram.conf
@@ -52,7 +52,7 @@ def test_legacy_module_paths_resolve(name):
 def test_legacy_class_import():
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        from telegram_bot.telegram_bot import TelegramBot  # noqa: PLC0415 - the import is what warns
+        from telegram_bot.telegram_bot import TelegramBot
 
     assert TelegramBot is django_redis_aiogram.TelegramBot
 
@@ -60,9 +60,9 @@ def test_legacy_class_import():
 def test_legacy_command_import():
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        from telegram_bot.management.commands.start_tgbot import Command  # noqa: PLC0415 - the import warns
+        from telegram_bot.management.commands.start_tgbot import Command
 
-    from django_redis_aiogram.management.commands.start_tgbot import Command as Original  # noqa: PLC0415 - see above
+    from django_redis_aiogram.management.commands.start_tgbot import Command as Original
 
     assert Command is Original
 
@@ -110,9 +110,9 @@ def test_installed_apps_entry_still_boots():
 def test_legacy_app_config_targets_the_old_label():
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", DeprecationWarning)
-        from telegram_bot.apps import TelegramBotAppConfig  # noqa: PLC0415 - the import is what warns
+        from telegram_bot.apps import TelegramBotAppConfig
 
-    from django_redis_aiogram.apps import TelegramBotAppConfig as Base  # noqa: PLC0415 - see above
+    from django_redis_aiogram.apps import TelegramBotAppConfig as Base
 
     assert issubclass(TelegramBotAppConfig, Base)
     assert TelegramBotAppConfig.name == "telegram_bot"
@@ -163,7 +163,7 @@ def test_the_package_ships_type_information():
     The shim needs its own: a project still importing `telegram_bot` gets no
     types from the package it does not name.
     """
-    import telegram_bot  # noqa: PLC0415 - importing the shim at module scope would warn during collection
+    import telegram_bot
 
     for package in (django_redis_aiogram, telegram_bot):
         marker = pathlib.Path(str(package.__file__)).parent / "py.typed"

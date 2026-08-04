@@ -1,8 +1,10 @@
+"""Every setting the package reads, with its default and the reason for it."""
+
 from typing import Any
 
 
-def no_default_kwargs(function: str) -> dict[str, Any]:
-    """Return no extra kwargs for any aiogram function."""
+def no_default_kwargs(_function: str) -> dict[str, Any]:
+    """Return no extra kwargs, whatever aiogram function is asked about."""
     return {}
 
 

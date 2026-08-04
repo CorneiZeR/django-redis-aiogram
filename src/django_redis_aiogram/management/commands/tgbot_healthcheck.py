@@ -43,7 +43,7 @@ class Command(BaseCommand):
             ),
         )
 
-    def handle(self, *args: Any, **options: Any) -> None:  # noqa: ARG002 - *args is BaseCommand's signature
+    def handle(self, *args: Any, **options: Any) -> None:
         """Report the first thing that is wrong, or that everything is fine."""
         if not bot.enabled:
             # nothing is meant to be running here, so nothing is wrong

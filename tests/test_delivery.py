@@ -218,7 +218,7 @@ def test_concurrent_send_raw_from_web_threads(monkeypatch):
             if len(sent) >= expected:
                 all_sent.set()
 
-        class session:  # noqa: N801 - it stands in for aiogram's `bot.session` attribute
+        class session:
             @staticmethod
             async def close():
                 pass
@@ -234,7 +234,7 @@ def test_concurrent_send_raw_from_web_threads(monkeypatch):
         try:
             ready.wait()
             instance.send_raw(chat_id=index, text="hi")
-        except Exception as error:  # noqa: BLE001 - the test reports whatever a thread raised
+        except Exception as error:
             errors.append(error)
 
     threads = [threading.Thread(target=send, args=(index,)) for index in range(expected)]
@@ -272,7 +272,7 @@ def test_sends_that_all_see_a_stopped_loop_are_serialised():
             await asyncio.sleep(0.01)
             sent.append(kwargs)
 
-        class session:  # noqa: N801 - it stands in for aiogram's `bot.session` attribute
+        class session:
             @staticmethod
             async def close():
                 pass
@@ -299,7 +299,7 @@ def test_sends_that_all_see_a_stopped_loop_are_serialised():
         try:
             ready.wait()
             instance.send_raw(chat_id=index, text="hi")
-        except Exception as error:  # noqa: BLE001 - the test reports whatever a thread raised
+        except Exception as error:
             errors.append(error)
 
     threads = [threading.Thread(target=send, args=(index,)) for index in range(expected)]
@@ -354,7 +354,7 @@ def rate_limited_bot(attempts):
                 retry_after=0,
             )
 
-        class session:  # noqa: N801 - it stands in for aiogram's `bot.session` attribute
+        class session:
             @staticmethod
             async def close():
                 pass

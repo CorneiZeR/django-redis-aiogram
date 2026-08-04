@@ -23,8 +23,8 @@ def test_bot_name_is_not_shadowed_by_a_module():
     Otherwise `django_redis_aiogram.bot` resolves to the module or the instance
     depending on import order.
     """
-    import django_redis_aiogram  # noqa: PLC0415 - local: what resolves after this import is the point
-    import django_redis_aiogram.client  # noqa: PLC0415 - local: importing the module last is the trap
+    import django_redis_aiogram
+    import django_redis_aiogram.client
 
     assert isinstance(django_redis_aiogram.bot, TelegramBot)
     assert django_redis_aiogram.client.TelegramBot is TelegramBot

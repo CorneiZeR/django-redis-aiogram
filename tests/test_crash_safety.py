@@ -213,7 +213,7 @@ def test_only_telegram_api_methods_may_be_named():
 
 @override_settings(TELEGRAM_BOT={"TOKEN": "42:x", "RATE_LIMIT": None})
 def test_send_raw_refuses_a_non_api_method():
-    destination = "/tmp/y"  # noqa: S108 - never opened, the call is refused on its name
+    destination = "/tmp/y"
     with pytest.raises(ValueError, match="not a Telegram API method"):
         TelegramBot().send_raw("download_file", file_path="x", destination=destination)
 
@@ -492,7 +492,7 @@ def test_raise_exception_does_not_leave_a_message_in_flight(redis_server):
                 retry_after=0,
             )
 
-        class session:  # noqa: N801 - it stands in for aiogram's `bot.session` attribute
+        class session:
             @staticmethod
             async def close():
                 pass

@@ -57,7 +57,7 @@ class Command(BaseCommand):
             ),
         )
 
-    def handle(self, *args: Any, **options: Any) -> None:  # noqa: ARG002 - *args is BaseCommand's signature
+    def handle(self, *args: Any, **options: Any) -> None:
         """Receive updates, drain the queue, and unwind both on a signal."""
         if not bot.enabled:
             self.stdout.write(

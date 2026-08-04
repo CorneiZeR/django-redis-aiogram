@@ -32,7 +32,7 @@ def stub_bot(sent=None, first_send=None):
             if first_send is not None:
                 first_send.set()
 
-        class session:  # noqa: N801 - it stands in for bot.session, which aiogram spells lowercase
+        class session:
             @staticmethod
             async def close():
                 pass

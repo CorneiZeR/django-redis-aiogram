@@ -150,7 +150,7 @@ conf = Settings()
 def _reset_on_setting_change(
     sender: object,  # noqa: ARG001 - Django sends this to every receiver, named
     setting: str,
-    **kwargs: Any,  # noqa: ARG001 - along with keys such as value and enter
+    **kwargs: Any,
 ) -> None:
     if setting == SETTINGS_NAME:
         conf.reset()
