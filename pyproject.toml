@@ -14,7 +14,7 @@ authors = [{ name = "Oleksii Kolosiuk", email = "kolosyuk1@gmail.com" }]
 keywords = ["django", "redis", "aiogram", "telegram", "bot", "docker"]
 dependencies = [
     "django>=5.2",
-    "redis>=5.0",
+    "redis>=8.1.0",
     "aiogram>=3.30",
 ]
 classifiers = [
