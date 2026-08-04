@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.0.1 - 2026-08-04
+
+### Fixed
+
+- The documentation links on the PyPI page. The README doubles as the long
+  description, and PyPI serves it from `pypi.org` without rewriting links, so
+  every `../../wiki/<page>` resolved to `pypi.org/wiki/<page>` — the whole
+  documentation table, plus `LICENSE`, `CONTRIBUTING.md`, `AGENTS.md`,
+  `CHANGELOG.md` and `SECURITY.md`, were dead there while working on GitHub.
+  All of them are absolute now, and a test refuses any relative link in the
+  README.
+- `project.urls` declares `Documentation`, so the wiki appears in the PyPI
+  sidebar rather than only inside the description.
+
 ## 2.0.0 - 2026-08-04
 
 Upgrading the dependency needs no application-code changes: `telegram_bot`
