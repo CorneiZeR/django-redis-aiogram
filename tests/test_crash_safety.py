@@ -541,3 +541,30 @@ def test_the_refused_message_is_delivered_once_the_operator_relents(redis_server
 
     assert [item['chat_id'] for item in delivery.handled] == [7]
     assert redis_server.llen(PROCESSING) == 0
+
+
+@pytest.mark.parametrize('method', ['set_webhook', 'delete_webhook', 'log_out', 'close'])
+def test_administrative_methods_are_denied_even_though_telegram_has_them(method):
+    """Sending is not administering: set_webhook would point updates at someone
+    else's URL, and log_out or close ends the session for the deployment."""
+    from django_redis_aiogram.api import API_METHODS, DENIED_METHODS, check_function
+
+    assert method in DENIED_METHODS
+    assert method not in API_METHODS
+    with pytest.raises(ValueError, match='not a Telegram API method'):
+        check_function(method)
+
+
+def test_the_deny_list_only_removes_methods_that_exist():
+    """A typo in the deny list would silently protect nothing."""
+    import re as regex
+
+    import aiogram.methods
+    from aiogram import Bot
+
+    from django_redis_aiogram.api import DENIED_METHODS
+
+    discovered = {regex.sub(r'(?<!^)(?=[A-Z])', '_', name).lower() for name in aiogram.methods.__all__}
+    public = {name for name in dir(Bot) if not name.startswith('_')}
+
+    assert discovered & public >= DENIED_METHODS, 'the deny list names something aiogram lacks'

@@ -25,10 +25,16 @@ def test_send_raw_is_a_noop_when_disabled():
 
 
 @override_settings(TELEGRAM_BOT={'ENABLED': False})
-def test_send_redis_is_a_noop_when_disabled():
-    instance = TelegramBot()
-    # would raise ImproperlyConfigured if it tried to reach Redis
-    instance.send_redis(chat_id=1, text='hi')
+def test_send_redis_is_a_noop_when_disabled(monkeypatch):
+    def refuse():
+        message = 'a disabled process reached for Redis'
+        raise AssertionError(message)
+
+    # asserted rather than inferred: an ImproperlyConfigured would also pass by
+    # accident if the early return were removed and REDIS_URL happened to be set
+    monkeypatch.setattr('django_redis_aiogram.client.get_redis', refuse)
+
+    TelegramBot().send_redis(chat_id=1, text='hi')
 
 
 @override_settings(TELEGRAM_BOT={'ENABLED': False})

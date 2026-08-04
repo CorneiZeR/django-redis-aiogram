@@ -118,9 +118,11 @@ class Settings(Mapping[str, Any]):
     @property
     def resolved(self) -> dict[str, Any]:
         """Every setting, resolved once and then cached until reset."""
-        if self._cache is None:
-            self._cache = self._resolve()
-        return self._cache
+        # one read, kept local: a reset() between two reads would return None
+        cache = self._cache
+        if cache is None:
+            cache = self._cache = self._resolve()
+        return cache
 
     def reset(self) -> None:
         """Drop the cache, so the next read picks up changed settings."""

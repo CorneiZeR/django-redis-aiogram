@@ -307,7 +307,8 @@ class KeyspaceDelivery(Delivery):
                     # setting up is as much a network call as reading: a Redis
                     # that is not up yet must not end the consumer thread
                     logger.exception('keyspace consumer error, retrying')
-                    pubsub = self._close(pubsub)
+                    self._close(pubsub)
+                    pubsub = None
                     self._stop.wait(1.0)
         finally:
             self._close(pubsub)

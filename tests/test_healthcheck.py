@@ -78,7 +78,7 @@ def test_a_redis_that_refuses_the_write_does_not_stop_the_loop(redis_server, cap
 
 
 @override_settings(TELEGRAM_BOT={**SETTINGS, 'DELIVERY': 'keyspace'})
-def test_both_consumers_have_their_own_key(redis_server):
+def test_both_consumers_report_under_the_same_key(redis_server):
     blpop = BlpopDelivery(handler=lambda **kwargs: None)
     keyspace = KeyspaceDelivery(handler=lambda **kwargs: None)
 

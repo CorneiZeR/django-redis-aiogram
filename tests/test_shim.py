@@ -1,6 +1,7 @@
 """The old `telegram_bot` package name keeps working, with a warning."""
 
 import importlib
+import os
 import pathlib
 import subprocess
 import sys
@@ -177,3 +178,35 @@ def test_every_management_command_is_reachable_under_the_old_name(name):
     real = importlib.import_module(f'django_redis_aiogram.management.commands.{name}')
 
     assert shim.Command is real.Command
+
+
+def test_the_shim_boots_django_without_touching_telegram_or_redis():
+    """A 1.x project gains the lazy import too: `telegram_bot` in INSTALLED_APPS
+    must not build the bot, import aiogram, or reach an unreachable Redis."""
+    script = textwrap.dedent("""
+        import sys
+
+        import django
+
+        django.setup()
+
+        assert 'aiogram' not in sys.modules, 'the shim imported aiogram at startup'
+        import telegram_bot
+        assert 'aiogram' not in sys.modules, 'importing the shim built the bot'
+        assert telegram_bot.conf['ENABLED'] is False
+        print('shim boot ok')
+    """)
+    result = subprocess.run(  # noqa: S603 - our own interpreter, and a script written right above
+        [sys.executable, '-c', script],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ,
+            'DJANGO_SETTINGS_MODULE': 'tests.shim_settings',
+            'DJANGO_REDIS_AIOGRAM_ENABLED': 'false',
+            'DJANGO_REDIS_AIOGRAM_REDIS_URL': 'redis://127.0.0.1:1/0',
+        },
+    )
+    assert result.returncode == 0, result.stderr
+    assert 'shim boot ok' in result.stdout

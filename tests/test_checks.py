@@ -207,3 +207,22 @@ def test_a_non_string_settings_key_is_reported_not_raised():
     reported = {message.id for message in check_settings()}
 
     assert 'django_redis_aiogram.W003' in reported
+
+
+@override_settings(TELEGRAM_BOT={'ENABLED': 'false', 'TOKEN': '', 'REDIS_URL': ''})
+def test_a_textually_disabled_bot_does_not_warn_about_credentials():
+    """'false' from the environment disables startup and sending, so the
+    credential warnings have to agree rather than nag a disabled process."""
+    reported = {message.id for message in check_settings()}
+
+    assert 'django_redis_aiogram.W001' not in reported
+    assert 'django_redis_aiogram.W002' not in reported
+
+
+@override_settings(TELEGRAM_BOT={'ENABLED': 'maybe', 'TOKEN': '', 'REDIS_URL': ''})
+def test_an_unreadable_enabled_still_warns_and_reports_its_own_problem():
+    """E001 owns the type complaint; the warnings assume the bot is on."""
+    reported = {message.id for message in check_settings()}
+
+    assert 'django_redis_aiogram.E001' in reported
+    assert 'django_redis_aiogram.W001' in reported

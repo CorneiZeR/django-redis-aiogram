@@ -130,12 +130,16 @@ def test_get_is_not_allowed():
 def test_a_body_that_is_not_an_update_is_rejected(handled, caplog):
     seen, _ = handled
 
-    with caplog.at_level('ERROR', logger='django_redis_aiogram'):
+    with caplog.at_level('WARNING', logger='django_redis_aiogram'):
         response = post({'not': 'an update'})
 
     assert response.status_code == 400
     assert seen == []
     assert 'could not read an update' in caplog.text
+    # the type as a field, and no traceback: the body is whoever posted it
+    record = next(item for item in caplog.records if 'could not read' in item.message)
+    assert record.tg_error == 'ValidationError'
+    assert record.exc_info is None, 'the traceback would carry unvalidated input'
 
 
 @override_settings(TELEGRAM_BOT=SETTINGS)
@@ -407,10 +411,13 @@ def test_concurrent_first_requests_share_one_dispatcher(monkeypatch):
     threads = [threading.Thread(target=deliver, args=(index,)) for index in range(4)]
     for thread in threads:
         thread.start()
+    deadline = time.monotonic() + 15
     for thread in threads:
-        thread.join(timeout=15)
+        thread.join(timeout=max(0.0, deadline - time.monotonic()))
 
     try:
+        # a request thread still blocked is the failure this test exists to catch
+        assert not [thread for thread in threads if thread.is_alive()], 'a request never returned'
         assert errors == [], errors
         assert len(built) == 1, f'{len(built)} dispatchers were built'
         assert sorted(seen) == [f'/probe{index}' for index in range(4)], seen

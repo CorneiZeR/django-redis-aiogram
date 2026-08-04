@@ -301,8 +301,9 @@ class TelegramBot:
             retries = 0
             while retries <= self.max_retries:
                 try:
-                    if self.rate_limiter is not None:
-                        await self.rate_limiter.acquire(call_kwargs.get('chat_id'))
+                    limiter = self.rate_limiter
+                    if limiter is not None:
+                        await limiter.acquire(call_kwargs.get('chat_id'))
                     await getattr(self.bot, function)(**call_kwargs)
                 except exceptions.TelegramRetryAfter as error:  # noqa: PERF203 - retrying is what the loop is for
                     last_error = error
