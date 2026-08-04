@@ -23,7 +23,6 @@ class TelegramBotAppConfig(AppConfig):
     def ready(self) -> None:
         """Register the checks and autodiscover routers, unless disabled here."""
         # deferred: apps.py is imported while the app registry is still loading
-        from django_redis_aiogram.checks import check_settings  # noqa: PLC0415 - as above
         from django_redis_aiogram.settings import SETTINGS_NAME, coerce_bool, conf  # noqa: PLC0415 - as above
 
         # parsed, not truthiness-tested: 'false' has to disable startup the same
@@ -31,6 +30,10 @@ class TelegramBotAppConfig(AppConfig):
         if not coerce_bool(conf['ENABLED'], f"{SETTINGS_NAME}['ENABLED']"):
             logger.debug('django-redis-aiogram is disabled in this process')
             return
+
+        # after the gate: checks are the only reason a disabled boot would pay
+        # for anything beyond the settings module
+        from django_redis_aiogram.checks import check_settings  # noqa: PLC0415 - only when enabled
 
         register(check_settings)
 

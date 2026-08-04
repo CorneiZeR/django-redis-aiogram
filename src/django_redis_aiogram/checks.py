@@ -13,8 +13,6 @@ from dataclasses import dataclass, fields
 from functools import partial
 from typing import Any
 
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import UpdateType
 from aiogram.fsm.storage.base import BaseStorage
 from django.core.checks import CheckMessage, Error
 from django.core.checks import Warning as CheckWarning
@@ -125,6 +123,9 @@ def _known_bot_properties(key: str) -> list[Problem]:
     value = conf.get(key)
     if not isinstance(value, Mapping):
         return []
+    # deferred: aiogram costs most of a second, and checks only run on demand
+    from aiogram.client.default import DefaultBotProperties  # noqa: PLC0415 - as above
+
     known = {field.name for field in fields(DefaultBotProperties)}
     # keys may be anything a project typed into settings, so stringify before joining
     unknown = sorted(str(name) for name in value if name not in known)
@@ -226,6 +227,9 @@ def _known_update_types(key: str) -> list[Problem]:
         return []
     if isinstance(allowed, (str, bytes)) or not isinstance(allowed, Collection):
         return [Problem(f'must be a list or tuple of update types, got {type(allowed).__name__}.')]
+
+    # deferred for the same reason as DefaultBotProperties above
+    from aiogram.enums import UpdateType  # noqa: PLC0415 - as above
 
     known = {member.value for member in UpdateType}
     # anything unhashable would raise out of the membership test below, so the
