@@ -140,7 +140,8 @@ def test_keyspace_delivery_with_notifications_from_the_server(server, redis_url)
 
         assert handled == [11], f"the expiry event never arrived: {handled}"
         flags = str(server.config_get("notify-keyspace-events")["notify-keyspace-events"])
-        assert "E" in flags and ("x" in flags or "A" in flags), flags
+        assert "E" in flags, flags
+        assert "x" in flags or "A" in flags, flags
 
 
 def test_two_workers_split_the_queue_without_duplicating(server, redis_url):

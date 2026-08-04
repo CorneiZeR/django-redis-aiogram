@@ -102,7 +102,8 @@ def test_failing_handler_does_not_kill_the_consumer(redis_server):
 
         def _handle(self, **kwargs):
             calls.append(kwargs)
-            raise RuntimeError("boom")
+            msg = "boom"
+            raise RuntimeError(msg)
 
     for index in range(2):
         redis_server.rpush(
@@ -217,7 +218,7 @@ def test_concurrent_send_raw_from_web_threads(monkeypatch):
             if len(sent) >= expected:
                 all_sent.set()
 
-        class session:
+        class session:  # noqa: N801 - it stands in for aiogram's `bot.session` attribute
             @staticmethod
             async def close():
                 pass
@@ -233,7 +234,7 @@ def test_concurrent_send_raw_from_web_threads(monkeypatch):
         try:
             ready.wait()
             instance.send_raw(chat_id=index, text="hi")
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001 - the test reports whatever a thread raised
             errors.append(error)
 
     threads = [threading.Thread(target=send, args=(index,)) for index in range(expected)]
@@ -271,7 +272,7 @@ def test_sends_that_all_see_a_stopped_loop_are_serialised():
             await asyncio.sleep(0.01)
             sent.append(kwargs)
 
-        class session:
+        class session:  # noqa: N801 - it stands in for aiogram's `bot.session` attribute
             @staticmethod
             async def close():
                 pass
@@ -298,7 +299,7 @@ def test_sends_that_all_see_a_stopped_loop_are_serialised():
         try:
             ready.wait()
             instance.send_raw(chat_id=index, text="hi")
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001 - the test reports whatever a thread raised
             errors.append(error)
 
     threads = [threading.Thread(target=send, args=(index,)) for index in range(expected)]
@@ -332,7 +333,7 @@ def test_a_zero_blpop_timeout_is_clamped(redis_server, monkeypatch):
         def __getattr__(self, name):
             return getattr(redis_server, name)
 
-    monkeypatch.setattr("django_redis_aiogram.delivery.get_redis", lambda: Spy())
+    monkeypatch.setattr("django_redis_aiogram.delivery.get_redis", Spy)
     # one message, so the consumer actually reaches the blocking call
     redis_server.rpush("TELEGRAM_BOT_MESSAGE", JsonSerializer().dumps({"function": "send_message", "chat_id": 1}))
     drain(RecordingBlpop(), expected=1, timeout=2)
@@ -353,7 +354,7 @@ def rate_limited_bot(attempts):
                 retry_after=0,
             )
 
-        class session:
+        class session:  # noqa: N801 - it stands in for aiogram's `bot.session` attribute
             @staticmethod
             async def close():
                 pass

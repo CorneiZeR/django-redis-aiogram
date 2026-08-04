@@ -1,8 +1,13 @@
-"""Redis hands back str when the URL enables decode_responses."""
+"""The helpers around the shared connection, and the str payloads it may hand back.
+
+A URL with `decode_responses=True` makes every read a str, which is why nothing
+downstream may call `.decode()` unconditionally.
+"""
 
 import fakeredis
 import pytest
 from django.test import override_settings
+from redis import Redis
 
 from django_redis_aiogram import TelegramBot
 from django_redis_aiogram.delivery import BlpopDelivery, KeyspaceDelivery
@@ -11,7 +16,7 @@ from django_redis_aiogram.serializers import JsonSerializer, loads
 
 
 @pytest.mark.parametrize(
-    "value,expected",
+    ("value", "expected"),
     [
         (b"already bytes", b"already bytes"),
         ("a str", b"a str"),
@@ -122,8 +127,6 @@ def test_the_connection_is_built_once_and_reused(monkeypatch):
     Nothing asserted this: a per-call client would leak a connection pool per
     send and still pass every other test in the suite.
     """
-    from redis import Redis
-
     built = []
     closed = []
 

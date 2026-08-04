@@ -14,6 +14,7 @@ from django.test import override_settings
 from redis.exceptions import ResponseError
 
 from django_redis_aiogram import TelegramBot
+from django_redis_aiogram.api import API_METHODS, check_function
 from django_redis_aiogram.delivery import BlpopDelivery, KeyspaceDelivery
 from django_redis_aiogram.serializers import JsonSerializer
 
@@ -100,7 +101,8 @@ def test_a_failing_handler_is_not_redelivered_forever(redis_server):
 
     def exploding(**kwargs):
         calls.append(kwargs)
-        raise RuntimeError("boom")
+        msg = "boom"
+        raise RuntimeError(msg)
 
     delivery = Recording(handler=exploding)
     delivery.handled = calls
@@ -118,10 +120,12 @@ class OldRedis:
         self._inner = inner
 
     def lmove(self, *args, **kwargs):
-        raise ResponseError("unknown command 'LMOVE'")
+        msg = "unknown command 'LMOVE'"
+        raise ResponseError(msg)
 
     def blmove(self, *args, **kwargs):
-        raise ResponseError("unknown command 'BLMOVE'")
+        msg = "unknown command 'BLMOVE'"
+        raise ResponseError(msg)
 
     def __getattr__(self, name):
         return getattr(self._inner, name)
@@ -199,8 +203,6 @@ def test_keyspace_drains_a_backlog_left_while_the_worker_was_down(redis_server):
 
 def test_only_telegram_api_methods_may_be_named():
     """A queued payload picks the method, so `getattr` must not be open season."""
-    from django_redis_aiogram.api import API_METHODS, check_function
-
     assert "send_message" in API_METHODS
     assert check_function("send_photo") == "send_photo"
 
@@ -211,8 +213,9 @@ def test_only_telegram_api_methods_may_be_named():
 
 @override_settings(TELEGRAM_BOT={"TOKEN": "42:x", "RATE_LIMIT": None})
 def test_send_raw_refuses_a_non_api_method():
+    destination = "/tmp/y"  # noqa: S108 - never opened, the call is refused on its name
     with pytest.raises(ValueError, match="not a Telegram API method"):
-        TelegramBot().send_raw("download_file", file_path="x", destination="/tmp/y")
+        TelegramBot().send_raw("download_file", file_path="x", destination=destination)
 
 
 @override_settings(TELEGRAM_BOT={"TOKEN": "42:x"})
@@ -240,12 +243,13 @@ def test_reclaim_survives_a_redis_that_is_not_up_yet(redis_server, monkeypatch):
 
     class Unreachable:
         def lmove(self, *args, **kwargs):
-            raise ConnectionError("Connection refused")
+            msg = "Connection refused"
+            raise ConnectionError(msg)
 
         def __getattr__(self, name):
             return getattr(redis_server, name)
 
-    monkeypatch.setattr("django_redis_aiogram.delivery.get_redis", lambda: Unreachable())
+    monkeypatch.setattr("django_redis_aiogram.delivery.get_redis", Unreachable)
 
     delivery = Recording()
     delivery.reclaim()  # must not raise
@@ -280,7 +284,8 @@ def test_reclaim_is_retried_when_redis_was_down_at_startup(redis_server):
         def lmove(self, *args, **kwargs):
             if not failures:
                 failures.append(True)
-                raise ConnectionError("Connection refused")
+                msg = "Connection refused"
+                raise ConnectionError(msg)
             return redis_server.lmove(*args, **kwargs)
 
         def __getattr__(self, name):
@@ -289,7 +294,7 @@ def test_reclaim_is_retried_when_redis_was_down_at_startup(redis_server):
     delivery = Recording()
 
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr("django_redis_aiogram.delivery.get_redis", lambda: FlakyOnce())
+        patch.setattr("django_redis_aiogram.delivery.get_redis", FlakyOnce)
         drain(delivery, expected_handled=1)
 
     assert [item["chat_id"] for item in delivery.handled] == [1]
@@ -306,7 +311,8 @@ def test_the_keyspace_consumer_also_retries_a_failed_reclaim(redis_server):
         def lmove(self, *args, **kwargs):
             if len(failures) < 2:
                 failures.append(True)
-                raise ConnectionError("Connection refused")
+                msg = "Connection refused"
+                raise ConnectionError(msg)
             return redis_server.lmove(*args, **kwargs)
 
         def __getattr__(self, name):
@@ -315,7 +321,7 @@ def test_the_keyspace_consumer_also_retries_a_failed_reclaim(redis_server):
     handled = []
     delivery = KeyspaceDelivery(handler=lambda **kwargs: handled.append(kwargs["chat_id"]))
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr("django_redis_aiogram.delivery.get_redis", lambda: DownForTwoAttempts())
+        patch.setattr("django_redis_aiogram.delivery.get_redis", DownForTwoAttempts)
         thread = delivery.start_thread()
         waiter = threading.Event()
         for _ in range(500):
@@ -338,14 +344,15 @@ def test_a_response_error_that_is_not_a_missing_lmove_keeps_crash_safety(redis_s
 
     class WrongType:
         def lmove(self, *args, **kwargs):
-            raise ResponseError("WRONGTYPE Operation against a key holding the wrong kind")
+            msg = "WRONGTYPE Operation against a key holding the wrong kind"
+            raise ResponseError(msg)
 
         def __getattr__(self, name):
             return getattr(redis_server, name)
 
     delivery = Recording()
     with pytest.MonkeyPatch.context() as patch, caplog.at_level("ERROR", logger=LOGGER):
-        patch.setattr("django_redis_aiogram.delivery.get_redis", lambda: WrongType())
+        patch.setattr("django_redis_aiogram.delivery.get_redis", WrongType)
         assert delivery.reclaim() is False, "the caller was not asked to retry"
 
     assert delivery._reliable is True, "crash-safe mode was given up on the wrong error"
@@ -360,14 +367,15 @@ def test_a_redis_that_fails_to_subscribe_does_not_kill_the_worker(redis_server, 
     class RefusesSubscribe:
         def pubsub(self, *args, **kwargs):
             attempts.append(True)
-            raise ConnectionError("Connection refused")
+            msg = "Connection refused"
+            raise ConnectionError(msg)
 
         def __getattr__(self, name):
             return getattr(redis_server, name)
 
     delivery = KeyspaceDelivery(handler=lambda **kwargs: None)
     with pytest.MonkeyPatch.context() as patch, caplog.at_level("ERROR", logger=LOGGER):
-        patch.setattr("django_redis_aiogram.delivery.get_redis", lambda: RefusesSubscribe())
+        patch.setattr("django_redis_aiogram.delivery.get_redis", RefusesSubscribe)
         thread = delivery.start_thread()
         waiter = threading.Event()
         for _ in range(300):
@@ -394,10 +402,12 @@ def test_a_redis_that_refuses_config_set_only_warns(redis_server, caplog):
 
     class RefusesConfigSet:
         def config_get(self, *args, **kwargs):
-            raise ResponseError("unknown command 'CONFIG'")
+            msg = "unknown command 'CONFIG'"
+            raise ResponseError(msg)
 
         def config_set(self, *args, **kwargs):
-            raise ResponseError("unknown command 'CONFIG'")
+            msg = "unknown command 'CONFIG'"
+            raise ResponseError(msg)
 
         def __getattr__(self, name):
             return getattr(redis_server, name)
@@ -405,7 +415,7 @@ def test_a_redis_that_refuses_config_set_only_warns(redis_server, caplog):
     handled = []
     delivery = KeyspaceDelivery(handler=lambda **kwargs: handled.append(kwargs["chat_id"]))
     with pytest.MonkeyPatch.context() as patch, caplog.at_level("WARNING", logger=LOGGER):
-        patch.setattr("django_redis_aiogram.delivery.get_redis", lambda: RefusesConfigSet())
+        patch.setattr("django_redis_aiogram.delivery.get_redis", RefusesConfigSet)
         thread = delivery.start_thread()
         waiter = threading.Event()
         for _ in range(500):
@@ -429,14 +439,15 @@ def test_a_redis_that_is_down_at_the_notification_probe_does_not_kill_the_worker
     class DownAtFirst:
         def config_get(self, *args, **kwargs):
             attempts.append(True)
-            raise ConnectionError("Connection refused")
+            msg = "Connection refused"
+            raise ConnectionError(msg)
 
         def __getattr__(self, name):
             return getattr(redis_server, name)
 
     delivery = KeyspaceDelivery(handler=lambda **kwargs: None)
     with pytest.MonkeyPatch.context() as patch, caplog.at_level("ERROR", logger=LOGGER):
-        patch.setattr("django_redis_aiogram.delivery.get_redis", lambda: DownAtFirst())
+        patch.setattr("django_redis_aiogram.delivery.get_redis", DownAtFirst)
         thread = delivery.start_thread()
         waiter = threading.Event()
         for _ in range(200):
@@ -481,7 +492,7 @@ def test_raise_exception_does_not_leave_a_message_in_flight(redis_server):
                 retry_after=0,
             )
 
-        class session:
+        class session:  # noqa: N801 - it stands in for aiogram's `bot.session` attribute
             @staticmethod
             async def close():
                 pass

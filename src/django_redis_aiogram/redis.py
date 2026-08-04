@@ -1,3 +1,11 @@
+"""The one Redis connection this package shares.
+
+Senders, consumers, the FSM heartbeat and the management commands all go through
+:func:`get_redis`, so a process opens a single connection pool however many of
+them are running. The connection is built on first use rather than at import,
+because Django settings are not readable while the app registry is loading.
+"""
+
 import threading
 from typing import Any
 
@@ -7,30 +15,54 @@ from redis import Redis
 
 from django_redis_aiogram.settings import SETTINGS_NAME, conf
 
-_lock = threading.Lock()
-_connection: Redis | None = None
+
+class _SharedConnection:
+    """Holds the shared client, together with the lock that keeps it single."""
+
+    def __init__(self) -> None:
+        """Start with an empty slot; nothing connects until someone asks."""
+        self._lock = threading.Lock()
+        self._client: Redis | None = None
+
+    @property
+    def is_open(self) -> bool:
+        """Whether a client has been built and not reset since."""
+        return self._client is not None
+
+    def get(self) -> Redis:
+        """Return the client, building it at most once."""
+        # read before taking the lock, so the steady state costs no lock at all
+        if self._client is None:
+            with self._lock:
+                if self._client is None:
+                    url = conf["REDIS_URL"]
+                    if not url:
+                        msg = f"{SETTINGS_NAME}['REDIS_URL'] is required to talk to Redis."
+                        raise ImproperlyConfigured(msg)
+                    self._client = Redis.from_url(url)
+        return self._client
+
+    def reset(self) -> None:
+        """Empty the slot, then close whatever was in it."""
+        with self._lock:
+            client, self._client = self._client, None
+        if client is not None:
+            # closing talks to the socket: a caller waiting to build a
+            # replacement should not be held up by it
+            client.close()
+
+
+_shared = _SharedConnection()
 
 
 def get_redis() -> Redis:
     """Return the shared connection, creating it on first use."""
-    global _connection
-    if _connection is None:
-        with _lock:
-            if _connection is None:
-                url = conf["REDIS_URL"]
-                if not url:
-                    raise ImproperlyConfigured(f"{SETTINGS_NAME}['REDIS_URL'] is required to talk to Redis.")
-                _connection = Redis.from_url(url)
-    return _connection
+    return _shared.get()
 
 
 def reset_redis() -> None:
     """Drop the shared connection so the next call reconnects."""
-    global _connection
-    with _lock:
-        connection, _connection = _connection, None
-    if connection is not None:
-        connection.close()
+    _shared.reset()
 
 
 def as_bytes(value: bytes | str) -> bytes:
@@ -50,18 +82,21 @@ class RedisProxy:
     module-level import without connecting at import time.
     """
 
-    def __getattr__(self, item: str) -> Any:
+    def __getattr__(self, item: str) -> Any:  # noqa: ANN401 - a forwarded Redis method may return anything
+        """Hand the attribute over to the shared client, connecting if needed."""
         return getattr(get_redis(), item)
 
     def __repr__(self) -> str:
-        state = "connected" if _connection is not None else "not connected"
+        """Say whether the connection behind the proxy exists yet."""
+        state = "connected" if _shared.is_open else "not connected"
         return f"<RedisProxy {state}>"
 
 
 redis_conn = RedisProxy()
 
 
-def _reset_on_setting_change(sender: Any, setting: str, **kwargs: Any) -> None:
+def _reset_on_setting_change(setting: str, **_kwargs: object) -> None:
+    """Reconnect after the settings change, since REDIS_URL may have moved."""
     if setting == SETTINGS_NAME:
         reset_redis()
 

@@ -30,6 +30,7 @@ from redis.client import PubSub
 from redis.exceptions import ResponseError
 
 from django_redis_aiogram.api import check_function
+from django_redis_aiogram.enums import DeliveryKind
 from django_redis_aiogram.redis import as_bytes, get_db_index, get_redis
 from django_redis_aiogram.serializers import SerializationError, loads
 from django_redis_aiogram.settings import conf
@@ -38,8 +39,10 @@ logger = logging.getLogger("django_redis_aiogram")
 
 Handler = Callable[..., Any]
 
-BLPOP_DELIVERY = "blpop"
-KEYSPACE_DELIVERY = "keyspace"
+# the names the DELIVERY setting takes, kept importable from here because that
+# is where callers have always found them
+BLPOP_DELIVERY = DeliveryKind.BLPOP
+KEYSPACE_DELIVERY = DeliveryKind.KEYSPACE
 
 
 def worker_identity() -> str:
@@ -59,6 +62,7 @@ class Delivery(ABC):
     """Consumes the Redis queue until stopped."""
 
     def __init__(self, handler: Handler) -> None:
+        """Take what each decoded message is handed to once it arrives."""
         self.handler = handler
         self._stop = threading.Event()
         self._reliable = True
@@ -66,6 +70,7 @@ class Delivery(ABC):
 
     @property
     def queue_key(self) -> str:
+        """The list queued messages are written to and read from."""
         return str(conf["REDIS_MESSAGES_KEY"])
 
     @property
@@ -82,9 +87,11 @@ class Delivery(ABC):
         """Block, consuming messages, until :meth:`stop` is called."""
 
     def stop(self) -> None:
+        """Ask :meth:`run` to return after its current read."""
         self._stop.set()
 
     def start_thread(self) -> threading.Thread:
+        """Run the consumer on a daemon thread and return it."""
         thread = threading.Thread(target=self.run, name="tgbot-delivery", daemon=True)
         thread.start()
         return thread
@@ -173,6 +180,11 @@ class Delivery(ABC):
             )
 
     def dispatch(self, raw: bytes) -> None:
+        """Decode one message and hand it to the handler.
+
+        A bad payload is one message's problem, so everything short of a kill is
+        logged and dropped: the consumer has to survive it to deliver the rest.
+        """
         try:
             payload = loads(raw)
         except SerializationError:
@@ -214,7 +226,10 @@ class Delivery(ABC):
 
 
 class BlpopDelivery(Delivery):
+    """Blocks on the queue itself, so a message is delivered as it arrives."""
+
     def run(self) -> None:
+        """Block on the queue until :meth:`stop` is called."""
         connection = get_redis()
         # 0 means "block for ever" in Redis, which would swallow stop(). The
         # heartbeat is written between reads, so a read longer than its interval
@@ -225,7 +240,7 @@ class BlpopDelivery(Delivery):
         logger.info(
             "delivery started",
             extra={
-                "tg_delivery": BLPOP_DELIVERY,
+                "tg_delivery": BLPOP_DELIVERY.value,
                 "tg_key": self.queue_key,
                 "tg_timeout": timeout,
                 "tg_crash_safe": self._reliable,
@@ -254,7 +269,10 @@ class BlpopDelivery(Delivery):
 
 
 class KeyspaceDelivery(Delivery):
+    """Waits for the expiry event of the key each send writes alongside."""
+
     def run(self) -> None:
+        """Read the expiry channel until :meth:`stop` is called."""
         channel = f"__keyevent@{get_db_index()}__:expired"
         pubsub: PubSub | None = None
         reclaimed = False
@@ -270,7 +288,7 @@ class KeyspaceDelivery(Delivery):
                             # no expiry event announces what the retry put back
                             self.consume_pending()
                     pubsub.get_message(timeout=1.0)
-                except Exception:
+                except Exception:  # noqa: PERF203 - catching per iteration is the resilience this loop exists for
                     # setting up is as much a network call as reading: a Redis
                     # that is not up yet must not end the consumer thread
                     logger.exception("keyspace consumer error, retrying")
@@ -288,7 +306,7 @@ class KeyspaceDelivery(Delivery):
         logger.info(
             "delivery started",
             extra={
-                "tg_delivery": KEYSPACE_DELIVERY,
+                "tg_delivery": KEYSPACE_DELIVERY.value,
                 "tg_channel": channel,
                 "tg_crash_safe": self._reliable,
             },
@@ -329,15 +347,18 @@ class KeyspaceDelivery(Delivery):
         self.consume_pending()
 
 
+# keyed by the enum's value, so the keys are the plain strings the setting holds
 DELIVERIES: dict[str, type[Delivery]] = {
-    BLPOP_DELIVERY: BlpopDelivery,
-    KEYSPACE_DELIVERY: KeyspaceDelivery,
+    DeliveryKind.BLPOP.value: BlpopDelivery,
+    DeliveryKind.KEYSPACE.value: KeyspaceDelivery,
 }
 
 
 def get_delivery(handler: Handler) -> Delivery:
+    """Build the consumer the DELIVERY setting names."""
     name = conf["DELIVERY"]
     try:
         return DELIVERIES[name](handler)
     except KeyError:
-        raise ValueError(f"Unknown delivery {name!r}, expected one of {sorted(DELIVERIES)}.") from None
+        msg = f"Unknown delivery {name!r}, expected one of {sorted(DELIVERIES)}."
+        raise ValueError(msg) from None
