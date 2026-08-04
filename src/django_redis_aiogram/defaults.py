@@ -44,7 +44,7 @@ DEFAULTS: dict[str, Any] = {
     'WORKER_NAME': '',
     # how long a blocking pop waits before re-checking the shutdown flag
     'BLPOP_TIMEOUT': 5,
-    'REDIS_TIMEOUT': 5,
+    'REDIS_TIMEOUT': 10,
     # how often the consumer refreshes the key `tgbot_healthcheck` reads. The key
     # lives three times as long, so one missed refresh is not a failure
     'HEARTBEAT_INTERVAL': 10,
