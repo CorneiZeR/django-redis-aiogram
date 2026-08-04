@@ -34,8 +34,10 @@ from django_redis_aiogram.throttling import RateLimiter, get_rate_limiter
 logger = logging.getLogger('django_redis_aiogram')
 
 #: the pre-2.2 spellings, kept importable; StorageKind is the name to use now
-MEMORY_STORAGE = StorageKind.MEMORY
-REDIS_STORAGE = StorageKind.REDIS
+# aliases carry the plain strings 2.0 shipped: a (str, Enum) member would
+# interpolate as its qualified name on newer Pythons, and these are public
+MEMORY_STORAGE = StorageKind.MEMORY.value
+REDIS_STORAGE = StorageKind.REDIS.value
 
 # run_until_complete is not reentrant, and the loop — not the bot — is what
 # cannot be entered twice. Two bots handed the same loop must share one lock.
@@ -109,8 +111,6 @@ class TelegramBot:
         self._bot: Bot | None = None
         self._dispatcher: Dispatcher | None = None
         self._router = Router()
-        self._rate_limiter: RateLimiter | None = None
-        self._rate_limiter_built = False
         #: sends this bot scheduled, so shutdown drains its own work only
         self._sends: set[asyncio.Task[None]] = set()
         self._polling = False
@@ -130,10 +130,10 @@ class TelegramBot:
         Two instances holding the same token therefore share one budget; a
         different token gets its own.
         """
-        if not self._rate_limiter_built:
-            self._rate_limiter = get_rate_limiter(str(conf['TOKEN'] or ''))
-            self._rate_limiter_built = True
-        return self._rate_limiter
+        # no instance cache: the registry already caches per token, and holding
+        # a second copy here is what kept a bot on stale RATE_LIMIT settings
+        # after the registry was reset
+        return get_rate_limiter(str(conf['TOKEN'] or ''))
 
     @property
     def max_retries(self) -> int:
@@ -285,9 +285,6 @@ class TelegramBot:
                     if not loop.is_closed():
                         loop.close()
             self._loop = None
-            # the buckets track wall clock, so a fresh loop needs a fresh limiter
-            self._rate_limiter = None
-            self._rate_limiter_built = False
         finally:
             # a closed bot can be built again, so this must not stick
             self._closing = False

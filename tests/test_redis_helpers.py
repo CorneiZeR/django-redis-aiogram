@@ -158,3 +158,29 @@ def test_the_connection_is_built_once_and_reused(monkeypatch):
 
     assert second is not first, 'reset_redis kept the closed client'
     assert len(built) == 2, built
+
+
+def test_get_reads_the_slot_exactly_once_on_the_fast_path():
+    """A reset between two reads of the attribute used to hand the caller None.
+
+    Deterministic where a stress test is not: the second read of the slot
+    answers None, exactly what a concurrent reset() makes it. Code that keeps
+    one local read never performs a second one.
+    """
+    from django_redis_aiogram.redis import _SharedConnection
+
+    sentinel = object()
+    reads = {'count': 0}
+
+    class SecondReadIsReset(_SharedConnection):
+        def __getattribute__(self, name: str):
+            if name == '_client':
+                reads['count'] += 1
+                if reads['count'] > 1:
+                    return None
+            return super().__getattribute__(name)
+
+    holder = SecondReadIsReset()
+    object.__setattr__(holder, '_client', sentinel)
+
+    assert holder.get() is sentinel, 'get() re-read the slot and met the reset'

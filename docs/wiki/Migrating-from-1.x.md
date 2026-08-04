@@ -103,8 +103,11 @@ you close it again matters — a 1.x producer keeps writing pickled payloads:
 
 `ALLOW_PICKLE` controls reads: `True` accepts a pickled payload, `False`
 refuses it. So removing it while an old producer is still running means its
-messages are written and then refused on read — silently discarded. It is also
-the code-execution door, so close it as soon as step 2 holds.
+messages are written and then refused on read. On Redis 6.2+ the consumer
+leaves each refused message in its in-flight list and says so in the log, so
+setting `ALLOW_PICKLE` back and restarting the worker delivers them; without
+`LMOVE` they are gone. Either way it is the code-execution door, so close it as
+soon as step 2 holds.
 
 ## 7. Re-silence checks if you had to
 

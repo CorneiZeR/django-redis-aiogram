@@ -18,11 +18,12 @@ from aiogram.enums import UpdateType
 from aiogram.fsm.storage.base import BaseStorage
 from django.core.checks import CheckMessage, Error
 from django.core.checks import Warning as CheckWarning
+from django.core.exceptions import ImproperlyConfigured
 from django.utils.module_loading import import_string
 
 from django_redis_aiogram.defaults import DEFAULTS
 from django_redis_aiogram.enums import DeliveryKind, SerializerKind, StorageKind, UpdateMode, choices
-from django_redis_aiogram.settings import SETTINGS_NAME, conf
+from django_redis_aiogram.settings import SETTINGS_NAME, coerce_bool, conf
 from django_redis_aiogram.throttling import KNOWN_RATE_LIMIT_KEYS
 
 DELIVERY_CHOICES = choices(DeliveryKind)
@@ -169,7 +170,16 @@ def _sane_rate_limits(key: str) -> list[Problem]:
 
 def _readable_serializer(key: str) -> list[Problem]:
     """Refuse to write pickle the reader would throw away: sends would vanish."""
-    if conf.get(key) != SerializerKind.PICKLE or conf.get('ALLOW_PICKLE'):
+    # coerced like the reader coerces it: from the environment this is a string
+    if conf.get(key) != SerializerKind.PICKLE:
+        return []
+    try:
+        # coerced like the reader coerces it: from the environment this is a string
+        allowed = coerce_bool(conf.get('ALLOW_PICKLE'), f"{SETTINGS_NAME}['ALLOW_PICKLE']")
+    except ImproperlyConfigured:
+        # unreadable is E017's finding; this check cannot say anything about it
+        return []
+    if allowed:
         return []
     return [
         Problem(
@@ -231,7 +241,9 @@ def _known_update_types(key: str) -> list[Problem]:
 
 def _known_keys(_key: str) -> list[Problem]:
     """Warn about keys nothing reads: settings keeps them, so a typo is silent."""
-    unknown = sorted(set(conf) - set(DEFAULTS))
+    # a non-string key would raise out of join and sorting mixed types raises
+    # too, so everything unknown is rendered through repr's eyes first
+    unknown = sorted(repr(key) for key in set(conf) - set(DEFAULTS))
     if not unknown:
         return []
     return [

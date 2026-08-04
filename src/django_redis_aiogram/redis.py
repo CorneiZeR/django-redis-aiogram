@@ -31,16 +31,19 @@ class _SharedConnection:
 
     def get(self) -> Redis:
         """Return the client, building it at most once."""
-        # read before taking the lock, so the steady state costs no lock at all
-        if self._client is None:
+        # one read, kept local: a reset() between two reads of the attribute
+        # would otherwise let this return None
+        client = self._client
+        if client is None:
             with self._lock:
-                if self._client is None:
+                client = self._client
+                if client is None:
                     url = conf['REDIS_URL']
                     if not url:
                         msg = f"{SETTINGS_NAME}['REDIS_URL'] is required to talk to Redis."
                         raise ImproperlyConfigured(msg)
-                    self._client = Redis.from_url(url)
-        return self._client
+                    client = self._client = Redis.from_url(url)
+        return client
 
     def reset(self) -> None:
         """Empty the slot, then close whatever was in it."""

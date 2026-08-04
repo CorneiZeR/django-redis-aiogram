@@ -32,7 +32,7 @@ from redis.exceptions import ResponseError
 from django_redis_aiogram.api import check_function
 from django_redis_aiogram.enums import DeliveryKind
 from django_redis_aiogram.redis import as_bytes, get_db_index, get_redis
-from django_redis_aiogram.serializers import SerializationError, loads
+from django_redis_aiogram.serializers import PickleReadRefusedError, SerializationError, loads
 from django_redis_aiogram.settings import conf
 
 logger = logging.getLogger('django_redis_aiogram')
@@ -41,8 +41,10 @@ Handler = Callable[..., Any]
 
 # the names the DELIVERY setting takes, kept importable from here because that
 # is where callers have always found them
-BLPOP_DELIVERY = DeliveryKind.BLPOP
-KEYSPACE_DELIVERY = DeliveryKind.KEYSPACE
+# aliases carry the plain strings 2.0 shipped: a (str, Enum) member would
+# interpolate as its qualified name on newer Pythons, and these are public
+BLPOP_DELIVERY = DeliveryKind.BLPOP.value
+KEYSPACE_DELIVERY = DeliveryKind.KEYSPACE.value
 
 
 def worker_identity() -> str:
@@ -179,20 +181,32 @@ class Delivery(ABC):
                 extra={'tg_key': self.processing_key},
             )
 
-    def dispatch(self, raw: bytes) -> None:
+    def dispatch(self, raw: bytes) -> bool:
         """Decode one message and hand it to the handler.
 
         A bad payload is one message's problem, so everything short of a kill is
         logged and dropped: the consumer has to survive it to deliver the rest.
+
+        Returns whether the message should be acknowledged. Only a pickle read
+        the configuration refuses says no: that payload is valid and the refusal
+        is the operator's to fix, so it stays in flight for a reclaim to retry
+        once ALLOW_PICKLE is set — acknowledging would silently destroy a 1.x
+        queue over a missing setting.
         """
         try:
             payload = loads(raw)
+        except PickleReadRefusedError:
+            logger.exception(
+                'leaving a refused pickle message in flight; set ALLOW_PICKLE to deliver it',
+                extra={'tg_key': self.processing_key},
+            )
+            return False
         except SerializationError:
             logger.exception('dropping undecodable queued message')
-            return
+            return True
         except Exception:
             logger.exception('dropping queued message that failed to decode')
-            return
+            return True
         try:
             check_function(str(payload.get('function', '')))
         except ValueError:
@@ -200,7 +214,7 @@ class Delivery(ABC):
                 'dropping queued message naming a method that is not Telegram API',
                 extra={'tg_function': payload.get('function')},
             )
-            return
+            return True
         try:
             self.handler(**payload)
         except Exception:
@@ -208,6 +222,7 @@ class Delivery(ABC):
                 'handler failed for queued message',
                 extra={'tg_function': payload.get('function')},
             )
+        return True
 
     def consume_pending(self) -> None:
         """Drain the queue without blocking, acknowledging each message."""
@@ -221,8 +236,8 @@ class Delivery(ABC):
                 raw = connection.lpop(self.queue_key)  # type: ignore[assignment]
             if raw is None:
                 return
-            self.dispatch(as_bytes(raw))
-            self.acknowledge(raw)
+            if self.dispatch(as_bytes(raw)):
+                self.acknowledge(raw)
 
 
 class BlpopDelivery(Delivery):
@@ -240,7 +255,7 @@ class BlpopDelivery(Delivery):
         logger.info(
             'delivery started',
             extra={
-                'tg_delivery': BLPOP_DELIVERY.value,
+                'tg_delivery': BLPOP_DELIVERY,
                 'tg_key': self.queue_key,
                 'tg_timeout': timeout,
                 'tg_crash_safe': self._reliable,
@@ -264,8 +279,8 @@ class BlpopDelivery(Delivery):
                 continue
             if raw is None:
                 continue
-            self.dispatch(as_bytes(raw))
-            self.acknowledge(raw)
+            if self.dispatch(as_bytes(raw)):
+                self.acknowledge(raw)
 
 
 class KeyspaceDelivery(Delivery):
@@ -306,7 +321,7 @@ class KeyspaceDelivery(Delivery):
         logger.info(
             'delivery started',
             extra={
-                'tg_delivery': KEYSPACE_DELIVERY.value,
+                'tg_delivery': KEYSPACE_DELIVERY,
                 'tg_channel': channel,
                 'tg_crash_safe': self._reliable,
             },

@@ -81,16 +81,16 @@ __all__ = [
 ]
 
 # The 2.0 module constants, now aliases of the enum members that carry the same strings
-TAG_MODEL = SerializationTag.MODEL
-TAG_DEFAULT = SerializationTag.DEFAULT
-TAG_DATETIME = SerializationTag.DATETIME
-TAG_DATE = SerializationTag.DATE
-TAG_DECIMAL = SerializationTag.DECIMAL
-TAG_BYTES = SerializationTag.BYTES
-TAG_INPUT_FILE = SerializationTag.INPUT_FILE
+TAG_MODEL = SerializationTag.MODEL.value
+TAG_DEFAULT = SerializationTag.DEFAULT.value
+TAG_DATETIME = SerializationTag.DATETIME.value
+TAG_DATE = SerializationTag.DATE.value
+TAG_DECIMAL = SerializationTag.DECIMAL.value
+TAG_BYTES = SerializationTag.BYTES.value
+TAG_INPUT_FILE = SerializationTag.INPUT_FILE.value
 
-JSON_SERIALIZER = SerializerKind.JSON
-PICKLE_SERIALIZER = SerializerKind.PICKLE
+JSON_SERIALIZER = SerializerKind.JSON.value
+PICKLE_SERIALIZER = SerializerKind.PICKLE.value
 
 # Frozen like the tags: these name the input file kind inside a queued payload
 FS_INPUT_FILE = 'FSInputFile'
@@ -105,7 +105,8 @@ class UnsupportedInputFileError(SerializationError):
         """Name the refused type and the two ways to send the file anyway."""
         super().__init__(
             f'{type(value).__name__} cannot be queued. Send a file_id or a URL instead, '
-            "or set TELEGRAM_BOT['SERIALIZER'] to 'pickle'.",
+            "or set TELEGRAM_BOT['SERIALIZER'] to 'pickle' together with "
+            'ALLOW_PICKLE = True, or the reader will refuse what it writes.',
         )
 
 
@@ -138,7 +139,7 @@ class UnknownSerializerError(SerializationError):
 
     def __init__(self, name: object) -> None:
         """Name the refused serializer and the ones that exist."""
-        known = sorted(kind.value for kind in SERIALIZERS)
+        known = sorted(SERIALIZERS)
         super().__init__(f'Unknown serializer {name!r}, expected one of {known}.')
 
 
@@ -409,7 +410,7 @@ class JsonSerializer:
     """The default format: tagged JSON, readable and not executable."""
 
     # .value, not the member: this name gets logged and compared, and a member formats as its class
-    name: str = JSON_SERIALIZER.value
+    name: str = JSON_SERIALIZER
 
     def dumps(self, payload: dict[str, Any]) -> bytes:
         """Encode a queued call as JSON bytes."""
@@ -438,7 +439,7 @@ class JsonSerializer:
 class PickleSerializer:
     """The 1.x format, kept for objects JSON cannot describe."""
 
-    name: str = PICKLE_SERIALIZER.value
+    name: str = PICKLE_SERIALIZER
 
     def dumps(self, payload: dict[str, Any]) -> bytes:
         """Encode a queued call as pickle bytes."""
@@ -460,7 +461,7 @@ class PickleSerializer:
         return decoded
 
 
-SERIALIZERS: dict[SerializerKind, type[Serializer]] = {
+SERIALIZERS: dict[str, type[Serializer]] = {
     JSON_SERIALIZER: JsonSerializer,
     PICKLE_SERIALIZER: PickleSerializer,
 }

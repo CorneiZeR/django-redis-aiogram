@@ -33,9 +33,11 @@ Sleeper = Callable[[float], Awaitable[None]]
 
 # the budget names, kept as module constants because that is how 2.0 exposed
 # them; never interpolate one, an (str, Enum) member formats as its own repr
-OVERALL_PER_SECOND = RateLimitKey.OVERALL_PER_SECOND
-PER_CHAT_PER_SECOND = RateLimitKey.PER_CHAT_PER_SECOND
-GROUP_PER_MINUTE = RateLimitKey.GROUP_PER_MINUTE
+# aliases carry the plain strings 2.0 shipped: a (str, Enum) member would
+# interpolate as its qualified name on newer Pythons, and these are public
+OVERALL_PER_SECOND = RateLimitKey.OVERALL_PER_SECOND.value
+PER_CHAT_PER_SECOND = RateLimitKey.PER_CHAT_PER_SECOND.value
+GROUP_PER_MINUTE = RateLimitKey.GROUP_PER_MINUTE.value
 
 KNOWN_RATE_LIMIT_KEYS = choices(RateLimitKey)
 

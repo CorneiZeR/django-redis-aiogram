@@ -31,8 +31,8 @@ logger = logging.getLogger('django_redis_aiogram')
 SECRET_HEADER = 'HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN'  # noqa: S105 - a header name, not the secret it carries
 # aliases: the modes were named here before the enums module existed, and both
 # this package and its consumers import them from this path
-POLLING = UpdateMode.POLLING
-WEBHOOK = UpdateMode.WEBHOOK
+POLLING = UpdateMode.POLLING.value
+WEBHOOK = UpdateMode.WEBHOOK.value
 #: plain strings, so argparse choices and messages read as the settings do
 MODES = choices(UpdateMode)
 

@@ -199,3 +199,11 @@ def test_every_registry_row_guards_a_real_setting():
 def test_a_non_string_worker_name_is_reported():
     """It names the in-flight list, so a wrong type breaks reclaim at startup."""
     assert 'django_redis_aiogram.E021' in ids(check_settings())
+
+
+@override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://x', 42: 'numeric'})
+def test_a_non_string_settings_key_is_reported_not_raised():
+    """`", ".join` over mixed key types used to raise out of manage.py check."""
+    reported = {message.id for message in check_settings()}
+
+    assert 'django_redis_aiogram.W003' in reported

@@ -16,7 +16,7 @@ from redis.exceptions import ResponseError
 from django_redis_aiogram import TelegramBot
 from django_redis_aiogram.api import API_METHODS, check_function
 from django_redis_aiogram.delivery import BlpopDelivery, KeyspaceDelivery
-from django_redis_aiogram.serializers import JsonSerializer
+from django_redis_aiogram.serializers import JsonSerializer, PickleSerializer
 
 LOGGER = 'django_redis_aiogram'
 QUEUE = 'TELEGRAM_BOT_MESSAGE'
@@ -235,6 +235,9 @@ def test_a_queued_non_api_method_is_dropped_not_executed(redis_server):
     drain(delivery, expected_handled=1)
 
     assert [item['chat_id'] for item in delivery.handled] == [5]
+    # permanently invalid, so it is acknowledged: redelivery cannot fix a name
+    assert redis_server.llen(QUEUE) == 0
+    assert redis_server.llen(PROCESSING) == 0
 
 
 @override_settings(TELEGRAM_BOT=SETTINGS)
@@ -509,3 +512,32 @@ def test_raise_exception_does_not_leave_a_message_in_flight(redis_server):
     assert redis_server.llen(PROCESSING) == 0, 'the refused message was left for reclaim'
     instance._bot = None
     instance.close()
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'ALLOW_PICKLE': False})
+def test_a_refused_pickle_message_stays_in_flight(redis_server, caplog):
+    """A missing setting must not destroy a 1.x queue: the payload is valid and
+    the refusal is the operator's to fix, so it waits for a reclaim."""
+    redis_server.rpush(QUEUE, PickleSerializer().dumps({'function': 'send_message', 'chat_id': 1}))
+    redis_server.rpush(QUEUE, payload(2))
+
+    delivery = Recording()
+    with caplog.at_level('ERROR', logger=LOGGER):
+        drain(delivery, expected_handled=1)
+
+    assert [item['chat_id'] for item in delivery.handled] == [2], 'the JSON message behind it was blocked'
+    assert redis_server.llen(QUEUE) == 0
+    assert redis_server.llen(PROCESSING) == 1, 'the refused message was acknowledged away'
+    assert 'set ALLOW_PICKLE to deliver it' in caplog.text
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'ALLOW_PICKLE': True})
+def test_the_refused_message_is_delivered_once_the_operator_relents(redis_server):
+    """The other half: reclaim plus the setting turns refusal into delivery."""
+    redis_server.rpush(PROCESSING, PickleSerializer().dumps({'function': 'send_message', 'chat_id': 7}))
+
+    delivery = Recording()
+    drain(delivery, expected_handled=1)
+
+    assert [item['chat_id'] for item in delivery.handled] == [7]
+    assert redis_server.llen(PROCESSING) == 0
