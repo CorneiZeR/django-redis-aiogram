@@ -5,10 +5,12 @@ was only ever set inside an `isinstance` branch that a wrong type never entered.
 import pathlib
 import re
 
-from django.core.checks import Error, Warning
+from django.core.checks import Error
+from django.core.checks import Warning as CheckWarning
 from django.test import override_settings
 
-from django_redis_aiogram.checks import check_settings
+from django_redis_aiogram.checks import CHECKS, check_settings
+from django_redis_aiogram.defaults import DEFAULTS
 
 
 def ids(messages):
@@ -87,7 +89,7 @@ def test_missing_credentials_warn_but_do_not_fail():
 def test_disabled_bot_does_not_warn_about_credentials():
     messages = check_settings()
     assert isinstance(messages, list)
-    assert not [m for m in messages if isinstance(m, Warning) and m.id.endswith("W001")]
+    assert not [m for m in messages if isinstance(m, CheckWarning) and m.id.endswith("W001")]
 
 
 SETTINGS_PAGE = pathlib.Path(__file__).resolve().parent.parent / "docs" / "wiki" / "Settings.md"
@@ -178,6 +180,19 @@ def test_every_check_id_is_documented():
     """An operator meeting E021 has to be able to look it up."""
     missing = sorted(EXPECTED_IDS - documented_ids())
     assert not missing, f"check ids missing from docs/wiki/Settings.md: {missing}"
+
+
+def test_every_registry_row_reports_under_its_own_id():
+    """Two rows sharing an id would make the docs entry ambiguous."""
+    codes = [check.code for check in CHECKS]
+    assert sorted(codes) == sorted(set(codes))
+
+
+def test_every_registry_row_guards_a_real_setting():
+    """A typo in the key would validate a setting nothing ever reads."""
+    # the unknown-keys row is about the settings dict as a whole, so it has no key
+    unknown = sorted({check.key for check in CHECKS if check.key} - set(DEFAULTS))
+    assert unknown == []
 
 
 @override_settings(TELEGRAM_BOT={"TOKEN": "42:x", "REDIS_URL": "redis://x", "WORKER_NAME": 7})
