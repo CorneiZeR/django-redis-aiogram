@@ -12,6 +12,7 @@ from the class under test would agree with any change to it.
 
 import asyncio
 import inspect
+import pathlib
 
 import pytest
 from django.test import override_settings
@@ -187,3 +188,39 @@ def test_enum_members_are_accepted_wherever_the_string_is():
     serious = [message.id for message in check_settings() if message.is_serious()]
 
     assert serious == [], serious
+
+
+def test_the_installed_redis_can_run_the_fsm_storage():
+    """Catches a bad floor in the unit suite, where fakeredis cannot hide it.
+
+    aiogram's RedisStorage calls aclose() on the async client. redis-py added it
+    in 5.0.1, so the 2.1.x floor of >=5.0 promised support that raised
+    AttributeError — and nothing noticed, because the unit suite talks to
+    fakeredis, which has aclose(). This asserts the real client the floor allows.
+    """
+    from redis.asyncio import Redis
+
+    assert hasattr(Redis, 'aclose'), 'the installed redis-py cannot back FSM_STORAGE = redis'
+
+
+def test_the_declared_redis_floor_is_not_below_what_aiogram_asks_for():
+    """We use aiogram's storage, so its requirement is the real lower bound."""
+    import re
+    from importlib.metadata import requires
+
+    pyproject = (pathlib.Path(__file__).resolve().parent.parent / 'pyproject.toml').read_text(encoding='utf-8')
+    declared = re.search(r'"redis>=([\d.]+)"', pyproject)
+    assert declared, 'the redis requirement is no longer spelled the way this test reads it'
+
+    wanted = [re.search(r'>=([\d.]+)', line) for line in requires('aiogram') or [] if line.startswith('redis')]
+    asked = [match.group(1) for match in wanted if match]
+    assert asked, 'aiogram no longer declares a redis lower bound'
+
+    def parts(version):
+        # padded: '6.2' and '6.2.0' are the same floor, and a short tuple sorts low
+        numbers = [int(number) for number in version.split('.')]
+        return tuple(numbers + [0] * (3 - len(numbers)))
+
+    assert parts(declared.group(1)) >= max(parts(version) for version in asked), (
+        f'declared redis>={declared.group(1)}, aiogram asks for >={max(asked)}'
+    )

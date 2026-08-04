@@ -12,7 +12,7 @@ What follows is what you get by doing the work.
 
 ## Requirements
 
-Python 3.10–3.14, Django 5.2+, aiogram 3.30+, redis 5.0+. Django 4.2 reached
+Python 3.10–3.14, Django 5.2+, aiogram 3.30+, redis 6.2+. Django 4.2 reached
 end of life, and aiogram 3.30 needs Python 3.10.
 
 ## 1. Rename the app and the imports

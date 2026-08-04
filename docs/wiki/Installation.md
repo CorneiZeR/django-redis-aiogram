@@ -4,7 +4,12 @@
 pip install django-redis-aiogram
 ```
 
-Requires Python 3.10–3.14, Django 5.2+, aiogram 3.30+, redis 5.0+.
+Requires Python 3.10–3.14, Django 5.2+, aiogram 3.30+, redis 6.2+.
+
+The redis floor is 6.2 because aiogram's `RedisStorage` asks for it, and
+`FSM_STORAGE: 'redis'` is the default. On redis-py below 5.0.1 the storage
+raises `AttributeError: 'Redis' object has no attribute 'aclose'`. redis-py 8 is
+tested here and works, though aiogram's own optional extra stops at 7.
 
 ## Add the app
 
