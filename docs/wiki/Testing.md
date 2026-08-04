@@ -125,8 +125,46 @@ def test_only_text_reaches_the_echo():
     assert seen == ['/probe']
 ```
 
-`Bot(token='42:x')` opens no connection on its own — nothing here reaches
-Telegram as long as the handler does not call `answer`.
+`Bot(token='42:x')` opens no connection on its own, and the handler above only
+records — so nothing reaches Telegram.
+
+**A handler that answers is a different matter.** `feed_update` hands the
+handler a *copy* of the event bound to the bot, so patching `answer` on the
+message you constructed has no effect: the copy carries the real one, and
+`await message.answer(...)` performs an actual API call. Stub the bot's session
+instead, which is the seam every reply goes through:
+
+```python
+from aiogram.client.session.base import BaseSession
+
+
+class RecordingSession(BaseSession):
+    def __init__(self):
+        super().__init__()
+        self.calls = []
+
+    async def close(self):
+        pass
+
+    async def make_request(self, bot, method, timeout=None):
+        self.calls.append(method)
+
+    async def stream_content(self, *args, **kwargs):  # pragma: no cover - unused
+        yield b''
+
+
+def test_the_handler_answers():
+    session = RecordingSession()
+    fake = Bot(token='42:x', session=session)
+    ...
+    asyncio.run(dispatcher.feed_update(fake, update))
+
+    assert [type(call).__name__ for call in session.calls] == ['SendMessage']
+    assert session.calls[0].text == 'you have 3 open orders'
+```
+
+Calling the handler directly, as in the section above, avoids all of this and is
+the better choice unless the routing itself is what you are testing.
 
 To exercise your real routing, include `bot.router` instead of a fresh one. Mind
 the order: aiogram stops at the first handler that matches, so a catch-all
