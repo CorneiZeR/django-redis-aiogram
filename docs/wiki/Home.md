@@ -11,7 +11,7 @@ Telegram from the calling process.
 ```python
 from django_redis_aiogram import bot
 
-bot.send(chat_id=CHAT_ID, text="hello")
+bot.send(chat_id=CHAT_ID, text='hello')
 ```
 
 ## Start here

@@ -44,40 +44,40 @@ from django_redis_aiogram.settings import SETTINGS_NAME, coerce_bool, conf
 
 #: the module's public surface; listing SerializationError keeps its 2.0 import path alive
 __all__ = [
-    "JSON_SERIALIZER",
-    "PICKLE_SERIALIZER",
-    "SERIALIZERS",
-    "TAG_BYTES",
-    "TAG_DATE",
-    "TAG_DATETIME",
-    "TAG_DECIMAL",
-    "TAG_DEFAULT",
-    "TAG_INPUT_FILE",
-    "TAG_MODEL",
-    "BytesCodec",
-    "DateCodec",
-    "DatetimeCodec",
-    "DecimalCodec",
-    "DefaultSentinelCodec",
-    "InputFileCodec",
-    "JsonSerializer",
-    "ModelCodec",
-    "NonMappingPayloadError",
-    "PickleReadRefusedError",
-    "PickleSerializer",
-    "PickleWriteRefusedError",
-    "SerializationError",
-    "Serializer",
-    "TypeCodec",
-    "UnknownInputFileKindError",
-    "UnknownModelError",
-    "UnknownSerializerError",
-    "UnsupportedInputFileError",
-    "decode",
-    "encode",
-    "get_serializer",
-    "loads",
-    "looks_like_json",
+    'JSON_SERIALIZER',
+    'PICKLE_SERIALIZER',
+    'SERIALIZERS',
+    'TAG_BYTES',
+    'TAG_DATE',
+    'TAG_DATETIME',
+    'TAG_DECIMAL',
+    'TAG_DEFAULT',
+    'TAG_INPUT_FILE',
+    'TAG_MODEL',
+    'BytesCodec',
+    'DateCodec',
+    'DatetimeCodec',
+    'DecimalCodec',
+    'DefaultSentinelCodec',
+    'InputFileCodec',
+    'JsonSerializer',
+    'ModelCodec',
+    'NonMappingPayloadError',
+    'PickleReadRefusedError',
+    'PickleSerializer',
+    'PickleWriteRefusedError',
+    'SerializationError',
+    'Serializer',
+    'TypeCodec',
+    'UnknownInputFileKindError',
+    'UnknownModelError',
+    'UnknownSerializerError',
+    'UnsupportedInputFileError',
+    'decode',
+    'encode',
+    'get_serializer',
+    'loads',
+    'looks_like_json',
 ]
 
 # The 2.0 module constants, now aliases of the enum members that carry the same strings
@@ -93,9 +93,9 @@ JSON_SERIALIZER = SerializerKind.JSON
 PICKLE_SERIALIZER = SerializerKind.PICKLE
 
 # Frozen like the tags: these name the input file kind inside a queued payload
-FS_INPUT_FILE = "FSInputFile"
-URL_INPUT_FILE = "URLInputFile"
-BUFFERED_INPUT_FILE = "BufferedInputFile"
+FS_INPUT_FILE = 'FSInputFile'
+URL_INPUT_FILE = 'URLInputFile'
+BUFFERED_INPUT_FILE = 'BufferedInputFile'
 
 
 class UnsupportedInputFileError(SerializationError):
@@ -104,7 +104,7 @@ class UnsupportedInputFileError(SerializationError):
     def __init__(self, value: InputFile) -> None:
         """Name the refused type and the two ways to send the file anyway."""
         super().__init__(
-            f"{type(value).__name__} cannot be queued. Send a file_id or a URL instead, "
+            f'{type(value).__name__} cannot be queued. Send a file_id or a URL instead, '
             "or set TELEGRAM_BOT['SERIALIZER'] to 'pickle'.",
         )
 
@@ -114,7 +114,7 @@ class UnknownInputFileKindError(SerializationError):
 
     def __init__(self, kind: object) -> None:
         """Name the refused kind."""
-        super().__init__(f"Unknown input file type {kind!r}.")
+        super().__init__(f'Unknown input file type {kind!r}.')
 
 
 class UnknownModelError(SerializationError):
@@ -122,7 +122,7 @@ class UnknownModelError(SerializationError):
 
     def __init__(self, name: str) -> None:
         """Name the refused class."""
-        super().__init__(f"{name!r} is not an aiogram type.")
+        super().__init__(f'{name!r} is not an aiogram type.')
 
 
 class NonMappingPayloadError(SerializationError):
@@ -130,7 +130,7 @@ class NonMappingPayloadError(SerializationError):
 
     def __init__(self) -> None:
         """State the shape every queued payload must have."""
-        super().__init__("Queued payload must be a mapping.")
+        super().__init__('Queued payload must be a mapping.')
 
 
 class UnknownSerializerError(SerializationError):
@@ -139,7 +139,7 @@ class UnknownSerializerError(SerializationError):
     def __init__(self, name: object) -> None:
         """Name the refused serializer and the ones that exist."""
         known = sorted(kind.value for kind in SERIALIZERS)
-        super().__init__(f"Unknown serializer {name!r}, expected one of {known}.")
+        super().__init__(f'Unknown serializer {name!r}, expected one of {known}.')
 
 
 class PickleReadRefusedError(SerializationError):
@@ -148,9 +148,9 @@ class PickleReadRefusedError(SerializationError):
     def __init__(self) -> None:
         """Explain the refusal and the upgrade window that lifts it."""
         super().__init__(
-            "Refusing to unpickle a queued payload. If this queue still holds "
+            'Refusing to unpickle a queued payload. If this queue still holds '
             "messages written by 1.x, set TELEGRAM_BOT['ALLOW_PICKLE'] = True "
-            "for the upgrade window and remove it once the queue has drained.",
+            'for the upgrade window and remove it once the queue has drained.',
         )
 
 
@@ -161,12 +161,12 @@ class PickleWriteRefusedError(DjangoRedisAiogramError, ImproperlyConfigured):
         """Say what the two settings together would do to every message."""
         super().__init__(
             f"{settings_name}['SERIALIZER'] is 'pickle' while ALLOW_PICKLE is False, so "
-            "every queued message would be written and then refused on read. Set "
+            'every queued message would be written and then refused on read. Set '
             "ALLOW_PICKLE to True, or use the 'json' serializer.",
         )
 
 
-CodecValue = TypeVar("CodecValue")
+CodecValue = TypeVar('CodecValue')
 
 
 class TypeCodec(ABC, Generic[CodecValue]):
@@ -216,12 +216,12 @@ class ModelCodec(TypeCodec[TelegramObject]):
 
     def encode(self, value: TelegramObject) -> dict[str, Any]:
         """Tag the class name and encode the fields, sentinels included."""
-        return {self.tag: type(value).__name__, "data": {key: encode(item) for key, item in dict(value).items()}}
+        return {self.tag: type(value).__name__, 'data': {key: encode(item) for key, item in dict(value).items()}}
 
     def decode(self, payload: dict[str, Any]) -> TelegramObject:
         """Look the tagged class up and validate the decoded fields into it."""
         model = _resolve_model(payload[self.tag])
-        return model.model_validate({key: decode(item) for key, item in payload["data"].items()})
+        return model.model_validate({key: decode(item) for key, item in payload['data'].items()})
 
 
 class InputFileCodec(TypeCodec[InputFile]):
@@ -239,21 +239,21 @@ class InputFileCodec(TypeCodec[InputFile]):
 
     def encode(self, value: InputFile) -> dict[str, Any]:
         """Tag the kind and whatever that kind needs to be rebuilt."""
-        common = {"filename": value.filename, "chunk_size": value.chunk_size}
+        common = {'filename': value.filename, 'chunk_size': value.chunk_size}
         if isinstance(value, FSInputFile):
-            return {self.tag: FS_INPUT_FILE, "path": str(value.path), **common}
+            return {self.tag: FS_INPUT_FILE, 'path': str(value.path), **common}
         if isinstance(value, URLInputFile):
             return {
                 self.tag: URL_INPUT_FILE,
-                "url": value.url,
-                "headers": value.headers,
-                "timeout": value.timeout,
+                'url': value.url,
+                'headers': value.headers,
+                'timeout': value.timeout,
                 **common,
             }
         if isinstance(value, BufferedInputFile):
             return {
                 self.tag: BUFFERED_INPUT_FILE,
-                "data": base64.b64encode(value.data).decode("ascii"),
+                'data': base64.b64encode(value.data).decode('ascii'),
                 **common,
             }
         raise UnsupportedInputFileError(value)
@@ -261,13 +261,13 @@ class InputFileCodec(TypeCodec[InputFile]):
     def decode(self, payload: dict[str, Any]) -> InputFile:
         """Rebuild the input file the tagged kind names."""
         kind = payload[self.tag]
-        common = {"filename": payload["filename"], "chunk_size": payload["chunk_size"]}
+        common = {'filename': payload['filename'], 'chunk_size': payload['chunk_size']}
         if kind == FS_INPUT_FILE:
-            return FSInputFile(payload["path"], **common)
+            return FSInputFile(payload['path'], **common)
         if kind == URL_INPUT_FILE:
-            return URLInputFile(payload["url"], headers=payload["headers"], timeout=payload["timeout"], **common)
+            return URLInputFile(payload['url'], headers=payload['headers'], timeout=payload['timeout'], **common)
         if kind == BUFFERED_INPUT_FILE:
-            return BufferedInputFile(base64.b64decode(payload["data"]), **common)
+            return BufferedInputFile(base64.b64decode(payload['data']), **common)
         raise UnknownInputFileKindError(kind)
 
 
@@ -336,7 +336,7 @@ class BytesCodec(TypeCodec[bytes]):
 
     def encode(self, value: bytes) -> dict[str, Any]:
         """Tag the base64 form."""
-        return {self.tag: base64.b64encode(value).decode("ascii")}
+        return {self.tag: base64.b64encode(value).decode('ascii')}
 
     def decode(self, payload: dict[str, Any]) -> bytes:
         """Decode the base64 form back to bytes."""
@@ -414,11 +414,11 @@ class JsonSerializer:
     def dumps(self, payload: dict[str, Any]) -> bytes:
         """Encode a queued call as JSON bytes."""
         try:
-            return json.dumps(encode(payload)).encode("utf-8")
+            return json.dumps(encode(payload)).encode('utf-8')
         except SerializationError:
             raise
         except (TypeError, ValueError, RecursionError) as error:
-            msg = f"Cannot encode payload as JSON: {error}"
+            msg = f'Cannot encode payload as JSON: {error}'
             raise SerializationError(msg) from error
 
     def loads(self, raw: bytes) -> dict[str, Any]:
@@ -428,7 +428,7 @@ class JsonSerializer:
         except SerializationError:
             raise
         except (TypeError, ValueError, KeyError, RecursionError) as error:
-            msg = f"Cannot decode JSON payload: {error}"
+            msg = f'Cannot decode JSON payload: {error}'
             raise SerializationError(msg) from error
         if not isinstance(decoded, dict):
             raise NonMappingPayloadError
@@ -445,7 +445,7 @@ class PickleSerializer:
         try:
             return pickle.dumps(payload)
         except Exception as error:
-            msg = f"Cannot pickle payload: {error}"
+            msg = f'Cannot pickle payload: {error}'
             raise SerializationError(msg) from error
 
     def loads(self, raw: bytes) -> dict[str, Any]:
@@ -453,7 +453,7 @@ class PickleSerializer:
         try:
             decoded = pickle.loads(raw)  # noqa: S301 - gated by ALLOW_PICKLE, a documented trust boundary
         except Exception as error:
-            msg = f"Cannot unpickle payload: {error}"
+            msg = f'Cannot unpickle payload: {error}'
             raise SerializationError(msg) from error
         if not isinstance(decoded, dict):
             raise NonMappingPayloadError
@@ -468,8 +468,8 @@ SERIALIZERS: dict[SerializerKind, type[Serializer]] = {
 
 def get_serializer() -> Serializer:
     """Build the serializer that the ``SERIALIZER`` setting names."""
-    name = conf["SERIALIZER"]
-    if name == PICKLE_SERIALIZER and not coerce_bool(conf["ALLOW_PICKLE"], f"{SETTINGS_NAME}['ALLOW_PICKLE']"):
+    name = conf['SERIALIZER']
+    if name == PICKLE_SERIALIZER and not coerce_bool(conf['ALLOW_PICKLE'], f"{SETTINGS_NAME}['ALLOW_PICKLE']"):
         # check E022 reports this, but a WSGI process never runs the checks
         raise PickleWriteRefusedError(SETTINGS_NAME)
     try:
@@ -481,7 +481,7 @@ def get_serializer() -> Serializer:
 def looks_like_json(raw: bytes) -> bool:
     """Report whether the JSON serializer wrote ``raw``."""
     # pickle never starts with whitespace or '{', so leading blanks are safe to skip
-    return raw.lstrip()[:1] == b"{"
+    return raw.lstrip()[:1] == b'{'
 
 
 def loads(raw: bytes) -> dict[str, Any]:
@@ -493,6 +493,6 @@ def loads(raw: bytes) -> dict[str, Any]:
     if looks_like_json(raw):
         return JsonSerializer().loads(raw)
     # from the environment this arrives as a string, and 'false' is truthy
-    if not coerce_bool(conf["ALLOW_PICKLE"], f"{SETTINGS_NAME}['ALLOW_PICKLE']"):
+    if not coerce_bool(conf['ALLOW_PICKLE'], f"{SETTINGS_NAME}['ALLOW_PICKLE']"):
         raise PickleReadRefusedError
     return PickleSerializer().loads(raw)

@@ -39,7 +39,7 @@ exhausted `MAX_RETRIES` is logged and acknowledged, not redelivered.
 ```python
 from django_redis_aiogram import bot
 
-len(bot.router.observers["message"].handlers)
+len(bot.router.observers['message'].handlers)
 ```
 
 Zero means autodiscovery did not find them. Usual causes:
@@ -105,11 +105,11 @@ Merge this logger into your existing `LOGGING`, keeping your own `version` and
 
 ```python
 LOGGING = {
-    "version": 1,
-    "disable_existing_loggers": False,
-    "handlers": {"console": {"class": "logging.StreamHandler"}},
-    "loggers": {
-        "django_redis_aiogram": {"handlers": ["console"], "level": "DEBUG"},
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {'console': {'class': 'logging.StreamHandler'}},
+    'loggers': {
+        'django_redis_aiogram': {'handlers': ['console'], 'level': 'DEBUG'},
     },
 }
 ```

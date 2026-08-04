@@ -75,7 +75,7 @@ def test_bucket_paces_once_the_burst_is_spent():
 
 
 def test_bucket_rejects_a_nonpositive_rate():
-    with pytest.raises(ValueError, match="rate must be positive"):
+    with pytest.raises(ValueError, match='rate must be positive'):
         TokenBucket(rate=0)
 
 
@@ -170,7 +170,7 @@ def test_string_chat_ids_are_keyed_when_numeric():
     )
 
     async def scenario():
-        await limiter.acquire(chat_id="42")
+        await limiter.acquire(chat_id='42')
         await limiter.acquire(chat_id=42)
 
     run(scenario())
@@ -190,7 +190,7 @@ def test_channel_usernames_skip_the_per_chat_bucket():
 
     async def scenario():
         for _ in range(5):
-            await limiter.acquire(chat_id="@some_channel")
+            await limiter.acquire(chat_id='@some_channel')
 
     run(scenario())
     assert clock.slept == []
@@ -234,7 +234,7 @@ def test_idle_chats_are_evicted():
     assert len(limiter._chats) <= MAX_TRACKED_CHATS
 
 
-@override_settings(TELEGRAM_BOT={"RATE_LIMIT": None})
+@override_settings(TELEGRAM_BOT={'RATE_LIMIT': None})
 def test_rate_limiting_can_be_disabled():
     assert build_rate_limiter() is None
     assert TelegramBot().rate_limiter is None
@@ -244,44 +244,44 @@ def test_rate_limiting_can_be_disabled():
 def test_enabled_by_default_with_telegrams_numbers():
     limiter = build_rate_limiter()
     assert isinstance(limiter, RateLimiter)
-    assert limiter._overall.rate == DEFAULTS["RATE_LIMIT"]["overall_per_second"]
+    assert limiter._overall.rate == DEFAULTS['RATE_LIMIT']['overall_per_second']
 
 
-@override_settings(TELEGRAM_BOT={"RATE_LIMIT": {"overall_per_second": 5}})
+@override_settings(TELEGRAM_BOT={'RATE_LIMIT': {'overall_per_second': 5}})
 def test_partial_settings_keep_the_other_defaults():
     limiter = build_rate_limiter()
     assert limiter._overall.rate == 5
-    assert limiter._per_chat_rate == DEFAULTS["RATE_LIMIT"]["per_chat_per_second"]
+    assert limiter._per_chat_rate == DEFAULTS['RATE_LIMIT']['per_chat_per_second']
 
 
-@override_settings(TELEGRAM_BOT={"RATE_LIMIT": {"per_second": 5}})
+@override_settings(TELEGRAM_BOT={'RATE_LIMIT': {'per_second': 5}})
 def test_unknown_key_is_reported():
-    with pytest.raises(ImproperlyConfigured, match="unknown keys"):
+    with pytest.raises(ImproperlyConfigured, match='unknown keys'):
         build_rate_limiter()
 
 
-@override_settings(TELEGRAM_BOT={"RATE_LIMIT": {"per_second": 5}, "TOKEN": "42:x", "REDIS_URL": "r://x"})
+@override_settings(TELEGRAM_BOT={'RATE_LIMIT': {'per_second': 5}, 'TOKEN': '42:x', 'REDIS_URL': 'r://x'})
 def test_check_catches_an_unknown_key():
-    assert "django_redis_aiogram.E020" in {message.id for message in check_settings()}
+    assert 'django_redis_aiogram.E020' in {message.id for message in check_settings()}
 
 
 @override_settings(
     TELEGRAM_BOT={
-        "RATE_LIMIT": {"overall_per_second": -1},
-        "TOKEN": "42:x",
-        "REDIS_URL": "r://x",
+        'RATE_LIMIT': {'overall_per_second': -1},
+        'TOKEN': '42:x',
+        'REDIS_URL': 'r://x',
     }
 )
 def test_check_catches_a_negative_rate():
-    assert "django_redis_aiogram.E020" in {message.id for message in check_settings()}
+    assert 'django_redis_aiogram.E020' in {message.id for message in check_settings()}
 
 
-@override_settings(TELEGRAM_BOT={"RATE_LIMIT": "fast", "TOKEN": "42:x", "REDIS_URL": "r://x"})
+@override_settings(TELEGRAM_BOT={'RATE_LIMIT': 'fast', 'TOKEN': '42:x', 'REDIS_URL': 'r://x'})
 def test_check_catches_a_non_mapping():
-    assert "django_redis_aiogram.E020" in {message.id for message in check_settings()}
+    assert 'django_redis_aiogram.E020' in {message.id for message in check_settings()}
 
 
-@override_settings(TELEGRAM_BOT={"TOKEN": "42:x"})
+@override_settings(TELEGRAM_BOT={'TOKEN': '42:x'})
 def test_bots_sharing_a_token_share_the_budget():
     """Telegram meters per token: separate limiters would double the rate."""
     first, second = TelegramBot(), TelegramBot()
@@ -289,55 +289,55 @@ def test_bots_sharing_a_token_share_the_budget():
 
 
 def test_a_different_token_gets_its_own_budget():
-    with override_settings(TELEGRAM_BOT={"TOKEN": "42:one"}):
+    with override_settings(TELEGRAM_BOT={'TOKEN': '42:one'}):
         first = TelegramBot().rate_limiter
         second = TelegramBot()
         second._rate_limiter_built = False
-        with override_settings(TELEGRAM_BOT={"TOKEN": "42:two"}):
+        with override_settings(TELEGRAM_BOT={'TOKEN': '42:two'}):
             assert second.rate_limiter is not first
 
 
-@override_settings(TELEGRAM_BOT={"RATE_LIMIT": {"overall_per_second": 7}})
+@override_settings(TELEGRAM_BOT={'RATE_LIMIT': {'overall_per_second': 7}})
 def test_defaults_come_from_the_settings_defaults():
     """Duplicated literals in RateLimiter would drift from defaults.py."""
     limiter = build_rate_limiter()
     assert limiter._overall.rate == 7
-    assert limiter._per_chat_rate == DEFAULTS["RATE_LIMIT"]["per_chat_per_second"]
-    assert limiter._group_capacity == DEFAULTS["RATE_LIMIT"]["group_per_minute"]
+    assert limiter._per_chat_rate == DEFAULTS['RATE_LIMIT']['per_chat_per_second']
+    assert limiter._group_capacity == DEFAULTS['RATE_LIMIT']['group_per_minute']
 
 
 @override_settings(
     TELEGRAM_BOT={
-        "SERIALIZER": "pickle",
-        "ALLOW_PICKLE": False,
-        "TOKEN": "42:x",
-        "REDIS_URL": "r://x",
+        'SERIALIZER': 'pickle',
+        'ALLOW_PICKLE': False,
+        'TOKEN': '42:x',
+        'REDIS_URL': 'r://x',
     }
 )
 def test_writing_pickle_while_refusing_to_read_it_is_rejected():
     """Otherwise every queued message is written and then silently discarded."""
-    assert "django_redis_aiogram.E022" in {message.id for message in check_settings()}
+    assert 'django_redis_aiogram.E022' in {message.id for message in check_settings()}
 
 
 def test_the_known_keys_are_the_rate_limit_enum():
     """A second hand-written list of the same names is a list that drifts."""
     assert choices(RateLimitKey) == KNOWN_RATE_LIMIT_KEYS
-    assert frozenset(DEFAULTS["RATE_LIMIT"]) == KNOWN_RATE_LIMIT_KEYS
+    assert frozenset(DEFAULTS['RATE_LIMIT']) == KNOWN_RATE_LIMIT_KEYS
 
 
 @override_settings(TELEGRAM_BOT={})
 def test_one_token_gets_one_limiter():
-    first = get_rate_limiter("42:one")
-    assert get_rate_limiter("42:one") is first
-    assert get_rate_limiter("42:two") is not first
+    first = get_rate_limiter('42:one')
+    assert get_rate_limiter('42:one') is first
+    assert get_rate_limiter('42:two') is not first
 
 
 @override_settings(TELEGRAM_BOT={})
 def test_resetting_forgets_the_shared_limiters():
     """override_settings fires this, which is how a changed budget takes effect."""
-    before = get_rate_limiter("42:one")
+    before = get_rate_limiter('42:one')
     reset_rate_limiters()
-    assert get_rate_limiter("42:one") is not before
+    assert get_rate_limiter('42:one') is not before
 
 
 def test_eviction_caps_the_map_even_when_every_bucket_is_busy():
@@ -354,9 +354,9 @@ def test_eviction_caps_the_map_even_when_every_bucket_is_busy():
     for chat_id in range(1, MAX_TRACKED_CHATS + 51):
         asyncio.run(limiter.acquire(chat_id))  # one token each, so none is idle
 
-    assert clock.slept == [], "the limiter waited, so the buckets were not all busy"
+    assert clock.slept == [], 'the limiter waited, so the buckets were not all busy'
 
     assert len(limiter._chats) <= MAX_TRACKED_CHATS, len(limiter._chats)
     assert not [bucket for bucket in limiter._chats.values() if bucket.is_idle()], (
-        "the buckets were idle, so this did not exercise the busy path"
+        'the buckets were idle, so this did not exercise the busy path'
     )

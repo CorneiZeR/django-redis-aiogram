@@ -40,7 +40,7 @@ GROUP_PER_MINUTE = RateLimitKey.GROUP_PER_MINUTE
 KNOWN_RATE_LIMIT_KEYS = choices(RateLimitKey)
 
 # the shipped limits live in defaults.py; duplicating them here would drift
-RATE_LIMIT_DEFAULTS: dict[str, float] = dict(DEFAULTS["RATE_LIMIT"])
+RATE_LIMIT_DEFAULTS: dict[str, float] = dict(DEFAULTS['RATE_LIMIT'])
 
 # chats a bot talks to at once; beyond this the idle ones are dropped
 MAX_TRACKED_CHATS = 4096
@@ -66,7 +66,7 @@ class TokenBucket:
     ) -> None:
         """Build a bucket that refills at ``rate`` per second."""
         if rate <= 0:
-            msg = "rate must be positive"
+            msg = 'rate must be positive'
             raise ValueError(msg)
         self.rate = rate
         self.capacity = capacity if capacity is not None else max(rate, 1.0)
@@ -223,7 +223,7 @@ class RateLimiter:
 
 def build_rate_limiter() -> RateLimiter | None:
     """Build the limiter described by settings, or None when disabled."""
-    limits = conf["RATE_LIMIT"]
+    limits = conf['RATE_LIMIT']
     if not limits:
         return None
 
@@ -287,4 +287,4 @@ def _reset_on_setting_change(
         reset_rate_limiters()
 
 
-setting_changed.connect(_reset_on_setting_change, dispatch_uid="django_redis_aiogram.throttling")
+setting_changed.connect(_reset_on_setting_change, dispatch_uid='django_redis_aiogram.throttling')

@@ -3,7 +3,7 @@
 from django_redis_aiogram.settings import SETTINGS_NAME, Settings, conf
 
 __all__ = (
-    "SETTINGS_NAME",
-    "Settings",
-    "conf",
+    'SETTINGS_NAME',
+    'Settings',
+    'conf',
 )

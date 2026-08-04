@@ -12,6 +12,6 @@ class TelegramBotAppConfig(base.TelegramBotAppConfig):
     autodiscover and the system checks would silently never run.
     """
 
-    name = "telegram_bot"
-    label = "telegram_bot"
+    name = 'telegram_bot'
+    label = 'telegram_bot'
     default = True

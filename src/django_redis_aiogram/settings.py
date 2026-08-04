@@ -19,11 +19,11 @@ from django.core.signals import setting_changed
 
 from django_redis_aiogram.defaults import DEFAULTS
 
-SETTINGS_NAME = "TELEGRAM_BOT"
-ENV_PREFIX = "DJANGO_REDIS_AIOGRAM_"
+SETTINGS_NAME = 'TELEGRAM_BOT'
+ENV_PREFIX = 'DJANGO_REDIS_AIOGRAM_'
 
-_TRUTHY = frozenset({"1", "true", "yes", "on"})
-_FALSY = frozenset({"0", "false", "no", "off"})
+_TRUTHY = frozenset({'1', 'true', 'yes', 'on'})
+_FALSY = frozenset({'0', 'false', 'no', 'off'})
 
 _MISSING = object()
 
@@ -39,7 +39,7 @@ def parse_bool(value: str, source: str) -> bool:
         return True
     if normalized in _FALSY:
         return False
-    msg = f"{source} must be one of {sorted(_TRUTHY | _FALSY)}, got {value!r}."
+    msg = f'{source} must be one of {sorted(_TRUTHY | _FALSY)}, got {value!r}.'
     raise ImproperlyConfigured(msg)
 
 
@@ -55,7 +55,7 @@ def coerce_bool(value: object, source: str) -> bool:
         return bool(value)
     if isinstance(value, str):
         return parse_bool(value, source)
-    msg = f"{source} must be a boolean, got {type(value).__name__}."
+    msg = f'{source} must be a boolean, got {type(value).__name__}.'
     raise ImproperlyConfigured(msg)
 
 
@@ -78,7 +78,7 @@ def _from_env(key: str, default: object) -> object:
         try:
             return int(raw)
         except ValueError:
-            msg = f"{name} must be an integer, got {raw!r}."
+            msg = f'{name} must be an integer, got {raw!r}.'
             raise ImproperlyConfigured(msg) from None
     if isinstance(default, str):
         return raw
@@ -100,7 +100,7 @@ class Settings(Mapping[str, Any]):
     def _resolve(self) -> dict[str, Any]:
         overrides = getattr(django_settings, SETTINGS_NAME, None) or {}
         if not isinstance(overrides, Mapping):
-            msg = f"{SETTINGS_NAME} must be a mapping, got {type(overrides).__name__}."
+            msg = f'{SETTINGS_NAME} must be a mapping, got {type(overrides).__name__}.'
             raise ImproperlyConfigured(msg)
         resolved = dict(DEFAULTS)
         for key, default in DEFAULTS.items():
@@ -140,8 +140,8 @@ class Settings(Mapping[str, Any]):
 
     def __repr__(self) -> str:
         """Describe the cache without resolving it: repr() must stay cheap."""
-        state = "unresolved" if self._cache is None else f"{len(self._cache)} keys"
-        return f"<{type(self).__name__} {state}>"
+        state = 'unresolved' if self._cache is None else f'{len(self._cache)} keys'
+        return f'<{type(self).__name__} {state}>'
 
 
 conf = Settings()
@@ -157,4 +157,4 @@ def _reset_on_setting_change(
 
 
 # dispatch_uid keeps autoreload from stacking duplicate receivers
-setting_changed.connect(_reset_on_setting_change, dispatch_uid="django_redis_aiogram.settings")
+setting_changed.connect(_reset_on_setting_change, dispatch_uid='django_redis_aiogram.settings')

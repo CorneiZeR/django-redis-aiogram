@@ -19,7 +19,7 @@ class UnknownApiMethodError(DjangoRedisAiogramError, ValueError):
     def __init__(self, function: str, method_count: int) -> None:
         """Name the rejected method and how many the Bot API actually has."""
         super().__init__(
-            f"{function!r} is not a Telegram API method. Queued payloads may only "
-            f"name one of the {method_count} methods aiogram exposes for the "
-            f"Bot API; see the Serialization page.",
+            f'{function!r} is not a Telegram API method. Queued payloads may only '
+            f'name one of the {method_count} methods aiogram exposes for the '
+            f'Bot API; see the Serialization page.',
         )

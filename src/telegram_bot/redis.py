@@ -3,8 +3,8 @@
 from django_redis_aiogram.redis import get_db_index, get_redis, redis_conn, reset_redis
 
 __all__ = (
-    "get_db_index",
-    "get_redis",
-    "redis_conn",
-    "reset_redis",
+    'get_db_index',
+    'get_redis',
+    'redis_conn',
+    'reset_redis',
 )

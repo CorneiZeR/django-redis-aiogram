@@ -30,7 +30,7 @@ MODE_CHOICES = choices(UpdateMode)
 SERIALIZER_CHOICES = choices(SerializerKind)
 
 _STORAGE_CHOICES = choices(StorageKind)
-_ID_PREFIX = "django_redis_aiogram"
+_ID_PREFIX = 'django_redis_aiogram'
 
 
 @dataclass(frozen=True)
@@ -70,8 +70,8 @@ class Check:
         key = self.key if problem.key is None else problem.key
         # an empty key means the check is about the settings dict as a whole
         label = f"{SETTINGS_NAME}['{key}']" if key else SETTINGS_NAME
-        report = CheckWarning if self.code.startswith("W") else Error
-        return report(f"{label} {problem.message}", hint=problem.hint, id=f"{_ID_PREFIX}.{self.code}")
+        report = CheckWarning if self.code.startswith('W') else Error
+        return report(f'{label} {problem.message}', hint=problem.hint, id=f'{_ID_PREFIX}.{self.code}')
 
 
 def _a_boolean(key: str) -> list[Problem]:
@@ -79,7 +79,7 @@ def _a_boolean(key: str) -> list[Problem]:
     value = conf.get(key)
     if isinstance(value, bool):
         return []
-    return [Problem(f"must be a boolean, got {type(value).__name__}.")]
+    return [Problem(f'must be a boolean, got {type(value).__name__}.')]
 
 
 def _an_integer(key: str, *, minimum: int | None = None) -> list[Problem]:
@@ -87,9 +87,9 @@ def _an_integer(key: str, *, minimum: int | None = None) -> list[Problem]:
     value = conf.get(key)
     # bool is a subclass of int, so it has to be rejected explicitly
     if isinstance(value, bool) or not isinstance(value, int):
-        return [Problem(f"must be an integer, got {type(value).__name__}.")]
+        return [Problem(f'must be an integer, got {type(value).__name__}.')]
     if minimum is not None and value < minimum:
-        return [Problem(f"must be >= {minimum}, got {value}.")]
+        return [Problem(f'must be >= {minimum}, got {value}.')]
     return []
 
 
@@ -97,9 +97,9 @@ def _a_string(key: str, *, allowed: Collection[str] | None = None) -> list[Probl
     """Require a string, one of ``allowed`` when the setting is an enumeration."""
     value = conf.get(key)
     if not isinstance(value, str):
-        return [Problem(f"must be a string, got {type(value).__name__}.")]
+        return [Problem(f'must be a string, got {type(value).__name__}.')]
     if allowed is not None and value not in allowed:
-        return [Problem(f"must be one of {sorted(allowed)}, got {value!r}.")]
+        return [Problem(f'must be one of {sorted(allowed)}, got {value!r}.')]
     return []
 
 
@@ -108,7 +108,7 @@ def _a_callable(key: str) -> list[Problem]:
     value = conf.get(key)
     if callable(value):
         return []
-    return [Problem(f"must be callable, got {type(value).__name__}.")]
+    return [Problem(f'must be callable, got {type(value).__name__}.')]
 
 
 def _a_mapping(key: str) -> list[Problem]:
@@ -116,7 +116,7 @@ def _a_mapping(key: str) -> list[Problem]:
     value = conf.get(key)
     if isinstance(value, Mapping):
         return []
-    return [Problem(f"must be a mapping, got {type(value).__name__}.")]
+    return [Problem(f'must be a mapping, got {type(value).__name__}.')]
 
 
 def _known_bot_properties(key: str) -> list[Problem]:
@@ -129,7 +129,7 @@ def _known_bot_properties(key: str) -> list[Problem]:
     unknown = sorted(str(name) for name in value if name not in known)
     if not unknown:
         return []
-    return [Problem(f"has unknown properties: {', '.join(unknown)}. Known: {', '.join(sorted(known))}.")]
+    return [Problem(f'has unknown properties: {", ".join(unknown)}. Known: {", ".join(sorted(known))}.')]
 
 
 def _importable_storage(key: str) -> list[Problem]:
@@ -139,14 +139,14 @@ def _importable_storage(key: str) -> list[Problem]:
         return []
     if value in _STORAGE_CHOICES:
         return []
-    if "." not in value:
+    if '.' not in value:
         return [Problem(f"must be 'redis', 'memory', or a dotted path, got {value!r}.")]
     try:
         storage = import_string(value)
     except ImportError as error:
-        return [Problem(f"cannot be imported: {error}")]
+        return [Problem(f'cannot be imported: {error}')]
     if not (isinstance(storage, type) and issubclass(storage, BaseStorage)):
-        return [Problem(f"must point to a BaseStorage subclass, got {value!r}.")]
+        return [Problem(f'must point to a BaseStorage subclass, got {value!r}.')]
     return []
 
 
@@ -156,25 +156,25 @@ def _sane_rate_limits(key: str) -> list[Problem]:
     if value is None:
         return []
     if not isinstance(value, Mapping):
-        return [Problem(f"must be a mapping or None, got {type(value).__name__}.")]
+        return [Problem(f'must be a mapping or None, got {type(value).__name__}.')]
     unknown = sorted(str(name) for name in value if name not in KNOWN_RATE_LIMIT_KEYS)
     if unknown:
-        known = ", ".join(sorted(KNOWN_RATE_LIMIT_KEYS))
-        return [Problem(f"has unknown keys: {', '.join(unknown)}. Known: {known}.")]
+        known = ', '.join(sorted(KNOWN_RATE_LIMIT_KEYS))
+        return [Problem(f'has unknown keys: {", ".join(unknown)}. Known: {known}.')]
     for name, rate in value.items():
         if isinstance(rate, bool) or not isinstance(rate, (int, float)) or rate < 0:
-            return [Problem(f"{name} must be a non-negative number, got {rate!r}.")]
+            return [Problem(f'{name} must be a non-negative number, got {rate!r}.')]
     return []
 
 
 def _readable_serializer(key: str) -> list[Problem]:
     """Refuse to write pickle the reader would throw away: sends would vanish."""
-    if conf.get(key) != SerializerKind.PICKLE or conf.get("ALLOW_PICKLE"):
+    if conf.get(key) != SerializerKind.PICKLE or conf.get('ALLOW_PICKLE'):
         return []
     return [
         Problem(
             "is 'pickle' while ALLOW_PICKLE is False, so queued messages would be "
-            "written and then refused on read. Set ALLOW_PICKLE to True, or use "
+            'written and then refused on read. Set ALLOW_PICKLE to True, or use '
             "the 'json' serializer.",
         )
     ]
@@ -182,8 +182,8 @@ def _readable_serializer(key: str) -> list[Problem]:
 
 def _serviceable_webhook(key: str) -> list[Problem]:
     """Reject a webhook Telegram cannot reach, or one anybody could post to."""
-    url = str(conf.get(key) or "").strip()
-    webhook_mode = str(conf.get("MODE") or "").strip().lower() == UpdateMode.WEBHOOK
+    url = str(conf.get(key) or '').strip()
+    webhook_mode = str(conf.get('MODE') or '').strip().lower() == UpdateMode.WEBHOOK
     if not url:
         if webhook_mode:
             return [
@@ -195,17 +195,17 @@ def _serviceable_webhook(key: str) -> list[Problem]:
         return []
 
     problems: list[Problem] = []
-    if not str(conf.get("WEBHOOK_SECRET") or "").strip():
+    if not str(conf.get('WEBHOOK_SECRET') or '').strip():
         problems.append(
             Problem(
-                "is required when WEBHOOK_URL is set: the view compares it with the header "
-                "Telegram echoes back, and without it anyone who finds the URL can feed "
-                "your bot updates.",
-                key="WEBHOOK_SECRET",
+                'is required when WEBHOOK_URL is set: the view compares it with the header '
+                'Telegram echoes back, and without it anyone who finds the URL can feed '
+                'your bot updates.',
+                key='WEBHOOK_SECRET',
             )
         )
-    if not url.startswith("https://"):
-        problems.append(Problem(f"must be https, got {url!r} — Telegram refuses anything else."))
+    if not url.startswith('https://'):
+        problems.append(Problem(f'must be https, got {url!r} — Telegram refuses anything else.'))
     return problems
 
 
@@ -215,7 +215,7 @@ def _known_update_types(key: str) -> list[Problem]:
     if not allowed:
         return []
     if isinstance(allowed, (str, bytes)) or not isinstance(allowed, Collection):
-        return [Problem(f"must be a list or tuple of update types, got {type(allowed).__name__}.")]
+        return [Problem(f'must be a list or tuple of update types, got {type(allowed).__name__}.')]
 
     known = {member.value for member in UpdateType}
     # anything unhashable would raise out of the membership test below, so the
@@ -224,7 +224,7 @@ def _known_update_types(key: str) -> list[Problem]:
     invalid += [repr(name) for name in allowed if isinstance(name, str) and name not in known]
     if invalid:
         return [
-            Problem(f"contains update types Telegram does not have: {sorted(invalid)}. Valid ones are {sorted(known)}.")
+            Problem(f'contains update types Telegram does not have: {sorted(invalid)}. Valid ones are {sorted(known)}.')
         ]
     return []
 
@@ -236,8 +236,8 @@ def _known_keys(_key: str) -> list[Problem]:
         return []
     return [
         Problem(
-            f"contains unknown keys: {', '.join(unknown)}.",
-            hint=f"Known keys are: {', '.join(sorted(DEFAULTS))}.",
+            f'contains unknown keys: {", ".join(unknown)}.',
+            hint=f'Known keys are: {", ".join(sorted(DEFAULTS))}.',
         )
     ]
 
@@ -248,56 +248,56 @@ def _filled_in_when_enabled(key: str, *, hint: str) -> list[Problem]:
     A project may legitimately boot without credentials — during migrations or
     image builds — so this must not be able to fail ``manage.py check``.
     """
-    if not conf["ENABLED"] or str(conf.get(key) or "").strip():
+    if not conf['ENABLED'] or str(conf.get(key) or '').strip():
         return []
-    return [Problem("is empty while the bot is enabled.", hint=hint)]
+    return [Problem('is empty while the bot is enabled.', hint=hint)]
 
 
 CHECKS: tuple[Check, ...] = (
-    Check("E001", "ENABLED", _a_boolean),
-    Check("E002", "AUTODISCOVER", _a_boolean),
-    Check("E003", "RAISE_EXCEPTION", _a_boolean),
-    Check("E017", "ALLOW_PICKLE", _a_boolean),
-    Check("E004", "TOKEN", _a_string),
-    Check("E005", "REDIS_URL", _a_string),
-    Check("E006", "MODULE_NAME", _a_string),
-    Check("E007", "REDIS_MESSAGES_KEY", _a_string),
-    Check("E021", "WORKER_NAME", _a_string),
-    Check("E008", "REDIS_EXP_KEY", _a_string),
-    Check("E009", "DELIVERY", partial(_a_string, allowed=DELIVERY_CHOICES)),
-    Check("E010", "SERIALIZER", partial(_a_string, allowed=SERIALIZER_CHOICES)),
-    Check("E011", "FSM_STORAGE", _a_string),
-    Check("E012", "MAX_RETRIES", partial(_an_integer, minimum=1)),
-    Check("E013", "REDIS_EXP_TIME", partial(_an_integer, minimum=1)),
-    Check("E014", "BLPOP_TIMEOUT", partial(_an_integer, minimum=1)),
-    Check("E023", "HEARTBEAT_INTERVAL", partial(_an_integer, minimum=1)),
-    Check("E024", "HEALTHCHECK_MAX_QUEUE", partial(_an_integer, minimum=0)),
-    Check("E028", "MODE", partial(_a_string, allowed=MODE_CHOICES)),
-    Check("E025", "WEBHOOK_URL", _a_string),
-    Check("E026", "WEBHOOK_SECRET", _a_string),
-    Check("E027", "WEBHOOK_URL", _serviceable_webhook),
-    Check("E029", "WEBHOOK_ALLOWED_UPDATES", _known_update_types),
-    Check("E015", "DEFAULT_KWARGS", _a_callable),
-    Check("E016", "DEFAULT_BOT_PROPERTIES", _a_mapping),
-    Check("E018", "DEFAULT_BOT_PROPERTIES", _known_bot_properties),
-    Check("E020", "RATE_LIMIT", _sane_rate_limits),
-    Check("E022", "SERIALIZER", _readable_serializer),
-    Check("E019", "FSM_STORAGE", _importable_storage),
-    Check("W003", "", _known_keys),
+    Check('E001', 'ENABLED', _a_boolean),
+    Check('E002', 'AUTODISCOVER', _a_boolean),
+    Check('E003', 'RAISE_EXCEPTION', _a_boolean),
+    Check('E017', 'ALLOW_PICKLE', _a_boolean),
+    Check('E004', 'TOKEN', _a_string),
+    Check('E005', 'REDIS_URL', _a_string),
+    Check('E006', 'MODULE_NAME', _a_string),
+    Check('E007', 'REDIS_MESSAGES_KEY', _a_string),
+    Check('E021', 'WORKER_NAME', _a_string),
+    Check('E008', 'REDIS_EXP_KEY', _a_string),
+    Check('E009', 'DELIVERY', partial(_a_string, allowed=DELIVERY_CHOICES)),
+    Check('E010', 'SERIALIZER', partial(_a_string, allowed=SERIALIZER_CHOICES)),
+    Check('E011', 'FSM_STORAGE', _a_string),
+    Check('E012', 'MAX_RETRIES', partial(_an_integer, minimum=1)),
+    Check('E013', 'REDIS_EXP_TIME', partial(_an_integer, minimum=1)),
+    Check('E014', 'BLPOP_TIMEOUT', partial(_an_integer, minimum=1)),
+    Check('E023', 'HEARTBEAT_INTERVAL', partial(_an_integer, minimum=1)),
+    Check('E024', 'HEALTHCHECK_MAX_QUEUE', partial(_an_integer, minimum=0)),
+    Check('E028', 'MODE', partial(_a_string, allowed=MODE_CHOICES)),
+    Check('E025', 'WEBHOOK_URL', _a_string),
+    Check('E026', 'WEBHOOK_SECRET', _a_string),
+    Check('E027', 'WEBHOOK_URL', _serviceable_webhook),
+    Check('E029', 'WEBHOOK_ALLOWED_UPDATES', _known_update_types),
+    Check('E015', 'DEFAULT_KWARGS', _a_callable),
+    Check('E016', 'DEFAULT_BOT_PROPERTIES', _a_mapping),
+    Check('E018', 'DEFAULT_BOT_PROPERTIES', _known_bot_properties),
+    Check('E020', 'RATE_LIMIT', _sane_rate_limits),
+    Check('E022', 'SERIALIZER', _readable_serializer),
+    Check('E019', 'FSM_STORAGE', _importable_storage),
+    Check('W003', '', _known_keys),
     Check(
-        "W001",
-        "TOKEN",
+        'W001',
+        'TOKEN',
         partial(
             _filled_in_when_enabled,
-            hint="Set it, or set ENABLED to False in processes that never reach Telegram.",
+            hint='Set it, or set ENABLED to False in processes that never reach Telegram.',
         ),
     ),
     Check(
-        "W002",
-        "REDIS_URL",
+        'W002',
+        'REDIS_URL',
         partial(
             _filled_in_when_enabled,
-            hint="Set it, or set ENABLED to False in processes that never reach Redis.",
+            hint='Set it, or set ENABLED to False in processes that never reach Redis.',
         ),
     ),
 )

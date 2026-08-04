@@ -35,7 +35,7 @@ class _SharedConnection:
         if self._client is None:
             with self._lock:
                 if self._client is None:
-                    url = conf["REDIS_URL"]
+                    url = conf['REDIS_URL']
                     if not url:
                         msg = f"{SETTINGS_NAME}['REDIS_URL'] is required to talk to Redis."
                         raise ImproperlyConfigured(msg)
@@ -67,12 +67,12 @@ def reset_redis() -> None:
 
 def as_bytes(value: bytes | str) -> bytes:
     """Redis hands back str when the URL enables decode_responses."""
-    return value if isinstance(value, bytes) else value.encode("utf-8")
+    return value if isinstance(value, bytes) else value.encode('utf-8')
 
 
 def get_db_index() -> int:
     """Return the database number encoded in REDIS_URL."""
-    return int(get_redis().connection_pool.connection_kwargs.get("db", 0) or 0)
+    return int(get_redis().connection_pool.connection_kwargs.get('db', 0) or 0)
 
 
 class RedisProxy:
@@ -88,8 +88,8 @@ class RedisProxy:
 
     def __repr__(self) -> str:
         """Say whether the connection behind the proxy exists yet."""
-        state = "connected" if _shared.is_open else "not connected"
-        return f"<RedisProxy {state}>"
+        state = 'connected' if _shared.is_open else 'not connected'
+        return f'<RedisProxy {state}>'
 
 
 redis_conn = RedisProxy()
@@ -101,4 +101,4 @@ def _reset_on_setting_change(setting: str, **_kwargs: object) -> None:
         reset_redis()
 
 
-setting_changed.connect(_reset_on_setting_change, dispatch_uid="django_redis_aiogram.redis")
+setting_changed.connect(_reset_on_setting_change, dispatch_uid='django_redis_aiogram.redis')

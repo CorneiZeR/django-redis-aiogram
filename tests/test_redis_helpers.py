@@ -16,11 +16,11 @@ from django_redis_aiogram.serializers import JsonSerializer, loads
 
 
 @pytest.mark.parametrize(
-    ("value", "expected"),
+    ('value', 'expected'),
     [
-        (b"already bytes", b"already bytes"),
-        ("a str", b"a str"),
-        ("кириллица", "кириллица".encode()),
+        (b'already bytes', b'already bytes'),
+        ('a str', b'a str'),
+        ('кириллица', 'кириллица'.encode()),
     ],
 )
 def test_as_bytes(value, expected):
@@ -32,19 +32,19 @@ def decoded_server(monkeypatch):
     """A connection configured the way decode_responses=True behaves."""
     server = fakeredis.FakeRedis(decode_responses=True)
     for target in (
-        "django_redis_aiogram.redis.get_redis",
-        "django_redis_aiogram.delivery.get_redis",
-        "django_redis_aiogram.client.get_redis",
+        'django_redis_aiogram.redis.get_redis',
+        'django_redis_aiogram.delivery.get_redis',
+        'django_redis_aiogram.client.get_redis',
     ):
         monkeypatch.setattr(target, lambda server=server: server)
     return server
 
 
-@override_settings(TELEGRAM_BOT={"DELIVERY": "blpop", "BLPOP_TIMEOUT": 1})
+@override_settings(TELEGRAM_BOT={'DELIVERY': 'blpop', 'BLPOP_TIMEOUT': 1})
 def test_blpop_handles_str_payloads(decoded_server):
     decoded_server.rpush(
-        "TELEGRAM_BOT_MESSAGE",
-        JsonSerializer().dumps({"function": "send_message", "chat_id": 4}),
+        'TELEGRAM_BOT_MESSAGE',
+        JsonSerializer().dumps({'function': 'send_message', 'chat_id': 4}),
     )
     handled = []
     delivery = BlpopDelivery(handler=lambda **kwargs: handled.append(kwargs))
@@ -55,21 +55,21 @@ def test_blpop_handles_str_payloads(decoded_server):
         thread.join(0.01)
     delivery.stop()
     thread.join(timeout=5)
-    assert handled == [{"function": "send_message", "chat_id": 4}]
+    assert handled == [{'function': 'send_message', 'chat_id': 4}]
 
 
-@override_settings(TELEGRAM_BOT={"DELIVERY": "keyspace"})
+@override_settings(TELEGRAM_BOT={'DELIVERY': 'keyspace'})
 def test_keyspace_handles_str_payloads(decoded_server):
     decoded_server.rpush(
-        "TELEGRAM_BOT_MESSAGE",
-        JsonSerializer().dumps({"function": "send_message", "chat_id": 6}),
+        'TELEGRAM_BOT_MESSAGE',
+        JsonSerializer().dumps({'function': 'send_message', 'chat_id': 6}),
     )
     handled = []
-    KeyspaceDelivery(handler=lambda **kwargs: handled.append(kwargs))._on_expired({"data": b"TELEGRAM_BOT_EXP"})
-    assert handled == [{"function": "send_message", "chat_id": 6}]
+    KeyspaceDelivery(handler=lambda **kwargs: handled.append(kwargs))._on_expired({'data': b'TELEGRAM_BOT_EXP'})
+    assert handled == [{'function': 'send_message', 'chat_id': 6}]
 
 
-@override_settings(TELEGRAM_BOT={"DELIVERY": "keyspace", "WORKER_NAME": "tests"})
+@override_settings(TELEGRAM_BOT={'DELIVERY': 'keyspace', 'WORKER_NAME': 'tests'})
 def test_keyspace_pops_atomically(redis_server):
     """Two workers reacting to the same expiry must share the messages, not
     duplicate them: every id arrives exactly once across both.
@@ -82,43 +82,43 @@ def test_keyspace_pops_atomically(redis_server):
     """
     for index in range(3):
         redis_server.rpush(
-            "TELEGRAM_BOT_MESSAGE",
-            JsonSerializer().dumps({"function": "send_message", "chat_id": index}),
+            'TELEGRAM_BOT_MESSAGE',
+            JsonSerializer().dumps({'function': 'send_message', 'chat_id': index}),
         )
 
     first, second = [], []
     competitor_ran = []
 
     def rival(**kwargs):
-        second.append(kwargs["chat_id"])
+        second.append(kwargs['chat_id'])
 
     def handler(**kwargs):
-        first.append(kwargs["chat_id"])
+        first.append(kwargs['chat_id'])
         if not competitor_ran:
             # a second worker drains while this dispatch is still in flight
             competitor_ran.append(True)
-            KeyspaceDelivery(handler=rival)._on_expired({"data": b"TELEGRAM_BOT_EXP"})
+            KeyspaceDelivery(handler=rival)._on_expired({'data': b'TELEGRAM_BOT_EXP'})
 
-    KeyspaceDelivery(handler=handler)._on_expired({"data": b"TELEGRAM_BOT_EXP"})
+    KeyspaceDelivery(handler=handler)._on_expired({'data': b'TELEGRAM_BOT_EXP'})
 
-    assert competitor_ran, "the competing drain never ran, so nothing was tested"
+    assert competitor_ran, 'the competing drain never ran, so nothing was tested'
     assert sorted(first + second) == [0, 1, 2], (first, second)
-    assert redis_server.llen("TELEGRAM_BOT_MESSAGE") == 0
+    assert redis_server.llen('TELEGRAM_BOT_MESSAGE') == 0
 
 
-@override_settings(TELEGRAM_BOT={"REDIS_URL": "redis://localhost:6379/7"})
+@override_settings(TELEGRAM_BOT={'REDIS_URL': 'redis://localhost:6379/7'})
 def test_db_index_comes_from_the_url(monkeypatch):
     server = fakeredis.FakeRedis(db=7)
-    monkeypatch.setattr("django_redis_aiogram.redis.get_redis", lambda: server)
+    monkeypatch.setattr('django_redis_aiogram.redis.get_redis', lambda: server)
     assert get_db_index() == 7
 
 
-@override_settings(TELEGRAM_BOT={"DELIVERY": "blpop"})
+@override_settings(TELEGRAM_BOT={'DELIVERY': 'blpop'})
 def test_send_redis_round_trips_through_a_decoded_connection(decoded_server):
-    TelegramBot().send_redis(chat_id=1, text="hi")
+    TelegramBot().send_redis(chat_id=1, text='hi')
 
-    queued = loads(as_bytes(decoded_server.lpop("TELEGRAM_BOT_MESSAGE")))
-    assert queued == {"function": "send_message", "chat_id": 1, "text": "hi"}
+    queued = loads(as_bytes(decoded_server.lpop('TELEGRAM_BOT_MESSAGE')))
+    assert queued == {'function': 'send_message', 'chat_id': 1, 'text': 'hi'}
 
 
 def test_the_connection_is_built_once_and_reused(monkeypatch):
@@ -139,16 +139,16 @@ def test_the_connection_is_built_once_and_reused(monkeypatch):
         built.append(url)
         return Stub()
 
-    monkeypatch.setattr(Redis, "from_url", classmethod(from_url))
+    monkeypatch.setattr(Redis, 'from_url', classmethod(from_url))
     reset_redis()
 
-    with override_settings(TELEGRAM_BOT={"REDIS_URL": "redis://localhost:6379/7"}):
+    with override_settings(TELEGRAM_BOT={'REDIS_URL': 'redis://localhost:6379/7'}):
         first = get_redis()
-        assert get_redis() is first, "a second call built another client"
-        assert built == ["redis://localhost:6379/7"], built
+        assert get_redis() is first, 'a second call built another client'
+        assert built == ['redis://localhost:6379/7'], built
 
         reset_redis()
-        assert closed == [first], "reset_redis left the connection open"
+        assert closed == [first], 'reset_redis left the connection open'
 
         # and the slot is empty: keeping a closed client would hand it to the
         # next caller
@@ -156,5 +156,5 @@ def test_the_connection_is_built_once_and_reused(monkeypatch):
 
     reset_redis()
 
-    assert second is not first, "reset_redis kept the closed client"
+    assert second is not first, 'reset_redis kept the closed client'
     assert len(built) == 2, built

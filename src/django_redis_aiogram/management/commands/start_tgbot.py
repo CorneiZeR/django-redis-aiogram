@@ -21,7 +21,7 @@ from django_redis_aiogram.delivery import get_delivery
 from django_redis_aiogram.settings import conf
 from django_redis_aiogram.webhook import MODES, WEBHOOK, current_mode
 
-logger = logging.getLogger("django_redis_aiogram")
+logger = logging.getLogger('django_redis_aiogram')
 
 #: what signal.signal returns: a handler, one of the SIG_* constants, or None
 Handler = Callable[[int, FrameType | None], Any] | int | None
@@ -30,7 +30,7 @@ Handler = Callable[[int, FrameType | None], Any] | int | None
 class Command(BaseCommand):
     """Start the bot and the queue consumer, and stop them together."""
 
-    help = "Start telegram bot"
+    help = 'Start telegram bot'
 
     #: what --idle waits on; tests replace it so they can end the wait
     idle_event: threading.Event | None = None
@@ -38,22 +38,22 @@ class Command(BaseCommand):
     def add_arguments(self, parser: ArgumentParser) -> None:
         """Declare --mode and --idle."""
         parser.add_argument(
-            "--mode",
+            '--mode',
             choices=sorted(MODES),
             default=None,
             help=(
                 "how updates reach the bot for this run. Defaults to TELEGRAM_BOT['MODE'] "
                 "(env: DJANGO_REDIS_AIOGRAM_MODE), itself 'polling'. In webhook mode this "
-                "process consumes the queue and never calls getUpdates, because the updates "
-                "arrive over HTTP instead."
+                'process consumes the queue and never calls getUpdates, because the updates '
+                'arrive over HTTP instead.'
             ),
         )
         parser.add_argument(
-            "--idle",
-            action="store_true",
+            '--idle',
+            action='store_true',
             help=(
-                "When the bot is disabled, block instead of exiting. Useful under "
-                "restart policies that treat a clean exit as a crash loop."
+                'When the bot is disabled, block instead of exiting. Useful under '
+                'restart policies that treat a clean exit as a crash loop.'
             ),
         )
 
@@ -62,31 +62,31 @@ class Command(BaseCommand):
         if not bot.enabled:
             self.stdout.write(
                 self.style.WARNING(
-                    "django-redis-aiogram is disabled "
+                    'django-redis-aiogram is disabled '
                     "(TELEGRAM_BOT['ENABLED'] or DJANGO_REDIS_AIOGRAM_ENABLED); "
-                    "not starting the bot."
+                    'not starting the bot.'
                 )
             )
-            if options["idle"]:
-                self.stdout.write("Idling. Send SIGINT or SIGTERM to stop.")
+            if options['idle']:
+                self.stdout.write('Idling. Send SIGINT or SIGTERM to stop.')
                 with contextlib.suppress(KeyboardInterrupt):
                     (self.idle_event or threading.Event()).wait()
             return
 
         configured = current_mode()
-        mode = options["mode"] or configured
-        self.stdout.write(f"Updates arrive by {mode}.")
+        mode = options['mode'] or configured
+        self.stdout.write(f'Updates arrive by {mode}.')
         if mode != configured:
             # the webhook view reads the setting, not this flag, so it would
             # refuse the updates this process is no longer polling for
             self.stdout.write(
                 self.style.WARNING(
                     f"--mode {mode} disagrees with TELEGRAM_BOT['MODE'] ({configured}), and it "
-                    "changes this process only: "
+                    'changes this process only: '
                     + (
-                        "the webhook view still refuses updates while the setting says polling"
+                        'the webhook view still refuses updates while the setting says polling'
                         if mode == WEBHOOK
-                        else "getUpdates fails while a webhook is registered"
+                        else 'getUpdates fails while a webhook is registered'
                     )
                 )
             )
@@ -110,15 +110,15 @@ class Command(BaseCommand):
         try:
             with contextlib.suppress(KeyboardInterrupt, SystemExit):
                 if mode == WEBHOOK:
-                    self.stdout.write("Consuming the queue; updates are expected over HTTP.")
+                    self.stdout.write('Consuming the queue; updates are expected over HTTP.')
                     (self.idle_event or threading.Event()).wait()
                 else:
                     bot.start_polling()
         finally:
-            logger.info("shutting down")
+            logger.info('shutting down')
             delivery.stop()
             for thread in threads:
-                thread.join(timeout=float(conf["BLPOP_TIMEOUT"]) + 1)
+                thread.join(timeout=float(conf['BLPOP_TIMEOUT']) + 1)
             bot.close()
             if previous is not None:
                 # the command may be called in-process; leaving our handler

@@ -18,8 +18,8 @@ from django_redis_aiogram.exceptions import UnknownApiMethodError
 
 def _api_methods() -> frozenset[str]:
     """Return the Bot attributes that correspond to a Telegram API method."""
-    api = {re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower() for name in aiogram.methods.__all__}
-    return frozenset(api & {name for name in dir(Bot) if not name.startswith("_")})
+    api = {re.sub(r'(?<!^)(?=[A-Z])', '_', name).lower() for name in aiogram.methods.__all__}
+    return frozenset(api & {name for name in dir(Bot) if not name.startswith('_')})
 
 
 API_METHODS = _api_methods()

@@ -16,4 +16,4 @@ def autodiscover_tg_routers() -> None:
     exists but raised on import", so a broken router surfaces instead of being
     silently swallowed.
     """
-    autodiscover_modules(conf["MODULE_NAME"])
+    autodiscover_modules(conf['MODULE_NAME'])

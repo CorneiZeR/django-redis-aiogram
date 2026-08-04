@@ -45,9 +45,9 @@ rather than being read as enabled. See **[[Deployment]]**.
 
 ```python
 TELEGRAM_BOT = {
-    "DEFAULT_BOT_PROPERTIES": {
-        "parse_mode": "HTML",
-        "link_preview_is_disabled": True,
+    'DEFAULT_BOT_PROPERTIES': {
+        'parse_mode': 'HTML',
+        'link_preview_is_disabled': True,
     },
 }
 ```
@@ -56,7 +56,7 @@ TELEGRAM_BOT = {
 
 ```python
 def default_kwargs(function: str) -> dict:
-    return {"send_photo": {"caption": "Photo"}}.get(function, {})
+    return {'send_photo': {'caption': 'Photo'}}.get(function, {})
 ```
 
 ## Queue
@@ -86,10 +86,10 @@ def default_kwargs(function: str) -> dict:
 
 ```python
 TELEGRAM_BOT = {
-    "RATE_LIMIT": {
-        "overall_per_second": 30,
-        "per_chat_per_second": 1,
-        "group_per_minute": 20,
+    'RATE_LIMIT': {
+        'overall_per_second': 30,
+        'per_chat_per_second': 1,
+        'group_per_minute': 20,
     },
 }
 ```

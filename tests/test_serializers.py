@@ -41,14 +41,14 @@ from django_redis_aiogram.serializers import (
 
 def roundtrip(value):
     serializer = JsonSerializer()
-    return serializer.loads(serializer.dumps({"value": value}))["value"]
+    return serializer.loads(serializer.dumps({'value': value}))['value']
 
 
 @pytest.mark.parametrize(
-    "markup",
+    'markup',
     [
-        types.InlineKeyboardMarkup(inline_keyboard=[[types.InlineKeyboardButton(text="b", callback_data="c")]]),
-        types.ReplyKeyboardMarkup(keyboard=[[types.KeyboardButton(text="b")]]),
+        types.InlineKeyboardMarkup(inline_keyboard=[[types.InlineKeyboardButton(text='b', callback_data='c')]]),
+        types.ReplyKeyboardMarkup(keyboard=[[types.KeyboardButton(text='b')]]),
         types.ReplyKeyboardRemove(),
         types.ForceReply(force_reply=True),
     ],
@@ -61,25 +61,25 @@ def test_every_reply_markup_survives(markup):
 
 def test_inline_keyboard_keeps_its_payload():
     markup = types.InlineKeyboardMarkup(
-        inline_keyboard=[[types.InlineKeyboardButton(text="press", callback_data="data")]]
+        inline_keyboard=[[types.InlineKeyboardButton(text='press', callback_data='data')]]
     )
     restored = roundtrip(markup)
-    assert restored.inline_keyboard[0][0].callback_data == "data"
-    assert SendMessage(chat_id=1, text="x", reply_markup=restored).reply_markup == markup
+    assert restored.inline_keyboard[0][0].callback_data == 'data'
+    assert SendMessage(chat_id=1, text='x', reply_markup=restored).reply_markup == markup
 
 
 def test_discriminator_is_preserved():
     """exclude_unset would drop type='photo' and decode this as InputMediaAudio."""
-    media = types.InputMediaPhoto(media="https://example.test/a.png", caption="cap")
+    media = types.InputMediaPhoto(media='https://example.test/a.png', caption='cap')
     restored = roundtrip(media)
     assert type(restored) is types.InputMediaPhoto
-    assert restored.type == "photo"
+    assert restored.type == 'photo'
     group = SendMediaGroup(chat_id=1, media=[restored])
     assert type(group.media[0]) is types.InputMediaPhoto
 
 
 @pytest.mark.parametrize(
-    "value",
+    'value',
     [
         types.LinkPreviewOptions(is_disabled=True),
         types.ReplyParameters(message_id=5),
@@ -88,7 +88,7 @@ def test_discriminator_is_preserved():
 def test_models_holding_default_sentinels(value):
     """These are exactly the models that raise PydanticSerializationError."""
     assert [item for item in dict(value).values() if isinstance(item, Default)], (
-        "fixture no longer carries a Default sentinel, so it tests nothing"
+        'fixture no longer carries a Default sentinel, so it tests nothing'
     )
     restored = roundtrip(value)
     assert type(restored) is type(value)
@@ -97,31 +97,31 @@ def test_models_holding_default_sentinels(value):
 
 
 def test_default_sentinel_keeps_its_name():
-    restored = roundtrip(Default("parse_mode"))
+    restored = roundtrip(Default('parse_mode'))
     assert isinstance(restored, Default)
-    assert restored.name == "parse_mode"
+    assert restored.name == 'parse_mode'
 
 
 def test_message_entities_survive():
-    entities = [types.MessageEntity(type="bold", offset=0, length=2)]
+    entities = [types.MessageEntity(type='bold', offset=0, length=2)]
     restored = roundtrip(entities)
-    assert restored[0].type == "bold"
-    assert SendMessage(chat_id=1, text="xx", entities=restored).entities == entities
+    assert restored[0].type == 'bold'
+    assert SendMessage(chat_id=1, text='xx', entities=restored).entities == entities
 
 
 @pytest.mark.parametrize(
-    "value",
+    'value',
     [
         datetime.datetime(2026, 8, 3, 12, 30, tzinfo=datetime.timezone.utc),
         datetime.date(2026, 8, 3),
-        Decimal("1.50"),
-        b"\x89PNG",
-        "plain",
+        Decimal('1.50'),
+        b'\x89PNG',
+        'plain',
         42,
         None,
         True,
-        [1, "two", None],
-        {"nested": {"deep": [1, 2]}},
+        [1, 'two', None],
+        {'nested': {'deep': [1, 2]}},
     ],
 )
 def test_scalars_and_containers(value):
@@ -133,60 +133,60 @@ def test_tuples_come_back_as_lists():
 
 
 def test_fs_input_file(tmp_path):
-    path = tmp_path / "a.png"
-    restored = roundtrip(FSInputFile(path, filename="a.png"))
+    path = tmp_path / 'a.png'
+    restored = roundtrip(FSInputFile(path, filename='a.png'))
     assert isinstance(restored, FSInputFile)
     assert str(restored.path) == str(path)
-    assert restored.filename == "a.png"
+    assert restored.filename == 'a.png'
 
 
 def test_url_input_file():
-    restored = roundtrip(URLInputFile("https://example.test/a.png", filename="a.png"))
+    restored = roundtrip(URLInputFile('https://example.test/a.png', filename='a.png'))
     assert isinstance(restored, URLInputFile)
-    assert restored.url == "https://example.test/a.png"
+    assert restored.url == 'https://example.test/a.png'
 
 
 def test_buffered_input_file():
-    restored = roundtrip(BufferedInputFile(b"\x89PNG", filename="a.png"))
+    restored = roundtrip(BufferedInputFile(b'\x89PNG', filename='a.png'))
     assert isinstance(restored, BufferedInputFile)
-    assert restored.data == b"\x89PNG"
-    assert restored.filename == "a.png"
+    assert restored.data == b'\x89PNG'
+    assert restored.filename == 'a.png'
 
 
 def test_full_call_payload():
     serializer = JsonSerializer()
     payload = {
-        "function": "send_photo",
-        "chat_id": 100,
-        "caption": "hi",
-        "reply_markup": types.InlineKeyboardMarkup(
-            inline_keyboard=[[types.InlineKeyboardButton(text="b", url="https://example.test")]]
+        'function': 'send_photo',
+        'chat_id': 100,
+        'caption': 'hi',
+        'reply_markup': types.InlineKeyboardMarkup(
+            inline_keyboard=[[types.InlineKeyboardButton(text='b', url='https://example.test')]]
         ),
     }
     restored = serializer.loads(serializer.dumps(payload))
-    assert restored["function"] == "send_photo"
-    assert restored["chat_id"] == 100
-    assert restored["reply_markup"] == payload["reply_markup"]
+    assert restored['function'] == 'send_photo'
+    assert restored['chat_id'] == 100
+    assert restored['reply_markup'] == payload['reply_markup']
 
 
 def test_the_module_constants_are_the_frozen_strings():
     """They are enum members now; queued payloads and settings still read them as text."""
     assert (TAG_MODEL, TAG_DEFAULT, TAG_DATETIME, TAG_DATE, TAG_DECIMAL, TAG_BYTES, TAG_INPUT_FILE) == (
-        "__model__",
-        "__default__",
-        "__datetime__",
-        "__date__",
-        "__decimal__",
-        "__bytes__",
-        "__input_file__",
+        '__model__',
+        '__default__',
+        '__datetime__',
+        '__date__',
+        '__decimal__',
+        '__bytes__',
+        '__input_file__',
     )
-    assert (JSON_SERIALIZER, PICKLE_SERIALIZER) == ("json", "pickle")
+    assert (JSON_SERIALIZER, PICKLE_SERIALIZER) == ('json', 'pickle')
 
 
 def test_a_tag_lands_in_the_payload_as_a_plain_key():
     """An enum member used as a dict key must serialize to its value, not its name."""
-    raw = JsonSerializer().dumps({"when": datetime.date(2026, 8, 3)})
-    assert json.loads(raw) == {"when": {"__date__": "2026-08-03"}}
+    raw = JsonSerializer().dumps({'when': datetime.date(2026, 8, 3)})
+    assert json.loads(raw) == {'when': {'__date__': '2026-08-03'}}
 
 
 def test_every_tag_has_exactly_one_codec():
@@ -195,62 +195,62 @@ def test_every_tag_has_exactly_one_codec():
 
 def test_unknown_input_file_kind_is_rejected():
     payload = b'{"__input_file__": "SmtpInputFile", "filename": "a.png", "chunk_size": 65536}'
-    with pytest.raises(SerializationError, match="Unknown input file type"):
+    with pytest.raises(SerializationError, match='Unknown input file type'):
         JsonSerializer().loads(payload)
 
 
 def test_unknown_model_name_is_rejected():
-    with pytest.raises(SerializationError, match="not an aiogram type"):
+    with pytest.raises(SerializationError, match='not an aiogram type'):
         JsonSerializer().loads(b'{"__model__": "os", "data": {}}')
 
 
 def test_non_mapping_payload_is_rejected():
-    with pytest.raises(SerializationError, match="must be a mapping"):
-        JsonSerializer().loads(b"[1, 2]")
+    with pytest.raises(SerializationError, match='must be a mapping'):
+        JsonSerializer().loads(b'[1, 2]')
 
 
-@override_settings(TELEGRAM_BOT={"SERIALIZER": "json"})
+@override_settings(TELEGRAM_BOT={'SERIALIZER': 'json'})
 def test_get_serializer_json():
     assert isinstance(get_serializer(), JsonSerializer)
 
 
-@override_settings(TELEGRAM_BOT={"SERIALIZER": "pickle", "ALLOW_PICKLE": True})
+@override_settings(TELEGRAM_BOT={'SERIALIZER': 'pickle', 'ALLOW_PICKLE': True})
 def test_get_serializer_pickle():
     assert isinstance(get_serializer(), PickleSerializer)
 
 
-@override_settings(TELEGRAM_BOT={"SERIALIZER": "yaml"})
+@override_settings(TELEGRAM_BOT={'SERIALIZER': 'yaml'})
 def test_get_serializer_rejects_unknown():
-    with pytest.raises(SerializationError, match="Unknown serializer"):
+    with pytest.raises(SerializationError, match='Unknown serializer'):
         get_serializer()
 
 
 def test_reader_detects_json():
-    raw = JsonSerializer().dumps({"function": "send_message", "chat_id": 1})
-    assert loads(raw)["chat_id"] == 1
+    raw = JsonSerializer().dumps({'function': 'send_message', 'chat_id': 1})
+    assert loads(raw)['chat_id'] == 1
 
 
-@override_settings(TELEGRAM_BOT={"ALLOW_PICKLE": True})
+@override_settings(TELEGRAM_BOT={'ALLOW_PICKLE': True})
 def test_legacy_pickle_drains_during_the_upgrade_window():
     """A queue written by 1.x drains once the operator opts in."""
-    raw = PickleSerializer().dumps({"function": "send_message", "chat_id": 1})
-    assert loads(raw)["chat_id"] == 1
+    raw = PickleSerializer().dumps({'function': 'send_message', 'chat_id': 1})
+    assert loads(raw)['chat_id'] == 1
 
 
 def test_pickle_reads_are_refused_by_default():
     """Unpickling queue data is code execution; it must be an explicit opt-in."""
-    raw = PickleSerializer().dumps({"function": "send_message", "chat_id": 1})
-    with pytest.raises(SerializationError, match="ALLOW_PICKLE"):
+    raw = PickleSerializer().dumps({'function': 'send_message', 'chat_id': 1})
+    with pytest.raises(SerializationError, match='ALLOW_PICKLE'):
         loads(raw)
 
 
 def test_unsupported_input_file_reports_how_to_proceed():
     class Weird(types.input_file.InputFile):
         async def read(self, bot):  # pragma: no cover - never called
-            yield b""
+            yield b''
 
-    with pytest.raises(SerializationError, match="file_id or a URL"):
-        JsonSerializer().dumps({"photo": Weird()})
+    with pytest.raises(SerializationError, match='file_id or a URL'):
+        JsonSerializer().dumps({'photo': Weird()})
 
 
 def test_unencodable_object_raises_serialization_error():
@@ -259,32 +259,32 @@ def test_unencodable_object_raises_serialization_error():
     class Opaque:
         pass
 
-    with pytest.raises(SerializationError, match="Cannot encode payload as JSON"):
-        JsonSerializer().dumps({"thing": Opaque()})
+    with pytest.raises(SerializationError, match='Cannot encode payload as JSON'):
+        JsonSerializer().dumps({'thing': Opaque()})
 
 
 def test_malformed_json_raises_serialization_error():
-    with pytest.raises(SerializationError, match="Cannot decode JSON payload"):
-        JsonSerializer().loads(b"{not json")
+    with pytest.raises(SerializationError, match='Cannot decode JSON payload'):
+        JsonSerializer().loads(b'{not json')
 
 
 def test_corrupt_pickle_raises_serialization_error():
-    with pytest.raises(SerializationError, match="Cannot unpickle payload"):
-        PickleSerializer().loads(b"\x80\x04corrupt")
+    with pytest.raises(SerializationError, match='Cannot unpickle payload'):
+        PickleSerializer().loads(b'\x80\x04corrupt')
 
 
 def test_json_detection_tolerates_leading_whitespace():
-    raw = b"  \n" + JsonSerializer().dumps({"function": "send_message", "chat_id": 5})
-    assert loads(raw)["chat_id"] == 5
+    raw = b'  \n' + JsonSerializer().dumps({'function': 'send_message', 'chat_id': 5})
+    assert loads(raw)['chat_id'] == 5
 
 
 def test_deeply_nested_payload_raises_serialization_error():
     """encode/decode recurse, so depth must surface as SerializationError."""
-    payload: dict = {"function": "send_message"}
+    payload: dict = {'function': 'send_message'}
     node = payload
     for _ in range(sys.getrecursionlimit() + 100):
-        node["next"] = {}
-        node = node["next"]
+        node['next'] = {}
+        node = node['next']
 
     with pytest.raises(SerializationError):
         JsonSerializer().dumps(payload)
@@ -292,36 +292,36 @@ def test_deeply_nested_payload_raises_serialization_error():
 
 def test_a_queue_holding_both_formats_is_read_per_message():
     """Format detection is per payload, which is what allows a live switch."""
-    json_payload = JsonSerializer().dumps({"function": "send_message", "chat_id": 1})
-    pickle_payload = PickleSerializer().dumps({"function": "send_message", "chat_id": 2})
+    json_payload = JsonSerializer().dumps({'function': 'send_message', 'chat_id': 1})
+    pickle_payload = PickleSerializer().dumps({'function': 'send_message', 'chat_id': 2})
 
-    with override_settings(TELEGRAM_BOT={"ALLOW_PICKLE": True}):
-        assert loads(json_payload)["chat_id"] == 1
-        assert loads(pickle_payload)["chat_id"] == 2
+    with override_settings(TELEGRAM_BOT={'ALLOW_PICKLE': True}):
+        assert loads(json_payload)['chat_id'] == 1
+        assert loads(pickle_payload)['chat_id'] == 2
 
     # ALLOW_PICKLE applies only to the non-JSON one
-    with override_settings(TELEGRAM_BOT={"ALLOW_PICKLE": False}):
-        assert loads(json_payload)["chat_id"] == 1
-        with pytest.raises(SerializationError, match="ALLOW_PICKLE"):
+    with override_settings(TELEGRAM_BOT={'ALLOW_PICKLE': False}):
+        assert loads(json_payload)['chat_id'] == 1
+        with pytest.raises(SerializationError, match='ALLOW_PICKLE'):
             loads(pickle_payload)
 
 
-@override_settings(TELEGRAM_BOT={"ALLOW_PICKLE": "false"})
+@override_settings(TELEGRAM_BOT={'ALLOW_PICKLE': 'false'})
 def test_a_textual_allow_pickle_still_refuses():
     """From the environment the flag is a string, and 'false' is truthy."""
-    raw = PickleSerializer().dumps({"function": "send_message", "chat_id": 1})
-    with pytest.raises(SerializationError, match="ALLOW_PICKLE"):
+    raw = PickleSerializer().dumps({'function': 'send_message', 'chat_id': 1})
+    with pytest.raises(SerializationError, match='ALLOW_PICKLE'):
         loads(raw)
 
 
-@override_settings(TELEGRAM_BOT={"ALLOW_PICKLE": "yes"})
+@override_settings(TELEGRAM_BOT={'ALLOW_PICKLE': 'yes'})
 def test_a_textual_allow_pickle_still_permits():
-    raw = PickleSerializer().dumps({"function": "send_message", "chat_id": 2})
-    assert loads(raw)["chat_id"] == 2
+    raw = PickleSerializer().dumps({'function': 'send_message', 'chat_id': 2})
+    assert loads(raw)['chat_id'] == 2
 
 
-@override_settings(TELEGRAM_BOT={"SERIALIZER": "pickle", "ALLOW_PICKLE": False})
+@override_settings(TELEGRAM_BOT={'SERIALIZER': 'pickle', 'ALLOW_PICKLE': False})
 def test_writing_pickle_the_reader_refuses_is_rejected_at_runtime():
     """E022 reports this, but a WSGI process never runs the system checks."""
-    with pytest.raises(ImproperlyConfigured, match="ALLOW_PICKLE"):
+    with pytest.raises(ImproperlyConfigured, match='ALLOW_PICKLE'):
         get_serializer()

@@ -15,4 +15,4 @@ warnings.warn(
     stacklevel=2,
 )
 
-__all__ = ("TelegramBot", "bot", "conf", "get_redis", "redis_conn")
+__all__ = ('TelegramBot', 'bot', 'conf', 'get_redis', 'redis_conn')

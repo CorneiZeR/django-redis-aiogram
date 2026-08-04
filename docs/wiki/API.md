@@ -49,9 +49,9 @@ One decorator per aiogram observer, all registering on `bot.router`:
 `chat_join_request`, `error`.
 
 ```python
-@bot.message(F.text == "/start")
+@bot.message(F.text == '/start')
 async def start(message):
-    await message.answer("hi")
+    await message.answer('hi')
 ```
 
 Arguments pass straight through to aiogram, so filters behave exactly as they do

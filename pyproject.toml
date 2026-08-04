@@ -109,8 +109,12 @@ ignore-variadic-names = true
     "S108",    # /tmp literals are inert fixture data; nothing opens them
 ]
 
+[tool.ruff.lint.flake8-quotes]
+# must agree with format.quote-style, or Q000's fix and the formatter fight each other
+inline-quotes = "single"
+
 [tool.ruff.format]
-quote-style = "double"
+quote-style = "single"
 docstring-code-format = true
 
 [tool.mypy]

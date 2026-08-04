@@ -75,7 +75,7 @@ If you touch these areas, keep them covered:
   backends can index them:
 
   ```python
-  logger.warning("rate limited by telegram", extra={"tg_function": function})
+  logger.warning('rate limited by telegram', extra={'tg_function': function})
   ```
 
   Prefix the keys — unprefixed names can collide with `LogRecord` attributes.
