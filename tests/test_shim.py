@@ -210,3 +210,14 @@ def test_the_shim_boots_django_without_touching_telegram_or_redis():
     )
     assert result.returncode == 0, result.stderr
     assert 'shim boot ok' in result.stdout
+
+
+def test_the_shim_forwards_the_whole_package_surface():
+    """An alias that exports less than what it aliases is a trap: the missing
+    name works under one import path and raises under the other."""
+    import django_redis_aiogram
+    import telegram_bot
+
+    assert set(telegram_bot.__all__) == set(django_redis_aiogram.__all__)
+    for name in django_redis_aiogram.__all__:
+        assert getattr(telegram_bot, name) is getattr(django_redis_aiogram, name), name

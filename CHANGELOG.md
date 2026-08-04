@@ -79,10 +79,12 @@ to `DEFAULT_BOT_PROPERTIES`. See the upgrade notes in the README.
   queued and dropped by the consumer, so whoever can write to Redis cannot
   reach `download_file` or the token.
 - `import django_redis_aiogram` costs about a millisecond. Naming `bot` is what
-  loads aiogram and the pydantic stack under it, so a process with `ENABLED=0`
-  — a migration container, CI — never loads them at all. The `telegram_bot`
-  shim resolves its exports the same way, so a project still on the 1.x name
-  pays for aiogram only where it sends.
+  loads aiogram and the pydantic stack under it, and `ENABLED=0` keeps the
+  package's own boot from naming it: no autodiscover, so no `tg_router` module
+  is imported, and no checks are registered. A migration container or a CI run
+  that imports nothing which sends never loads aiogram at all. The
+  `telegram_bot` shim resolves its exports the same way, so a project still on
+  the 1.x name pays for aiogram only where it sends.
 
 ### Fixed
 

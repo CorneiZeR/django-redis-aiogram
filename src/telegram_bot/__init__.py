@@ -18,10 +18,11 @@ warnings.warn(
     stacklevel=2,
 )
 
-__all__ = ('TelegramBot', 'bot', 'conf', 'get_redis', 'redis_conn')
+__all__ = ('TelegramBot', '__version__', 'bot', 'conf', 'get_redis', 'redis_conn')
 
 if TYPE_CHECKING:
     from django_redis_aiogram import TelegramBot as TelegramBot
+    from django_redis_aiogram import __version__ as __version__
     from django_redis_aiogram import conf as conf
     from django_redis_aiogram import get_redis as get_redis
     from django_redis_aiogram import redis_conn as redis_conn

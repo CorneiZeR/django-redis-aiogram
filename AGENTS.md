@@ -94,7 +94,8 @@ and vice versa.
 ## Documentation
 
 Wiki pages live in `docs/wiki/` and are edited in the same pull request as the
-code they describe. Links are `[[Page-Name|Link text]]`, page first;
+code they describe. Links are `[[Page-Name]]`, or `[[Page-Name|Link text]]`
+with the page first when the label differs;
 `tests/test_wiki.py` checks that every link resolves, that the sidebar lists
 every page, and that the README's wiki links are not stale. Configuration
 examples in the docs are executed by `tests/test_docs_examples.py` and

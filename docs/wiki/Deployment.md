@@ -29,6 +29,11 @@ services:
     restart: always
 ```
 
+Note the absence of `ports:` on `redis`. Nothing outside the compose network
+reaches it, which is why no password appears here. Publish that port and Redis
+needs `requirepass` and a `REDIS_URL` carrying the credentials — the queue is a
+list of Telegram API calls, and whoever can write to it can send as your bot.
+
 Note what is **not** set: `back` and `celery_worker` leave `ENABLED` alone.
 They queue messages, and `ENABLED=0` would make those calls no-ops — the
 messages would vanish with a debug line and nothing else. The flag is for

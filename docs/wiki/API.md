@@ -15,7 +15,13 @@ resolves its exports on attribute access. Naming `bot` is what loads aiogram and
 the pydantic stack under it (~900 ms), so `from django_redis_aiogram import bot`
 pays that once, at the moment of import. Put it in the modules that send —
 router modules, the views and tasks that call `bot.send()` — and a process that
-imports none of them, or runs with `ENABLED=0`, never loads aiogram at all.
+imports none of them never loads aiogram at all.
+
+`ENABLED=0` covers the package's own boot: no autodiscover, so no `tg_router`
+module is imported, and no checks are registered. It does not un-import
+anything. A module that names `bot` at import time still loads aiogram in a
+disabled process — the send is a no-op, the import is not free. Move it inside
+the function if that matters.
 
 ## What the instance holds
 

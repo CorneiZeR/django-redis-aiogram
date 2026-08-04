@@ -90,7 +90,8 @@ repositories. `.coderabbit.yaml` points it at the invariants above.
 
 Wiki pages live in `docs/wiki/`. Edit them there, in the same pull request as
 the code they describe; a push to `master` publishes them to the wiki. Links
-between pages use `[[Page-Name|Link text]]` — the page comes first — and tests
+between pages use `[[Page-Name]]`, or `[[Page-Name|Link text]]` when the label
+differs from the page name — the page always comes first — and tests
 check that they all resolve and that none is written the other way round.
 
 ## Commits
