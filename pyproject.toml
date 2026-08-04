@@ -36,12 +36,12 @@ classifiers = [
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8",
-    "pytest-django>=4.9",
-    "fakeredis>=2.26",
-    "ruff>=0.9",
-    "mypy>=1.14",
-    "django-stubs[compatible-mypy]>=5.1",
+    "pytest>=9.1.1",
+    "pytest-django>=4.12.0",
+    "fakeredis>=2.37.0",
+    "ruff>=0.16.1",
+    "mypy>=2.3.0",
+    "django-stubs[compatible-mypy]>=6.0.7",
 ]
 
 [project.urls]
