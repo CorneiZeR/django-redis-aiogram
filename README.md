@@ -1,145 +1,105 @@
 # django-redis-aiogram
 
-`django-redis-aiogram` provides a quick way to install `aiogram` in a container adjacent to `django`, allowing you to use your own router and loop. Also allows you to send messages through `redis`.
+[![PyPI](https://img.shields.io/pypi/v/django-redis-aiogram.svg)](https://pypi.org/project/django-redis-aiogram/)
+[![Python](https://img.shields.io/pypi/pyversions/django-redis-aiogram.svg)](https://pypi.org/project/django-redis-aiogram/)
+[![CI](https://github.com/CorneiZeR/django-redis-aiogram/actions/workflows/ci.yml/badge.svg)](https://github.com/CorneiZeR/django-redis-aiogram/actions/workflows/ci.yml)
+[![License](https://img.shields.io/pypi/l/django-redis-aiogram.svg)](LICENSE)
 
-## Installation
+Run [aiogram](https://docs.aiogram.dev/) next to Django: write handlers as
+ordinary Django app code, and send Telegram messages from anywhere in the
+project.
 
-The easiest and recommended way to install `django-redis-aiogram` is from [PyPI](https://pypi.org/project/django-redis-aiogram/)
+One container runs the bot. Every other process — web, Celery, a management
+command — pushes the call onto a Redis list and returns, so a request never
+waits on Telegram.
 
-``` shell
+```text
+  web, celery  ──bot.send()──▶  Redis list  ──▶  start_tgbot  ──▶  Telegram
+```
+
+## Install
+
+```shell
 pip install django-redis-aiogram
 ```
 
-You need to add `telegram_bot` to `INSTALLED_APPS` in your projects `settings.py`.
-
-``` python
+```python
 # settings.py
+import os
 
-INSTALLED_APPS = (
-    ...
-    'telegram_bot',
-    ...
-)
-```
-
-Also, you need to specify the minimum settings:
-``` python
-# settings.py
+INSTALLED_APPS = [..., 'django_redis_aiogram']
 
 TELEGRAM_BOT = {
-    'REDIS_URL': REDIS_URL,
-    'TOKEN': TELEGRAM_BOT_TOKEN,
+    'TOKEN': os.environ.get('TELEGRAM_BOT_TOKEN', ''),
+    'REDIS_URL': os.environ.get('REDIS_URL', ''),
 }
 ```
 
-Next, add a separate container to your docker-compose.yml. 
-(optional, if you want to use routers and handlers)
+Both may be empty. Nothing connects or validates credentials at import time, so
+tests and migrations run without them. Requires Python 3.10–3.14, Django 5.2+,
+aiogram 3.30+, redis 5.0+.
 
-``` yaml
-# docker-compose.yml
+## Use it
 
-services:
-  ...
-  
-  telegram_bot:
-    container_name: telegram_bot
-    restart: always
-    command: python manage.py start_tgbot
-    build:
-      context: ./
-```
+```python
+# myapp/tg_router.py — imported automatically from every installed app
+from aiogram import F, types
 
-## Example Usage
-
-To send a message, use the following code:
-``` python
-# test.py
-
-from aiogram import types, F
-from telegram_bot import bot
-
-# sending a message directly
-bot.send_raw(chat_id=CHAT_ID, text=TEXT)
-bot.send_raw('send_photo', chat_id=CHAT_ID, caption=TEXT, photo=URL)
-
-# sending a message via redis
-bot.send_redis(chat_id=CHAT_ID, text=TEXT)
-bot.send_redis('send_photo', chat_id=CHAT_ID, caption=TEXT, photo=URL)
-
-# markup example
-markup = types.InlineKeyboardMarkup(inline_keyboard=[
-    [types.InlineKeyboardButton(
-        text='best project ever',
-        web_app=types.WebAppInfo(url='https://pypi.org/project/django-redis-aiogram')
-    )]
-])
-
-bot.send_raw(chat_id=CHAT_ID, text=TEXT, reply_markup=markup)
-bot.send_redis(chat_id=CHAT_ID, text=TEXT, reply_markup=markup)
+from django_redis_aiogram import bot
 
 
-# if RAISE_EXCEPTION is True, you can use try-except to handle errors from send_raw
-from aiogram.exceptions import TelegramBadRequest
-
-try:
-    bot.send_raw(chat_id=CHAT_ID, text='**test*', parse_mode='Markdown')
-except TelegramBadRequest:
-    print('Telegram bad request :)')
-```
-
-If you need to use handlers, create file `tg_router.py` (by default) in your app, use the following code:
-
-``` python
-from aiogram import types, F
-from telegram_bot import bot
-
-
-@bot.message(F.text.startswith('/start'))
-async def start_handler(message: types.Message) -> None:
+@bot.message(F.text == '/start')
+async def start(message: types.Message) -> None:
     await message.answer('hi')
-
-
-@bot.message()
-async def simple_handler(message: types.Message) -> None:
-    await message.reply(message.text)
 ```
 
-You can use all handler types like in aiogram.
+```python
+# anywhere else in the project
+from django_redis_aiogram import bot
 
-## Settings
-
-You can override settings:
-
-``` python
-# settings.py
-
-def default_kwargs(function: str) -> dict[str, Any]:
-    """Default kwargs for telegram bot functions."""
-    prepared_dict = {
-        'send_message': {'parse_mode': 'HTML'},
-        'send_photo': {'parse_mode': 'Markdown', 'caption': '`Photo`'}
-    }
-    return prepared_dict.get(function, {})
-
-TELEGRAM_BOT = {
-    {
-    # event expiration time in redis
-    'REDIS_EXP_TIME': 5,
-    # redis key for handling expired event
-    'REDIS_EXP_KEY': 'TELEGRAM_BOT_EXP',
-    # redis key for collecting messages
-    'REDIS_MESSAGES_KEY': 'TELEGRAM_BOT_MESSAGE',
-    # name of the module to find
-    'MODULE_NAME': 'tg_router',
-    # default kwargs for telegram bot
-    'DEFAULT_KWARGS': default_kwargs,
-    # telegram bot token
-    'TOKEN': <TELEGRAM_BOT_TOKEN>,
-    # url for redis connection
-    'REDIS_URL': <REDIS_URL>,
-    # max retries for sending message
-    'MAX_RETRIES': 10,
-    # raise exception if error occurred
-    'RAISE_EXCEPTION': False
-}
+bot.send(chat_id=CHAT_ID, text='Order approved')
 ```
+
+```shell
+python manage.py start_tgbot
+```
+
+A router module, a call, and one process running the bot. Everything else — rate
+limits, per-process opt-out, healthchecks — is configuration, and it is
+documented rather than required. Webhook mode is the one alternative that also
+asks for a URL route; [Webhook](../../wiki/Webhook) has the four steps.
+
+## Documentation
+
+The [wiki](https://github.com/CorneiZeR/django-redis-aiogram/wiki) is the
+documentation. Pages live in [`docs/wiki/`](docs/wiki), so they are reviewed in
+the same pull request as the code they describe and published from `master`.
+
+| | |
+| --- | --- |
+| [Installation](../../wiki/Installation) | install, configure, run |
+| [Settings](../../wiki/Settings) | every setting, with defaults and check ids |
+| [Handlers](../../wiki/Handlers) | routers, filters, FSM, the async ORM |
+| [Sending messages](../../wiki/Sending-messages) | routes, keyboards, files, errors |
+| [Testing](../../wiki/Testing) | your suite without Redis, asserting what was queued |
+| [API](../../wiki/API) | the instance, its internals, and what stays public |
+| [Delivery](../../wiki/Delivery) | how queued messages reach Telegram |
+| [Webhook](../../wiki/Webhook) | receiving updates over HTTP instead of polling |
+| [Rate limits](../../wiki/Rate-limits) | staying inside Telegram's published limits |
+| [Deployment](../../wiki/Deployment) | compose recipes, healthchecks, per-process opt-out |
+| [Logging](../../wiki/Logging) | the logger and its structured fields |
+| [Serialization](../../wiki/Serialization) | what can be queued |
+| [Troubleshooting](../../wiki/Troubleshooting) | symptoms and their usual causes |
+| [Migrating from 1.x](../../wiki/Migrating-from-1.x) | what changed, and what you must do |
+| [AI assistants](../../wiki/AI-assistants) | the brief to hand a coding agent |
+
+Upgrading from 1.x: `telegram_bot` still imports and still works in
+`INSTALLED_APPS` until 3.0, so nothing breaks on the version bump alone. The
+migration page lists the settings that do need attention.
+
+## Contributing
+
+[CONTRIBUTING.md](CONTRIBUTING.md) for the workflow, [AGENTS.md](AGENTS.md) for
+the same ground in the form coding agents read. Changes are in
+[CHANGELOG.md](CHANGELOG.md); security reports go through
+[SECURITY.md](SECURITY.md).

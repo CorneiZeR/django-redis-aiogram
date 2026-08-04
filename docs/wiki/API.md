@@ -1,0 +1,174 @@
+# API
+
+The shared instance is what you normally use:
+
+```python
+from django_redis_aiogram import bot
+```
+
+`bot` is a `TelegramBot`. Building one needs no credentials — everything that
+does appears on first use — so importing it anywhere is safe, including in a
+process that never talks to Telegram.
+
+`import django_redis_aiogram` costs about a millisecond, because the package
+resolves its exports on attribute access. Naming `bot` is what loads aiogram and
+the pydantic stack under it (~900 ms), so `from django_redis_aiogram import bot`
+pays that once, at the moment of import. Put it in the modules that send —
+router modules, the views and tasks that call `bot.send()` — and a process that
+imports none of them never loads aiogram at all.
+
+`ENABLED=0` covers the package's own boot: no autodiscover, so no `tg_router`
+module is imported, and no checks are registered. It does not un-import
+anything. A module that names `bot` at import time still loads aiogram in a
+disabled process — the send is a no-op, the import is not free. Move it inside
+the function if that matters.
+
+## What the instance holds
+
+| | What it is | Built |
+| --- | --- | --- |
+| `bot.bot` | the aiogram `Bot` | on first use; raises if `TOKEN` is empty |
+| `bot.dispatcher` | the aiogram `Dispatcher`, with the configured FSM storage | on first use |
+| `bot.loop` | the event loop this bot's work runs on | on first use, one per instance |
+| `bot.router` | the `Router` the decorators register on | with the instance |
+| `bot.redis_conn` | the shared Redis connection | on first use; raises if `REDIS_URL` is empty |
+| `bot.max_retries` | how many times a rate-limited send is retried | from `MAX_RETRIES`, or the constructor |
+| `bot.enabled` | whether this process should reach Telegram or Redis at all | read per access |
+| `bot.rate_limiter` | the limiter for this token, shared with any other instance holding it | on first use |
+| `bot.is_worker` | whether this process is the one polling Telegram | read per access |
+
+These are public. 1.x code drives them directly — running the loop by hand,
+feeding the dispatcher, reusing the connection — and that keeps working;
+`tests/test_public_surface.py` fails if any of them disappears.
+
+## Sending
+
+| | |
+| --- | --- |
+| `bot.send(function='send_message', **kwargs)` | queue it, or call Telegram directly inside the bot container |
+| `bot.send_redis(...)` | always queue |
+| `bot.send_raw(...)` | always call Telegram from this process |
+
+`function` must name a Telegram API method aiogram exposes; anything else raises
+`ValueError` before it reaches the queue. See **[[Sending-messages|Sending messages]]**.
+
+## Handlers
+
+One decorator per aiogram observer, all registering on `bot.router`:
+
+`message`, `edited_message`, `channel_post`, `edited_channel_post`,
+`inline_query`, `chosen_inline_result`, `callback_query`, `shipping_query`,
+`pre_checkout_query`, `poll`, `poll_answer`, `my_chat_member`, `chat_member`,
+`chat_join_request`, `error`.
+
+```python
+@bot.message(F.text == '/start')
+async def start(message):
+    await message.answer('hi')
+```
+
+Arguments pass straight through to aiogram, so filters behave exactly as they do
+there. See **[[Handlers]]**.
+
+## Running and stopping
+
+```python
+bot.start_polling()  # attaches the router, then blocks on long polling
+bot.close()  # drains in-flight sends, releases the storage, session and loop
+```
+
+`close(drain_timeout=5.0)` waits that long for sends still pacing behind the rate
+limiter, cancels whatever outlasts it with a warning, then releases the FSM
+storage's own Redis client, the bot's HTTP session and the loop. A closed
+instance builds itself again on next use.
+
+`start_tgbot` does both around the delivery consumer; you only need them when
+running the bot yourself.
+
+## A second instance
+
+```python
+own = TelegramBot(max_retries=3)
+```
+
+`TelegramBot(max_retries=None, loop=None)` — pass a loop to put its work on one
+you already run.
+
+Each instance builds its **own** aiogram `Bot`, HTTP session, dispatcher and,
+unless you hand it one, event loop. What they share is the token, which comes
+from settings either way, and therefore the rate-limit budget: `get_rate_limiter`
+is keyed by token, because Telegram counts per bot and two limiters would let one
+bot send at twice the rate. The Redis connection is shared too — it is
+process-wide, not per instance.
+
+Polling from more than one instance on the same token is not supported by
+Telegram itself: one `getUpdates` consumer per bot.
+
+Prefer the shared `bot`. A fresh instance inside a task or a request means a
+fresh event loop and HTTP session that nothing closes — see **[[Sending-messages|Sending messages]]**.
+
+## Module level
+
+```python
+from django_redis_aiogram import TelegramBot, bot, conf, get_redis, redis_conn, __version__
+```
+
+`conf` reads `settings.TELEGRAM_BOT` on first access, falls back to
+`DJANGO_REDIS_AIOGRAM_<NAME>` for scalars, and resets itself on
+`override_settings`. `redis_conn` is a lazy proxy over `get_redis()`; both hand
+back the one connection.
+
+## Values the settings accept
+
+Every choice a setting offers exists as an enum member, so a project can import
+the value instead of spelling the string:
+
+```python
+from django_redis_aiogram.enums import DeliveryKind, StorageKind, UpdateMode
+
+TELEGRAM_BOT = {
+    'DELIVERY': DeliveryKind.BLPOP,
+    'FSM_STORAGE': StorageKind.REDIS,
+    'MODE': UpdateMode.POLLING,
+}
+```
+
+| | Members |
+| --- | --- |
+| `DeliveryKind` | `BLPOP`, `KEYSPACE` |
+| `SerializerKind` | `JSON`, `PICKLE` |
+| `StorageKind` | `REDIS`, `MEMORY` |
+| `UpdateMode` | `POLLING`, `WEBHOOK` |
+| `RateLimitKey` | the three `RATE_LIMIT` keys |
+| `SerializationTag` | the `__model__`-style markers a queued payload carries |
+
+They are `(str, Enum)`, so a member compares equal to its string and works
+anywhere the string does. `choices(DeliveryKind)` gives the plain-string set,
+which is what the system checks validate against.
+
+The values are **frozen**: queued payloads and stored settings carry them, so a
+member may be renamed but never revalued.
+
+## Errors
+
+```python
+from django_redis_aiogram.exceptions import DjangoRedisAiogramError
+```
+
+| | Raised when |
+| --- | --- |
+| `DjangoRedisAiogramError` | base of everything this package raises |
+| `SerializationError` | a payload cannot be encoded, or cannot be decoded |
+| `UnknownApiMethodError` | a call names something that is not a Telegram API method |
+
+Catching `DjangoRedisAiogramError` catches all of them. The two you are likely
+to name keep the bases they had before the family existed —
+`UnknownApiMethodError` is still a `ValueError`, and the serializer errors are
+still `SerializationError` — so existing `except` clauses keep working.
+Configuration problems remain Django's `ImproperlyConfigured`, since that is
+what `manage.py check` and Django's own machinery expect.
+
+## Deprecated
+
+`telegram_bot` still imports and still works in `INSTALLED_APPS`, with a
+`DeprecationWarning`. It is removed in 3.0 — see **[[Migrating-from-1.x|Migrating from 1.x]]**.

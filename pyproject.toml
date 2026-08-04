@@ -1,0 +1,127 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "django-redis-aiogram"
+dynamic = ["version"]
+description = "Run aiogram in a neighbour container and send Telegram messages from Django through Redis"
+readme = "README.md"
+requires-python = ">=3.10,<3.15"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Oleksii Kolosiuk", email = "kolosyuk1@gmail.com" }]
+keywords = ["django", "redis", "aiogram", "telegram", "bot", "docker"]
+dependencies = [
+    "django>=5.2",
+    "redis>=5.0",
+    "aiogram>=3.30",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Framework :: Django",
+    "Framework :: Django :: 5.2",
+    "Framework :: Django :: 6.0",
+    "Typing :: Typed",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-django>=4.9",
+    "fakeredis>=2.26",
+    "ruff>=0.9",
+    "mypy>=1.14",
+    "django-stubs[compatible-mypy]>=5.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/CorneiZeR/django-redis-aiogram"
+Changelog = "https://github.com/CorneiZeR/django-redis-aiogram/blob/master/CHANGELOG.md"
+Issues = "https://github.com/CorneiZeR/django-redis-aiogram/issues"
+
+[tool.hatch.version]
+path = "src/django_redis_aiogram/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/django_redis_aiogram", "src/telegram_bot"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "README.md", "CHANGELOG.md", "LICENSE"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "tests.settings"
+testpaths = ["tests"]
+markers = [
+    "integration: needs a real Redis; set DJANGO_REDIS_AIOGRAM_TEST_REDIS_URL to run",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "D203",   # incorrect-blank-line-before-class is incompatible with D211
+    "D213",   # multi-line-summary-second-line is incompatible with D212
+    "COM812", # trailing commas are the formatter's job
+    "CPY001", # no per-file copyright headers; LICENSE covers the project
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["django_redis_aiogram", "telegram_bot"]
+
+[tool.ruff.lint.flake8-annotations]
+# Any is unavoidable for **kwargs passthroughs into aiogram bot methods
+allow-star-arg-any = true
+
+[tool.ruff.lint.flake8-unused-arguments]
+# Django's BaseCommand.handle(self, *args, **options) never uses *args
+ignore-variadic-names = true
+
+[tool.ruff.lint.extend-per-file-ignores]
+"tests/**" = [
+    "S101",    # asserts are the point of a test
+    "S105",    # hardcoded test secrets
+    "S106",    # hardcoded test passwords
+    "SLF001",  # tests reach into private members deliberately
+    "PLR2004", # magic values in assertions
+    "ANN",     # annotations are not required in tests
+    "ARG",     # unused fixture and mock arguments
+    "D",       # test names are the documentation
+    "PLC0415", # importing inside a test body is how import-time behaviour is asserted
+    "EM101",   # test doubles raise realistic errors inline
+    "EM102",   # same: the message is test data, not a domain error
+    "TRY003",  # same
+    "N801",    # a stub named `session` mirrors the aiogram attribute it stands in for
+    "BLE001",  # tests catch Exception in thread bodies to report what the thread raised
+    "S108",    # /tmp literals are inert fixture data; nothing opens them
+]
+
+[tool.ruff.lint.flake8-quotes]
+# must agree with format.quote-style, or Q000's fix and the formatter fight each other
+inline-quotes = "single"
+
+[tool.ruff.format]
+quote-style = "single"
+docstring-code-format = true
+
+[tool.mypy]
+python_version = "3.10"
+files = ["src"]
+strict = true
+plugins = ["mypy_django_plugin.main"]
+
+[tool.django-stubs]
+django_settings_module = "tests.settings"

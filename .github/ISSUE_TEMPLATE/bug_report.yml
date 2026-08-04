@@ -1,0 +1,56 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: >-
+        Include the traceback or the relevant log lines. Strip credentials and
+        chat ids first — issues here are public.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: How to reproduce
+      description: The smallest set of steps or code that shows the problem.
+    validations:
+      required: true
+
+  - type: textarea
+    id: settings
+    attributes:
+      label: Your TELEGRAM_BOT settings
+      description: >-
+        Redact TOKEN and any password in REDIS_URL. If a secret has already been
+        exposed somewhere, report it privately instead — see SECURITY.md.
+      render: python
+    validations:
+      required: true
+
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      placeholder: django-redis-aiogram 2.0.0, Django 5.2, aiogram 3.30, Python 3.12
+    validations:
+      required: true
+
+  - type: input
+    id: redis
+    attributes:
+      label: Redis
+      description: >-
+        Which Redis, and is it managed? Managed providers refuse CONFIG SET.
+        Version and hosting only — no connection string.
+      placeholder: Redis 7.4 in docker / AWS ElastiCache / Upstash
