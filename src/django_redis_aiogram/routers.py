@@ -1,3 +1,9 @@
+"""Collect the handlers each installed app contributes.
+
+Handlers register themselves on the shared bot as a side effect of being
+imported, so discovery is nothing more than importing one module per app.
+"""
+
 from django.utils.module_loading import autodiscover_modules
 
 from django_redis_aiogram.settings import conf

@@ -109,7 +109,6 @@ def test_a_catch_all_registered_earlier_swallows_the_update():
 
 
 @override_settings(TELEGRAM_BOT={"DELIVERY": "blpop"})
-@override_settings(TELEGRAM_BOT={"DELIVERY": "blpop"})
 def test_draining_the_queue_without_a_thread(redis_server):
     """Queued by send_redis and read by the consumer, which is the whole path."""
     bot.send_redis(chat_id=42, text="hi")

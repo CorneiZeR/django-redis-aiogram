@@ -1,3 +1,5 @@
+"""Deprecated alias for :mod:`django_redis_aiogram.apps`."""
+
 from django_redis_aiogram import apps as base
 
 

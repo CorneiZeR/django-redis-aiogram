@@ -31,7 +31,7 @@ def test_there_is_a_logging_example_to_check():
     assert EXAMPLES, "no LOGGING example found in the docs"
 
 
-@pytest.mark.parametrize("name,source", EXAMPLES, ids=[name for name, _ in EXAMPLES])
+@pytest.mark.parametrize(("name", "source"), EXAMPLES, ids=[name for name, _ in EXAMPLES])
 def test_every_referenced_handler_is_defined(name, source):
     config = ast.literal_eval(source)
     defined = set(config.get("handlers", {}))

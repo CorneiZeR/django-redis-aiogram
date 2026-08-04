@@ -195,7 +195,8 @@ def test_asking_for_webhook_mode_against_a_polling_setting_warns():
     printed, events = run_start_command(mode="webhook")
 
     assert "Updates arrive by webhook." in printed
-    assert "disagrees" in printed and "refuses updates" in printed
+    assert "disagrees" in printed
+    assert "refuses updates" in printed
     assert "polled" not in events
 
 
@@ -212,7 +213,8 @@ def test_asking_for_polling_against_a_webhook_setting_warns():
     printed, events = run_start_command(mode="polling")
 
     assert "Updates arrive by polling." in printed
-    assert "disagrees" in printed and "getUpdates fails" in printed
+    assert "disagrees" in printed
+    assert "getUpdates fails" in printed
     assert "polled" in events, "it did not poll despite being asked to"
 
 

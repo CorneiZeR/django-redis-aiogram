@@ -26,6 +26,8 @@ from django_redis_aiogram.webhook import (
 )
 
 SECRET = "a-long-random-string"
+#: what the deliberately failing handler below raises with
+BOOM = "boom"
 SETTINGS = {
     "TOKEN": "42:x",
     "FSM_STORAGE": "memory",
@@ -153,7 +155,7 @@ def test_a_failing_handler_still_answers_200(monkeypatch, caplog):
 
     @instance.message()
     async def explode(message: types.Message) -> None:
-        raise RuntimeError("boom")
+        raise RuntimeError(BOOM)
 
     monkeypatch.setattr("django_redis_aiogram.webhook.bot", instance)
     try:
@@ -254,7 +256,7 @@ class FakeBotApi:
             last_error_message="wrong response from the webhook",
         )
 
-    class session:
+    class session:  # noqa: N801 - stands in for aiogram's bot.session attribute
         @staticmethod
         async def close():
             pass
@@ -267,7 +269,7 @@ def telegram(monkeypatch):
     api = FakeBotApi()
     instance._bot = api
     monkeypatch.setattr("django_redis_aiogram.management.commands.tgbot_webhook.bot", instance)
-    yield api
+    return api
 
 
 @override_settings(TELEGRAM_BOT=SETTINGS)
@@ -399,7 +401,7 @@ def test_concurrent_first_requests_share_one_dispatcher(monkeypatch):
         try:
             ready.wait()
             assert post(an_update(f"/probe{index}", update_id=index)).status_code == 200
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001 - a thread cannot fail the test; the main thread re-raises
             errors.append(error)
 
     threads = [threading.Thread(target=deliver, args=(index,)) for index in range(4)]

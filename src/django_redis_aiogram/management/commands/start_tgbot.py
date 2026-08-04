@@ -1,3 +1,10 @@
+"""Run the bot: receive updates, and consume the queue Django writes to.
+
+This is the long-running process a bot container is built around. It owns two
+things at once — whatever brings updates in, and the consumer that drains the
+Redis queue — and has to shut both down cleanly when the container stops.
+"""
+
 import contextlib
 import logging
 import signal
@@ -21,12 +28,15 @@ Handler = Callable[[int, FrameType | None], Any] | int | None
 
 
 class Command(BaseCommand):
+    """Start the bot and the queue consumer, and stop them together."""
+
     help = "Start telegram bot"
 
     #: what --idle waits on; tests replace it so they can end the wait
     idle_event: threading.Event | None = None
 
     def add_arguments(self, parser: ArgumentParser) -> None:
+        """Declare --mode and --idle."""
         parser.add_argument(
             "--mode",
             choices=sorted(MODES),
@@ -47,7 +57,8 @@ class Command(BaseCommand):
             ),
         )
 
-    def handle(self, *args: Any, **options: Any) -> None:
+    def handle(self, *args: Any, **options: Any) -> None:  # noqa: ARG002 - *args is BaseCommand's signature
+        """Receive updates, drain the queue, and unwind both on a signal."""
         if not bot.enabled:
             self.stdout.write(
                 self.style.WARNING(
@@ -123,7 +134,7 @@ class Command(BaseCommand):
         signal.signal only works on the main thread.
         """
 
-        def raise_interrupt(signum: int, frame: FrameType | None) -> None:
+        def raise_interrupt(_signum: int, _frame: FrameType | None) -> None:
             raise KeyboardInterrupt
 
         try:
