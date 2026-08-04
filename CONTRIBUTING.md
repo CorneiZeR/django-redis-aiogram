@@ -46,9 +46,9 @@ other half — it builds the wheel, installs it into a throwaway project and
 checks that Django boots with no credentials at all.
 
 CI splits those up: `ruff`, `ruff format` and `mypy` run once on Python 3.13,
-while `pytest` runs across Python 3.10–3.13 × Django 5.2/6.0, plus a job pinning
-the lowest supported versions of every dependency. Python 3.14 runs too but
-cannot block a merge, since its dependency wheels still lag.
+while `pytest` runs across Python 3.10–3.14 × Django 5.2/6.0, plus a job pinning
+the lowest supported versions of every dependency. Every version the package
+advertises has to pass before a merge.
 
 ## What the tests care about
 

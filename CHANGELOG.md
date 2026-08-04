@@ -159,9 +159,9 @@ to `DEFAULT_BOT_PROPERTIES`. See the upgrade notes in the README.
 
 - Test suite covering lazy import, the `ENABLED` flag, serialization
   round-trips, delivery, checks and the shim.
-- CI across Python 3.10–3.13 and Django 5.2/6.0 with ruff, mypy and pytest,
-  plus a job pinning the lowest supported dependency versions and a
-  non-blocking one on Python 3.14.
+- CI across Python 3.10–3.14 and Django 5.2/6.0 with ruff, mypy and pytest,
+  plus a job pinning the lowest supported dependency versions. Every version the
+  package advertises has to pass before a merge.
 - Releases publish to PyPI through Trusted Publishing.
 - Dependabot, issue and pull request templates, `CONTRIBUTING.md`,
   `SECURITY.md`.
