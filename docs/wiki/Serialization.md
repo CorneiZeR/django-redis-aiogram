@@ -40,7 +40,8 @@ queued, naming the alternative:
 
 ```text
 FooInputFile cannot be queued. Send a file_id or a URL instead,
-or set TELEGRAM_BOT['SERIALIZER'] to 'pickle'.
+or set TELEGRAM_BOT['SERIALIZER'] to 'pickle' together with
+ALLOW_PICKLE = True, or the reader will refuse what it writes.
 ```
 
 Falling back to pickle takes both keys, and a queue nothing untrusted can write

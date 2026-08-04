@@ -58,6 +58,10 @@ and vice versa.
   boot, with no token and no reachable Redis. Anything that connects or
   validates credentials goes behind a property or a function. This is the defect
   2.0 existed to fix; re-introducing it breaks every consumer's test suite.
+- **Importing the package stays cheap.** `__init__` resolves its exports lazily
+  (PEP 562) so `import django_redis_aiogram` costs ~1 ms, and a disabled Django
+  boot never loads aiogram (~900 ms). `tests/test_lazy_init.py` pins both in
+  subprocesses; an eager import anywhere on the boot path fails them.
 - **Every change carries a test, and the test must fail without the change.**
   Revert your fix, watch the test fail, put it back. A test that passes either
   way is worse than none, because it reads as coverage.

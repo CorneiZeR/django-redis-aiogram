@@ -21,18 +21,25 @@ from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from django.core.exceptions import ImproperlyConfigured
 from django.core.signals import setting_changed
 
 from django_redis_aiogram.defaults import DEFAULTS
+from django_redis_aiogram.enums import RateLimitKey, choices
+from django_redis_aiogram.settings import SETTINGS_NAME, conf
 
 Clock = Callable[[], float]
 Sleeper = Callable[[float], Awaitable[None]]
 
-OVERALL_PER_SECOND = 'overall_per_second'
-PER_CHAT_PER_SECOND = 'per_chat_per_second'
-GROUP_PER_MINUTE = 'group_per_minute'
+# the budget names, kept as module constants because that is how 2.0 exposed
+# them; never interpolate one, an (str, Enum) member formats as its own repr
+# aliases carry the plain strings 2.0 shipped: a (str, Enum) member would
+# interpolate as its qualified name on newer Pythons, and these are public
+OVERALL_PER_SECOND = RateLimitKey.OVERALL_PER_SECOND.value
+PER_CHAT_PER_SECOND = RateLimitKey.PER_CHAT_PER_SECOND.value
+GROUP_PER_MINUTE = RateLimitKey.GROUP_PER_MINUTE.value
 
-KNOWN_RATE_LIMIT_KEYS = frozenset({OVERALL_PER_SECOND, PER_CHAT_PER_SECOND, GROUP_PER_MINUTE})
+KNOWN_RATE_LIMIT_KEYS = choices(RateLimitKey)
 
 # the shipped limits live in defaults.py; duplicating them here would drift
 RATE_LIMIT_DEFAULTS: dict[str, float] = dict(DEFAULTS['RATE_LIMIT'])
@@ -59,8 +66,10 @@ class TokenBucket:
         clock: Clock = time.monotonic,
         sleep: Sleeper = asyncio.sleep,
     ) -> None:
+        """Build a bucket that refills at ``rate`` per second."""
         if rate <= 0:
-            raise ValueError('rate must be positive')
+            msg = 'rate must be positive'
+            raise ValueError(msg)
         self.rate = rate
         self.capacity = capacity if capacity is not None else max(rate, 1.0)
         self._clock = clock
@@ -70,7 +79,7 @@ class TokenBucket:
         self._guard = threading.Lock()
 
     def is_idle(self) -> bool:
-        """Back to full, so forgetting this bucket costs the caller nothing."""
+        """Report whether the bucket is back to full, and so free to forget."""
         with self._guard:
             self._refill()
             return self._tokens >= self.capacity - TOKEN_EPSILON
@@ -111,6 +120,11 @@ class RateLimiter:
         clock: Clock = time.monotonic,
         sleep: Sleeper = asyncio.sleep,
     ) -> None:
+        """Build the buckets for one bot; a rate of 0 switches that budget off.
+
+        The parameter names are the ``RATE_LIMIT`` keys, so a settings mapping
+        can be splatted straight in.
+        """
         self._clock = clock
         self._sleep = sleep
         self._overall = self._bucket(overall_per_second)
@@ -158,12 +172,8 @@ class RateLimiter:
         while len(chats) > MAX_TRACKED_CHATS:
             # stopping at the first busy bucket left the map uncapped: one chat
             # that keeps sending pinned everything behind it
-            candidates = [
-                chats.popitem(last=False) for _ in range(min(EVICTION_CANDIDATES, len(chats)))
-            ]
-            evict = next(
-                (index for index, (_, bucket) in enumerate(candidates) if bucket.is_idle()), 0
-            )
+            candidates = [chats.popitem(last=False) for _ in range(min(EVICTION_CANDIDATES, len(chats)))]
+            evict = next((index for index, (_, bucket) in enumerate(candidates) if bucket.is_idle()), 0)
             del candidates[evict]
             for key, bucket in reversed(candidates):
                 chats[key] = bucket
@@ -171,10 +181,14 @@ class RateLimiter:
 
     @staticmethod
     def is_group(chat_id: int) -> bool:
-        """Groups, supergroups and channels all carry a negative id."""
+        """Report whether ``chat_id`` is a group: those all carry a negative id.
+
+        Supergroups and channels count as groups here, since Telegram gives the
+        three of them the same per-minute budget.
+        """
         return chat_id < 0
 
-    async def acquire(self, chat_id: Any = None) -> None:
+    async def acquire(self, chat_id: int | str | None = None) -> None:
         """Wait until sending to ``chat_id`` stays inside every limit."""
         buckets: list[TokenBucket] = []
         if self._overall is not None:
@@ -185,9 +199,7 @@ class RateLimiter:
             with self._lock:
                 per_chat = self._for(self._chats, key, self._per_chat_rate)
                 group = (
-                    self._for(self._groups, key, self._group_rate, self._group_capacity)
-                    if self.is_group(key)
-                    else None
+                    self._for(self._groups, key, self._group_rate, self._group_capacity) if self.is_group(key) else None
                 )
             buckets.extend(bucket for bucket in (per_chat, group) if bucket is not None)
 
@@ -195,8 +207,14 @@ class RateLimiter:
             await bucket.acquire()
 
     @staticmethod
-    def _chat_key(chat_id: Any) -> int | None:
-        """Per-chat limits only apply to numeric ids; @channel names cannot be keyed."""
+    def _chat_key(chat_id: int | str | None) -> int | None:
+        """Return the bucket key for ``chat_id``, or None when it has none.
+
+        Per-chat limits only apply to numeric ids: an ``@channel`` name cannot
+        be keyed. The runtime check is wider than the annotation because the id
+        comes from caller kwargs, where anything at all can turn up — including
+        a bool, which int() would otherwise fold into chat 1.
+        """
         if isinstance(chat_id, bool) or not isinstance(chat_id, (int, str)):
             return None
         try:
@@ -207,52 +225,66 @@ class RateLimiter:
 
 def build_rate_limiter() -> RateLimiter | None:
     """Build the limiter described by settings, or None when disabled."""
-    from django.core.exceptions import ImproperlyConfigured
-
-    from django_redis_aiogram.settings import SETTINGS_NAME, conf
-
     limits = conf['RATE_LIMIT']
     if not limits:
         return None
 
     unknown = sorted(str(key) for key in limits if key not in KNOWN_RATE_LIMIT_KEYS)
     if unknown:
-        raise ImproperlyConfigured(
-            f"{SETTINGS_NAME}['RATE_LIMIT'] has unknown keys: {', '.join(unknown)}."
-        )
+        msg = f"{SETTINGS_NAME}['RATE_LIMIT'] has unknown keys: {', '.join(unknown)}."
+        raise ImproperlyConfigured(msg)
     return RateLimiter(**limits)
 
 
-_limiters: dict[str, RateLimiter] = {}
-_limiters_guard = threading.Lock()
-
-
-def get_rate_limiter(token: str) -> RateLimiter | None:
-    """Return the limiter for ``token``, shared across bot instances.
+class _LimiterRegistry:
+    """The limiters in use, one per bot token.
 
     Telegram applies its limits per bot, so two ``TelegramBot`` objects holding
     the same token must draw on one budget; separate limiters would let them
     send at twice the rate.
     """
-    with _limiters_guard:
-        existing = _limiters.get(token)
-        if existing is not None:
-            return existing
-        limiter = build_rate_limiter()
-        if limiter is not None:
-            _limiters[token] = limiter
-        return limiter
+
+    def __init__(self) -> None:
+        """Start empty: a limiter is built on the first send with that token."""
+        self._limiters: dict[str, RateLimiter] = {}
+        # threading, not asyncio: see TokenBucket.acquire
+        self._guard = threading.Lock()
+
+    def get(self, token: str) -> RateLimiter | None:
+        """Return the limiter for ``token``, building it if this is the first ask."""
+        with self._guard:
+            existing = self._limiters.get(token)
+            if existing is not None:
+                return existing
+            limiter = build_rate_limiter()
+            if limiter is not None:
+                self._limiters[token] = limiter
+            return limiter
+
+    def clear(self) -> None:
+        """Forget every limiter, so the next ask reads the settings again."""
+        with self._guard:
+            self._limiters.clear()
+
+
+_registry = _LimiterRegistry()
+
+
+def get_rate_limiter(token: str) -> RateLimiter | None:
+    """Return the limiter for ``token``, shared across bot instances."""
+    return _registry.get(token)
 
 
 def reset_rate_limiters() -> None:
     """Forget the shared limiters, so changed settings take effect."""
-    with _limiters_guard:
-        _limiters.clear()
+    _registry.clear()
 
 
-def _reset_on_setting_change(sender: Any, setting: str, **kwargs: Any) -> None:
-    from django_redis_aiogram.settings import SETTINGS_NAME
-
+def _reset_on_setting_change(
+    sender: object,  # noqa: ARG001 - Django sends this to every receiver, named
+    setting: str,
+    **kwargs: Any,
+) -> None:
     if setting == SETTINGS_NAME:
         reset_rate_limiters()
 

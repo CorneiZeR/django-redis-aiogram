@@ -26,6 +26,8 @@ from django_redis_aiogram.webhook import (
 )
 
 SECRET = 'a-long-random-string'
+#: what the deliberately failing handler below raises with
+BOOM = 'boom'
 SETTINGS = {
     'TOKEN': '42:x',
     'FSM_STORAGE': 'memory',
@@ -50,9 +52,7 @@ def an_update(text='/start', update_id=1):
 
 def post(payload, secret=SECRET, path='/tg/hook/'):
     headers = {SECRET_HEADER: secret} if secret is not None else {}
-    request = RequestFactory().post(
-        path, data=json.dumps(payload), content_type='application/json', **headers
-    )
+    request = RequestFactory().post(path, data=json.dumps(payload), content_type='application/json', **headers)
     return telegram_webhook(request)
 
 
@@ -155,7 +155,7 @@ def test_a_failing_handler_still_answers_200(monkeypatch, caplog):
 
     @instance.message()
     async def explode(message: types.Message) -> None:
-        raise RuntimeError('boom')
+        raise RuntimeError(BOOM)
 
     monkeypatch.setattr('django_redis_aiogram.webhook.bot', instance)
     try:
@@ -269,7 +269,7 @@ def telegram(monkeypatch):
     api = FakeBotApi()
     instance._bot = api
     monkeypatch.setattr('django_redis_aiogram.management.commands.tgbot_webhook.bot', instance)
-    yield api
+    return api
 
 
 @override_settings(TELEGRAM_BOT=SETTINGS)
@@ -468,9 +468,7 @@ def test_real_update_types_are_accepted():
     assert webhook_settings()['allowed_updates'] == ['message', 'poll_answer']
 
 
-@override_settings(
-    TELEGRAM_BOT={**SETTINGS, 'WEBHOOK_ALLOWED_UPDATES': (['message'], {'poll': 1}, 7)}
-)
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'WEBHOOK_ALLOWED_UPDATES': (['message'], {'poll': 1}, 7)})
 def test_members_that_are_not_strings_are_reported_not_raised():
     """A list member is unhashable, so the membership test used to raise out of
     manage.py check instead of reporting anything."""

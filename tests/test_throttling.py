@@ -14,11 +14,15 @@ from django.test import override_settings
 from django_redis_aiogram import TelegramBot
 from django_redis_aiogram.checks import check_settings
 from django_redis_aiogram.defaults import DEFAULTS
+from django_redis_aiogram.enums import RateLimitKey, choices
 from django_redis_aiogram.throttling import (
+    KNOWN_RATE_LIMIT_KEYS,
     MAX_TRACKED_CHATS,
     RateLimiter,
     TokenBucket,
     build_rate_limiter,
+    get_rate_limiter,
+    reset_rate_limiters,
 )
 
 
@@ -256,9 +260,7 @@ def test_unknown_key_is_reported():
         build_rate_limiter()
 
 
-@override_settings(
-    TELEGRAM_BOT={'RATE_LIMIT': {'per_second': 5}, 'TOKEN': '42:x', 'REDIS_URL': 'r://x'}
-)
+@override_settings(TELEGRAM_BOT={'RATE_LIMIT': {'per_second': 5}, 'TOKEN': '42:x', 'REDIS_URL': 'r://x'})
 def test_check_catches_an_unknown_key():
     assert 'django_redis_aiogram.E020' in {message.id for message in check_settings()}
 
@@ -317,6 +319,27 @@ def test_writing_pickle_while_refusing_to_read_it_is_rejected():
     assert 'django_redis_aiogram.E022' in {message.id for message in check_settings()}
 
 
+def test_the_known_keys_are_the_rate_limit_enum():
+    """A second hand-written list of the same names is a list that drifts."""
+    assert choices(RateLimitKey) == KNOWN_RATE_LIMIT_KEYS
+    assert frozenset(DEFAULTS['RATE_LIMIT']) == KNOWN_RATE_LIMIT_KEYS
+
+
+@override_settings(TELEGRAM_BOT={})
+def test_one_token_gets_one_limiter():
+    first = get_rate_limiter('42:one')
+    assert get_rate_limiter('42:one') is first
+    assert get_rate_limiter('42:two') is not first
+
+
+@override_settings(TELEGRAM_BOT={})
+def test_resetting_forgets_the_shared_limiters():
+    """override_settings fires this, which is how a changed budget takes effect."""
+    before = get_rate_limiter('42:one')
+    reset_rate_limiters()
+    assert get_rate_limiter('42:one') is not before
+
+
 def test_eviction_caps_the_map_even_when_every_bucket_is_busy():
     """Stopping at the first busy bucket left the map growing without limit."""
     clock = FakeClock()  # frozen, so nothing refills while the test runs
@@ -337,3 +360,46 @@ def test_eviction_caps_the_map_even_when_every_bucket_is_busy():
     assert not [bucket for bucket in limiter._chats.values() if bucket.is_idle()], (
         'the buckets were idle, so this did not exercise the busy path'
     )
+
+
+@override_settings(
+    TELEGRAM_BOT={
+        'TOKEN': '42:x',
+        'RATE_LIMIT': {'overall_per_second': 5, 'per_chat_per_second': 0, 'group_per_minute': 0},
+    }
+)
+def test_a_living_bot_picks_up_changed_rate_limits():
+    """The instance used to cache its limiter, so setting_changed cleared the
+    registry and the bot kept pacing to the old numbers anyway."""
+    instance = TelegramBot()
+    limiter = instance.rate_limiter
+    assert limiter is not None
+    assert limiter._overall is not None
+    assert limiter._overall.rate == 5
+
+    with override_settings(
+        TELEGRAM_BOT={
+            'TOKEN': '42:x',
+            'RATE_LIMIT': {'overall_per_second': 9, 'per_chat_per_second': 0, 'group_per_minute': 0},
+        }
+    ):
+        changed = instance.rate_limiter
+        assert changed is not None
+        assert changed._overall is not None
+        assert changed._overall.rate == 9, 'the bot kept the limiter built for the old settings'
+
+
+@override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'SERIALIZER': 'pickle', 'ALLOW_PICKLE': 'false'})
+def test_a_textual_false_still_trips_the_pickle_check():
+    """From the environment ALLOW_PICKLE is a string, and 'false' is truthy —
+    the check has to coerce it exactly the way the reader does."""
+    assert 'django_redis_aiogram.E022' in {message.id for message in check_settings()}
+
+
+@override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'SERIALIZER': 'pickle', 'ALLOW_PICKLE': 'maybe'})
+def test_unreadable_allow_pickle_is_reported_not_raised():
+    """A check reports; E017 owns the type complaint, E022 stays silent."""
+    reported = {message.id for message in check_settings()}
+
+    assert 'django_redis_aiogram.E017' in reported
+    assert 'django_redis_aiogram.E022' not in reported

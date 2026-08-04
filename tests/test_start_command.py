@@ -103,9 +103,7 @@ class _NoDelivery:
         pass
 
 
-@override_settings(
-    TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost:6379/0', 'MODE': 'webhook'}
-)
+@override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost:6379/0', 'MODE': 'webhook'})
 def test_webhook_mode_consumes_without_calling_telegram(monkeypatch):
     """Webhook mode: updates arrive over HTTP, but the queue still needs a worker."""
     events = []
@@ -190,16 +188,15 @@ def run_start_command(**options):
     return out.getvalue(), events
 
 
-@override_settings(
-    TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost:6379/0', 'MODE': 'polling'}
-)
+@override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost:6379/0', 'MODE': 'polling'})
 def test_asking_for_webhook_mode_against_a_polling_setting_warns():
     """The view reads the setting, so this process would consume updates nobody
     is serving."""
     printed, events = run_start_command(mode='webhook')
 
     assert 'Updates arrive by webhook.' in printed
-    assert 'disagrees' in printed and 'refuses updates' in printed
+    assert 'disagrees' in printed
+    assert 'refuses updates' in printed
     assert 'polled' not in events
 
 
@@ -216,13 +213,12 @@ def test_asking_for_polling_against_a_webhook_setting_warns():
     printed, events = run_start_command(mode='polling')
 
     assert 'Updates arrive by polling.' in printed
-    assert 'disagrees' in printed and 'getUpdates fails' in printed
+    assert 'disagrees' in printed
+    assert 'getUpdates fails' in printed
     assert 'polled' in events, 'it did not poll despite being asked to'
 
 
-@override_settings(
-    TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost:6379/0', 'MODE': 'polling'}
-)
+@override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost:6379/0', 'MODE': 'polling'})
 def test_no_warning_when_the_flag_agrees_with_the_setting():
     printed, events = run_start_command(mode='polling')
 

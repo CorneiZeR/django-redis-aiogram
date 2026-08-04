@@ -140,7 +140,8 @@ def test_keyspace_delivery_with_notifications_from_the_server(server, redis_url)
 
         assert handled == [11], f'the expiry event never arrived: {handled}'
         flags = str(server.config_get('notify-keyspace-events')['notify-keyspace-events'])
-        assert 'E' in flags and ('x' in flags or 'A' in flags), flags
+        assert 'E' in flags, flags
+        assert 'x' in flags or 'A' in flags, flags
 
 
 def test_two_workers_split_the_queue_without_duplicating(server, redis_url):
@@ -220,9 +221,7 @@ def test_threading_is_not_needed_to_drain(server, redis_url):
 
 def test_the_heartbeat_expires_on_its_own(server, redis_url):
     """A worker that dies must stop looking alive, and only the server can do that."""
-    with override_settings(
-        TELEGRAM_BOT={**SETTINGS, 'REDIS_URL': redis_url, 'HEARTBEAT_INTERVAL': 1}
-    ):
+    with override_settings(TELEGRAM_BOT={**SETTINGS, 'REDIS_URL': redis_url, 'HEARTBEAT_INTERVAL': 1}):
         delivery = Recording()
         delivery.heartbeat()
 
@@ -268,9 +267,7 @@ def test_a_read_longer_than_the_heartbeat_interval_keeps_it_fresh(server, redis_
 
 
 def test_the_running_consumer_keeps_its_heartbeat_fresh(server, redis_url):
-    with override_settings(
-        TELEGRAM_BOT={**SETTINGS, 'REDIS_URL': redis_url, 'HEARTBEAT_INTERVAL': 1}
-    ):
+    with override_settings(TELEGRAM_BOT={**SETTINGS, 'REDIS_URL': redis_url, 'HEARTBEAT_INTERVAL': 1}):
         delivery = Recording()
         key = delivery.heartbeat_key
         thread = delivery.start_thread()

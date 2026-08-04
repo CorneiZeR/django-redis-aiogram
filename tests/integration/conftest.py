@@ -9,6 +9,10 @@ the next.
 import os
 
 import pytest
+from redis import Redis
+
+from django_redis_aiogram.redis import reset_redis
+from django_redis_aiogram.throttling import reset_rate_limiters
 
 # the marker is registered in pyproject.toml, and each module carries it itself
 REDIS_URL = os.environ.get('DJANGO_REDIS_AIOGRAM_TEST_REDIS_URL', '')
@@ -29,11 +33,6 @@ def server(redis_url):
     Point `DJANGO_REDIS_AIOGRAM_TEST_REDIS_URL` at a throwaway server or at
     least a database nothing else uses.
     """
-    from redis import Redis
-
-    from django_redis_aiogram.redis import reset_redis
-    from django_redis_aiogram.throttling import reset_rate_limiters
-
     client = Redis.from_url(redis_url)
     client.flushdb()
     reset_redis()

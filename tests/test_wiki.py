@@ -19,7 +19,7 @@ def page_names() -> set[str]:
 
 def target_of(link: str) -> str:
     """GitHub wiki links are [[Page-Name|Link Text]] — the page comes first."""
-    target = link.split('|')[0]
+    target = link.split('|', maxsplit=1)[0]
     return target.strip().replace(' ', '-')
 
 
@@ -52,9 +52,7 @@ def test_piped_links_name_the_page_first(path):
     """
     known = page_names()
     reversed_links = [
-        link
-        for link in LINK.findall(path.read_text())
-        if '|' in link and link.split('|')[0].strip() not in known
+        link for link in LINK.findall(path.read_text()) if '|' in link and link.split('|')[0].strip() not in known
     ]
     assert not reversed_links, f'{path.name} has label-first links: {reversed_links}'
 
@@ -89,15 +87,13 @@ def test_the_sidebar_lists_every_page():
 #: material the wiki already carried, and it drifted from those pages.
 README_BUDGET = 140
 #: `## Title`, with the three leading spaces markdown still renders as a heading
-ATX = re.compile(r'^ {0,3}#{1,6}\s+(.+?)\s*$', re.M)
+ATX = re.compile(r'^ {0,3}#{1,6}\s+(.+?)\s*$', re.MULTILINE)
 #: `Title` underlined with `===` or `---`, which renders as one too
-SETEXT = re.compile(r'^ {0,3}(\S.*?)\s*\n {0,3}(?:=+|-+)\s*$', re.M)
+SETEXT = re.compile(r'^ {0,3}(\S.*?)\s*\n {0,3}(?:=+|-+)\s*$', re.MULTILINE)
 #: a fence opens with at least three of either marker, indented up to three
 #: spaces, and runs to a matching close or to the end of the file
-FENCE = re.compile(
-    r'^ {0,3}(?P<mark>`{3,}|~{3,}).*?(?:^ {0,3}(?P=mark)[`~]*[ \t]*$|\Z)', re.M | re.S
-)
-COMMENT = re.compile(r'<!--.*?-->', re.S)
+FENCE = re.compile(r'^ {0,3}(?P<mark>`{3,}|~{3,}).*?(?:^ {0,3}(?P=mark)[`~]*[ \t]*$|\Z)', re.MULTILINE | re.DOTALL)
+COMMENT = re.compile(r'<!--.*?-->', re.DOTALL)
 
 
 def visible(text: str) -> str:
@@ -155,17 +151,13 @@ def test_an_unclosed_fence_hides_everything_after_it():
 
 def test_the_readme_stays_a_front_page():
     lines = README.read_text().splitlines()
-    assert len(lines) <= README_BUDGET, (
-        f'the README is {len(lines)} lines; anything this long belongs in a wiki page'
-    )
+    assert len(lines) <= README_BUDGET, f'the README is {len(lines)} lines; anything this long belongs in a wiki page'
 
 
 def test_no_readme_section_duplicates_a_wiki_page():
     """A section named after a page is that page's material coming back."""
     pages = {normalised(name) for name in page_names()} - {'home', '_sidebar'}
-    duplicated = [
-        title for title in sections(visible(README.read_text())) if normalised(title) in pages
-    ]
+    duplicated = [title for title in sections(visible(README.read_text())) if normalised(title) in pages]
 
     assert not duplicated, f'these belong in the wiki, not the README: {duplicated}'
 
@@ -177,9 +169,7 @@ def test_the_readme_links_to_every_page():
     treats spaces as dashes, so `../../wiki/rate-limits` reaches the page and has
     to count as reaching it.
     """
-    linked = {
-        normalised(target) for target in README_WIKI_LINK.findall(visible(README.read_text()))
-    }
+    linked = {normalised(target) for target in README_WIKI_LINK.findall(visible(README.read_text()))}
     pages = {normalised(name) for name in page_names()}
     missing = pages - linked - {normalised('Home'), normalised('_Sidebar')}
 
@@ -189,9 +179,7 @@ def test_the_readme_links_to_every_page():
 def test_a_link_spelled_the_way_github_accepts_it_counts(tmp_path, monkeypatch):
     """Otherwise the test demands one spelling of a link that has several."""
     readme = tmp_path / 'README.md'
-    rows = '\n'.join(
-        f'[{name}](../../wiki/{normalised(name)})' for name in page_names() if name != '_Sidebar'
-    )
+    rows = '\n'.join(f'[{name}](../../wiki/{normalised(name)})' for name in page_names() if name != '_Sidebar')
     readme.write_text(rows + '\n')
     monkeypatch.setattr('tests.test_wiki.README', readme)
 
@@ -201,9 +189,7 @@ def test_a_link_spelled_the_way_github_accepts_it_counts(tmp_path, monkeypatch):
 def a_readme(tmp_path, monkeypatch, body: str):
     """Point the checks at a README of our own, through the name they read."""
     readme = tmp_path / 'README.md'
-    rows = '\n'.join(
-        f'[{name}](../../wiki/{normalised(name)})' for name in page_names() if name != '_Sidebar'
-    )
+    rows = '\n'.join(f'[{name}](../../wiki/{normalised(name)})' for name in page_names() if name != '_Sidebar')
     readme.write_text(rows + '\n' + body)
     monkeypatch.setattr('tests.test_wiki.README', readme)
     return readme

@@ -36,9 +36,7 @@ def test_unknown_property_is_reported_clearly():
         build_default_properties()
 
 
-@override_settings(
-    TELEGRAM_BOT={'TOKEN': '42:test', 'DEFAULT_BOT_PROPERTIES': {'parse_mode': 'MarkdownV2'}}
-)
+@override_settings(TELEGRAM_BOT={'TOKEN': '42:test', 'DEFAULT_BOT_PROPERTIES': {'parse_mode': 'MarkdownV2'}})
 def test_bot_receives_the_properties():
     instance = TelegramBot()
     assert instance.bot.default.parse_mode == 'MarkdownV2'
@@ -100,17 +98,13 @@ def test_whitespace_only_redis_url_is_reported_as_missing():
         build_storage()
 
 
-@override_settings(
-    TELEGRAM_BOT={'DEFAULT_BOT_PROPERTIES': {1: 'HTML'}, 'TOKEN': '42:x', 'REDIS_URL': 'r://x'}
-)
+@override_settings(TELEGRAM_BOT={'DEFAULT_BOT_PROPERTIES': {1: 'HTML'}, 'TOKEN': '42:x', 'REDIS_URL': 'r://x'})
 def test_non_string_property_key_does_not_crash_the_check():
     """manage.py check must report the problem, not raise TypeError from join."""
     assert 'django_redis_aiogram.E018' in {message.id for message in check_settings()}
 
 
-@override_settings(
-    TELEGRAM_BOT={'FSM_STORAGE': 'does.not.Exist', 'TOKEN': '42:x', 'REDIS_URL': 'r://x'}
-)
+@override_settings(TELEGRAM_BOT={'FSM_STORAGE': 'does.not.Exist', 'TOKEN': '42:x', 'REDIS_URL': 'r://x'})
 def test_check_catches_a_dotted_path_that_does_not_import():
     """It used to pass the check and then raise ModuleNotFoundError at runtime."""
     assert 'django_redis_aiogram.E019' in {message.id for message in check_settings()}

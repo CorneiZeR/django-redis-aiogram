@@ -22,40 +22,44 @@ from django.views.decorators.csrf import csrf_exempt
 from pydantic import ValidationError
 
 from django_redis_aiogram import bot
+from django_redis_aiogram.enums import UpdateMode, choices
 from django_redis_aiogram.settings import SETTINGS_NAME, conf
 
 logger = logging.getLogger('django_redis_aiogram')
 
 #: what Telegram sends the configured secret back in
-SECRET_HEADER = 'HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN'
-POLLING = 'polling'
-WEBHOOK = 'webhook'
-MODES = frozenset({POLLING, WEBHOOK})
+SECRET_HEADER = 'HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN'  # noqa: S105 - a header name, not the secret it carries
+# aliases: the modes were named here before the enums module existed, and both
+# this package and its consumers import them from this path
+POLLING = UpdateMode.POLLING.value
+WEBHOOK = UpdateMode.WEBHOOK.value
+#: plain strings, so argparse choices and messages read as the settings do
+MODES = choices(UpdateMode)
 
 
 def current_mode() -> str:
     """Which of the two ways of receiving updates this deployment uses."""
     mode = str(conf['MODE'] or '').strip().lower()
     if mode not in MODES:
-        raise ImproperlyConfigured(
-            f"{SETTINGS_NAME}['MODE'] must be one of {sorted(MODES)}, got {mode!r}."
-        )
+        msg = f"{SETTINGS_NAME}['MODE'] must be one of {sorted(MODES)}, got {mode!r}."
+        raise ImproperlyConfigured(msg)
     return mode
 
 
 def webhook_secret() -> str:
-    """The shared secret, which the view refuses to run without."""
+    """Return the shared secret, which the view refuses to run without."""
     secret = str(conf['WEBHOOK_SECRET'] or '').strip()
     if not secret:
-        raise ImproperlyConfigured(
+        msg = (
             f"{SETTINGS_NAME}['WEBHOOK_SECRET'] is required to serve the webhook: without it "
             'anyone who finds the URL can feed your bot updates.'
         )
+        raise ImproperlyConfigured(msg)
     return secret
 
 
 @csrf_exempt
-def telegram_webhook(request: HttpRequest) -> HttpResponse:
+def telegram_webhook(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911 - a guard-clause chain is the readable shape
     """Feed one update to the dispatcher.
 
     Answers 200 for anything Telegram should not retry, including a handler that
@@ -110,9 +114,8 @@ def webhook_settings() -> dict[str, Any]:
     """Everything `setWebhook` needs, resolved from settings."""
     url = str(conf['WEBHOOK_URL'] or '').strip()
     if not url:
-        raise ImproperlyConfigured(
-            f"{SETTINGS_NAME}['WEBHOOK_URL'] is required to register a webhook."
-        )
+        msg = f"{SETTINGS_NAME}['WEBHOOK_URL'] is required to register a webhook."
+        raise ImproperlyConfigured(msg)
     allowed = conf['WEBHOOK_ALLOWED_UPDATES']
     return {
         'url': url,

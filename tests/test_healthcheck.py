@@ -23,6 +23,11 @@ SETTINGS = {
     'DELIVERY': 'blpop',
     'BLPOP_TIMEOUT': 1,
 }
+#: what the fakes below raise with, named up here so each raise stays one line
+REFUSED = 'Connection refused'
+READONLY = 'READONLY You cannot write against a read only replica'
+RESET = 'Connection reset by peer'
+STOP_AFTER_ONE_READ = 'stop here'
 
 
 def healthcheck(**options):
@@ -59,14 +64,14 @@ def test_the_heartbeat_is_paced(redis_server):
 def test_a_redis_that_refuses_the_write_does_not_stop_the_loop(redis_server, caplog):
     class Refuses:
         def set(self, *args, **kwargs):
-            raise ConnectionError('Connection refused')
+            raise ConnectionError(REFUSED)
 
         def __getattr__(self, name):
             return getattr(redis_server, name)
 
     delivery = BlpopDelivery(handler=lambda **kwargs: None)
     with pytest.MonkeyPatch.context() as patch, caplog.at_level('ERROR'):
-        patch.setattr('django_redis_aiogram.delivery.get_redis', lambda: Refuses())
+        patch.setattr('django_redis_aiogram.delivery.get_redis', Refuses)
         delivery.heartbeat()  # must not raise
 
     assert 'could not write the heartbeat' in caplog.text
@@ -111,11 +116,9 @@ def test_unhealthy_when_the_heartbeat_is_stale(redis_server):
 def test_unhealthy_when_redis_is_unreachable(monkeypatch):
     class Down:
         def ping(self):
-            raise ConnectionError('Connection refused')
+            raise ConnectionError(REFUSED)
 
-    monkeypatch.setattr(
-        'django_redis_aiogram.management.commands.tgbot_healthcheck.get_redis', lambda: Down()
-    )
+    monkeypatch.setattr('django_redis_aiogram.management.commands.tgbot_healthcheck.get_redis', Down)
 
     with pytest.raises(CommandError, match='redis is unreachable'):
         healthcheck()
@@ -190,12 +193,12 @@ def test_a_long_blocking_read_cannot_outlast_the_heartbeat(redis_server, monkeyp
     class Spy:
         def blmove(self, source, destination, timeout, *args, **kwargs):
             seen.append(timeout)
-            raise ConnectionError('stop here')  # one read is enough to observe
+            raise ConnectionError(STOP_AFTER_ONE_READ)  # one read is enough to observe
 
         def __getattr__(self, name):
             return getattr(redis_server, name)
 
-    monkeypatch.setattr('django_redis_aiogram.delivery.get_redis', lambda: Spy())
+    monkeypatch.setattr('django_redis_aiogram.delivery.get_redis', Spy)
     delivery = BlpopDelivery(handler=lambda **kwargs: None)
     thread = delivery.start_thread()
     try:
@@ -219,14 +222,14 @@ def test_a_heartbeat_read_that_fails_after_ping_is_reported(redis_server, monkey
             return True
 
         def get(self, *args, **kwargs):
-            raise ConnectionError('READONLY You cannot write against a read only replica')
+            raise ConnectionError(READONLY)
 
         def __getattr__(self, name):
             return getattr(redis_server, name)
 
     monkeypatch.setattr(
         'django_redis_aiogram.management.commands.tgbot_healthcheck.get_redis',
-        lambda: FailsTheRead(),
+        FailsTheRead,
     )
 
     with pytest.raises(CommandError, match='could not read the heartbeat'):
@@ -243,14 +246,14 @@ def test_a_queue_read_that_fails_is_reported(redis_server, monkeypatch):
             return str(int(time.time())).encode()
 
         def llen(self, *args, **kwargs):
-            raise ConnectionError('Connection reset by peer')
+            raise ConnectionError(RESET)
 
         def __getattr__(self, name):
             return getattr(redis_server, name)
 
     monkeypatch.setattr(
         'django_redis_aiogram.management.commands.tgbot_healthcheck.get_redis',
-        lambda: FailsTheCount(),
+        FailsTheCount,
     )
 
     with pytest.raises(CommandError, match='could not read the queue length'):

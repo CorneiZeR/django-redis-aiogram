@@ -10,6 +10,11 @@ from django_redis_aiogram import bot
 everything expensive appears on first use — so importing it anywhere is safe,
 including in a process that never talks to Telegram.
 
+The package import itself costs about a millisecond: aiogram and the pydantic
+stack under it (~900 ms) load on the first *use* of the bot, not on import. A
+process with `ENABLED=0` — a migration container, CI — never loads them at
+all.
+
 ## What the instance holds
 
 | | What it is | Built |

@@ -120,11 +120,7 @@ def test_only_text_reaches_the_echo():
     dispatcher = Dispatcher()
     dispatcher.include_router(router)
 
-    asyncio.run(
-        dispatcher.feed_update(
-            Bot(token='42:x'), types.Update(update_id=1, message=a_message('/probe'))
-        )
-    )
+    asyncio.run(dispatcher.feed_update(Bot(token='42:x'), types.Update(update_id=1, message=a_message('/probe'))))
 
     assert seen == ['/probe']
 ```

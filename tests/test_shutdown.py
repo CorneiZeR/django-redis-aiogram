@@ -281,9 +281,7 @@ def test_close_waits_for_a_send_driving_the_same_loop():
     finished = threading.Event()
 
     lock.acquire()
-    threading.Thread(
-        target=lambda: (instance.close(drain_timeout=0.1), finished.set()), daemon=True
-    ).start()
+    threading.Thread(target=lambda: (instance.close(drain_timeout=0.1), finished.set()), daemon=True).start()
     try:
         assert not finished.wait(0.3), 'close tore the loop down while it was in use'
     finally:
@@ -336,4 +334,5 @@ def test_close_refuses_to_tear_down_a_running_loop(caplog):
     assert instance._loop is not None
     assert instance._bot is not None
     instance.close(drain_timeout=0.1)
-    assert instance._loop is None and instance._bot is None
+    assert instance._loop is None
+    assert instance._bot is None

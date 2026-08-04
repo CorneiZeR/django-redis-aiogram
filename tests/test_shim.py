@@ -24,11 +24,7 @@ SHIM_MODULES = [
 
 
 def test_importing_the_shim_warns():
-    stale = [
-        name
-        for name in list(sys.modules)
-        if name == 'telegram_bot' or name.startswith('telegram_bot.')
-    ]
+    stale = [name for name in list(sys.modules) if name == 'telegram_bot' or name.startswith('telegram_bot.')]
     for name in stale:
         del sys.modules[name]
     with pytest.warns(DeprecationWarning, match='django_redis_aiogram'):
@@ -104,7 +100,7 @@ def test_installed_apps_entry_still_boots():
         assert 'check_settings' in registered, registered
         print('ok')
     """)
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603 - our own interpreter, and a script written right above
         [sys.executable, '-c', script], capture_output=True, text=True, check=False
     )
     assert result.returncode == 0, result.stderr
@@ -154,7 +150,7 @@ def test_both_app_labels_can_be_installed_together():
         assert len(registered) == 1, registered
         print('ok')
     """)
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603 - our own interpreter, and a script written right above
         [sys.executable, '-c', script], capture_output=True, text=True, check=False
     )
     assert result.returncode == 0, result.stderr
@@ -167,7 +163,6 @@ def test_the_package_ships_type_information():
     The shim needs its own: a project still importing `telegram_bot` gets no
     types from the package it does not name.
     """
-    import django_redis_aiogram
     import telegram_bot
 
     for package in (django_redis_aiogram, telegram_bot):

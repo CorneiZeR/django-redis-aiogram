@@ -87,11 +87,7 @@ def test_routing_through_a_dispatcher():
     dispatcher = Dispatcher()
     dispatcher.include_router(router)
 
-    asyncio.run(
-        dispatcher.feed_update(
-            Bot(token='42:x'), types.Update(update_id=1, message=a_message('/probe'))
-        )
-    )
+    asyncio.run(dispatcher.feed_update(Bot(token='42:x'), types.Update(update_id=1, message=a_message('/probe'))))
 
     assert seen == ['/probe']
 
@@ -107,16 +103,11 @@ def test_a_catch_all_registered_earlier_swallows_the_update():
     dispatcher = Dispatcher()
     dispatcher.include_router(bot.router)
 
-    asyncio.run(
-        dispatcher.feed_update(
-            Bot(token='42:x'), types.Update(update_id=2, message=a_message('/late'))
-        )
-    )
+    asyncio.run(dispatcher.feed_update(Bot(token='42:x'), types.Update(update_id=2, message=a_message('/late'))))
 
     assert seen == [], 'a later handler received an update the catch-all should have taken'
 
 
-@override_settings(TELEGRAM_BOT={'DELIVERY': 'blpop'})
 @override_settings(TELEGRAM_BOT={'DELIVERY': 'blpop'})
 def test_draining_the_queue_without_a_thread(redis_server):
     """Queued by send_redis and read by the consumer, which is the whole path."""
@@ -131,16 +122,14 @@ def test_draining_the_queue_without_a_thread(redis_server):
 
 
 PAGE = pathlib.Path(__file__).resolve().parent.parent / 'docs' / 'wiki' / 'Testing.md'
-SNIPPETS = re.findall(r'```python\n(.*?)```', PAGE.read_text(), re.S)
+SNIPPETS = re.findall(r'```python\n(.*?)```', PAGE.read_text(), re.DOTALL)
 
 
 def imported_from_the_package(tree: ast.Module) -> dict[str, object]:
     """What a snippet bound by importing from this package, resolved for real."""
     bound: dict[str, object] = {}
     for node in ast.walk(tree):
-        if not isinstance(node, ast.ImportFrom) or not (node.module or '').startswith(
-            'django_redis_aiogram'
-        ):
+        if not isinstance(node, ast.ImportFrom) or not (node.module or '').startswith('django_redis_aiogram'):
             continue
         module = importlib.import_module(node.module or '')
         for alias in node.names:

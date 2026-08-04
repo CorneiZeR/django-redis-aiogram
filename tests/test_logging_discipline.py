@@ -18,9 +18,7 @@ SOURCE = Path(__file__).resolve().parent.parent / 'src'
 MODULES = sorted(SOURCE.rglob('*.py'))
 PACKAGE_LOGGER = 'django_redis_aiogram'
 # `fatal` and `warn` are deprecated aliases, but they still write to the root
-LEVELS = frozenset(
-    {'debug', 'info', 'warning', 'warn', 'error', 'exception', 'critical', 'fatal', 'log'}
-)
+LEVELS = frozenset({'debug', 'info', 'warning', 'warn', 'error', 'exception', 'critical', 'fatal', 'log'})
 # basicConfig configures the root logger for the whole host process
 ROOT_FUNCTIONS = LEVELS | {'basicConfig'}
 # `task.exception()` and `warnings.warn()` are not logging, so the receiver has
@@ -194,8 +192,10 @@ BOUND = [
     ("import logging\nlogger = logging.getLogger('django_redis_aiogram')", 'logger'),
     ("import logging\nlogger = logging.getLogger(name='django_redis_aiogram')", 'logger'),
     (
-        'import logging\nclass Worker:\n    def __init__(self):\n'
-        "        self.logger = logging.getLogger('django_redis_aiogram')",
+        (
+            'import logging\nclass Worker:\n    def __init__(self):\n'
+            "        self.logger = logging.getLogger('django_redis_aiogram')"
+        ),
         'logger',
     ),
     ("from logging import getLogger\nlog = getLogger('django_redis_aiogram')", 'log'),
@@ -213,9 +213,7 @@ def walk(source, tmp_path):
     return LoggingUse.read(module)
 
 
-@pytest.mark.parametrize(
-    'source,attribute', SEEN, ids=[source.splitlines()[-1] for source, _ in SEEN]
-)
+@pytest.mark.parametrize(('source', 'attribute'), SEEN, ids=[source.splitlines()[-1] for source, _ in SEEN])
 def test_the_walk_sees_indirect_logging(source, attribute, tmp_path):
     assert getattr(walk(source, tmp_path), attribute), f'went unnoticed: {source!r}'
 
@@ -229,7 +227,7 @@ def test_the_walk_ignores_what_is_not_root_logging(source, tmp_path):
 
 
 @pytest.mark.parametrize(
-    'source,expected', BOUND, ids=['positional', 'keyword', 'on an instance', 'imported getLogger']
+    ('source', 'expected'), BOUND, ids=['positional', 'keyword', 'on an instance', 'imported getLogger']
 )
 def test_the_walk_recognises_the_package_logger_however_it_is_bound(source, expected, tmp_path):
     assert expected in walk(source, tmp_path).package_loggers, source

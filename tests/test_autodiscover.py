@@ -37,11 +37,7 @@ def test_handlers_landed_on_the_shared_bot():
 
 def test_a_missing_router_module_is_not_an_error():
     """Most installed apps have no router module, and that is not a failure."""
-    without = [
-        app.label
-        for app in apps.get_app_configs()
-        if not module_has_submodule(app.module, conf['MODULE_NAME'])
-    ]
+    without = [app.label for app in apps.get_app_configs() if not module_has_submodule(app.module, conf['MODULE_NAME'])]
     assert without, 'every installed app has a router module, so nothing is tested here'
 
     autodiscover_tg_routers()

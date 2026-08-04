@@ -5,10 +5,12 @@ was only ever set inside an `isinstance` branch that a wrong type never entered.
 import pathlib
 import re
 
-from django.core.checks import Error, Warning
+from django.core.checks import Error
+from django.core.checks import Warning as CheckWarning
 from django.test import override_settings
 
-from django_redis_aiogram.checks import check_settings
+from django_redis_aiogram.checks import CHECKS, check_settings
+from django_redis_aiogram.defaults import DEFAULTS
 
 
 def ids(messages):
@@ -49,9 +51,7 @@ def test_wrong_string_type_is_caught():
     assert 'django_redis_aiogram.E004' in ids(errors(check_settings()))
 
 
-@override_settings(
-    TELEGRAM_BOT={'DELIVERY': 'carrier-pigeon', 'TOKEN': '42:x', 'REDIS_URL': 'r://x'}
-)
+@override_settings(TELEGRAM_BOT={'DELIVERY': 'carrier-pigeon', 'TOKEN': '42:x', 'REDIS_URL': 'r://x'})
 def test_unknown_delivery_is_rejected():
     assert 'django_redis_aiogram.E009' in ids(errors(check_settings()))
 
@@ -66,9 +66,7 @@ def test_non_callable_default_kwargs_is_caught():
     assert 'django_redis_aiogram.E015' in ids(errors(check_settings()))
 
 
-@override_settings(
-    TELEGRAM_BOT={'DEFAULT_BOT_PROPERTIES': 'HTML', 'TOKEN': '42:x', 'REDIS_URL': 'r://x'}
-)
+@override_settings(TELEGRAM_BOT={'DEFAULT_BOT_PROPERTIES': 'HTML', 'TOKEN': '42:x', 'REDIS_URL': 'r://x'})
 def test_non_mapping_bot_properties_is_caught():
     assert 'django_redis_aiogram.E016' in ids(errors(check_settings()))
 
@@ -91,7 +89,7 @@ def test_missing_credentials_warn_but_do_not_fail():
 def test_disabled_bot_does_not_warn_about_credentials():
     messages = check_settings()
     assert isinstance(messages, list)
-    assert not [m for m in messages if isinstance(m, Warning) and m.id.endswith('W001')]
+    assert not [m for m in messages if isinstance(m, CheckWarning) and m.id.endswith('W001')]
 
 
 SETTINGS_PAGE = pathlib.Path(__file__).resolve().parent.parent / 'docs' / 'wiki' / 'Settings.md'
@@ -154,9 +152,7 @@ def documented_ids():
         if not last:
             found.add(first)
             continue
-        found.update(
-            f'{first[0]}{number:03d}' for number in range(int(first[1:]), int(last[1:]) + 1)
-        )
+        found.update(f'{first[0]}{number:03d}' for number in range(int(first[1:]), int(last[1:]) + 1))
     return found
 
 
@@ -169,19 +165,14 @@ def emitted_ids():
     found = set()
     for settings in (WRONG_TYPES, WRONG_VALUES):
         with override_settings(TELEGRAM_BOT=settings):
-            found |= {
-                str(message.id).removeprefix('django_redis_aiogram.')
-                for message in check_settings()
-            }
+            found |= {str(message.id).removeprefix('django_redis_aiogram.') for message in check_settings()}
     return found
 
 
 def test_the_expected_ids_are_the_ones_the_checks_emit():
     """A new check has to be added here, and therefore to the docs, to pass."""
     emitted = emitted_ids()
-    assert emitted - EXPECTED_IDS == set(), (
-        f'undeclared check ids: {sorted(emitted - EXPECTED_IDS)}'
-    )
+    assert emitted - EXPECTED_IDS == set(), f'undeclared check ids: {sorted(emitted - EXPECTED_IDS)}'
     assert EXPECTED_IDS - emitted == set(), f'ids nothing emitted: {sorted(EXPECTED_IDS - emitted)}'
 
 
@@ -191,7 +182,28 @@ def test_every_check_id_is_documented():
     assert not missing, f'check ids missing from docs/wiki/Settings.md: {missing}'
 
 
+def test_every_registry_row_reports_under_its_own_id():
+    """Two rows sharing an id would make the docs entry ambiguous."""
+    codes = [check.code for check in CHECKS]
+    assert sorted(codes) == sorted(set(codes))
+
+
+def test_every_registry_row_guards_a_real_setting():
+    """A typo in the key would validate a setting nothing ever reads."""
+    # the unknown-keys row is about the settings dict as a whole, so it has no key
+    unknown = sorted({check.key for check in CHECKS if check.key} - set(DEFAULTS))
+    assert unknown == []
+
+
 @override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://x', 'WORKER_NAME': 7})
 def test_a_non_string_worker_name_is_reported():
     """It names the in-flight list, so a wrong type breaks reclaim at startup."""
     assert 'django_redis_aiogram.E021' in ids(check_settings())
+
+
+@override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://x', 42: 'numeric'})
+def test_a_non_string_settings_key_is_reported_not_raised():
+    """`", ".join` over mixed key types used to raise out of manage.py check."""
+    reported = {message.id for message in check_settings()}
+
+    assert 'django_redis_aiogram.W003' in reported

@@ -27,9 +27,7 @@ def test_inside_the_worker_it_calls_telegram(redis_server, monkeypatch):
     instance = TelegramBot()
     instance._polling = True
     sent = []
-    monkeypatch.setattr(
-        instance, 'send_raw', lambda function='send_message', **kw: sent.append((function, kw))
-    )
+    monkeypatch.setattr(instance, 'send_raw', lambda function='send_message', **kw: sent.append((function, kw)))
 
     instance.send(chat_id=1, text='hi')
 
@@ -50,7 +48,8 @@ def test_disabled_send_is_a_noop(monkeypatch):
     """Neither route may build a bot or reach for a connection."""
 
     def forbidden():
-        raise AssertionError('a disabled send reached for Redis')
+        msg = 'a disabled send reached for Redis'
+        raise AssertionError(msg)
 
     monkeypatch.setattr('django_redis_aiogram.client.get_redis', forbidden)
 

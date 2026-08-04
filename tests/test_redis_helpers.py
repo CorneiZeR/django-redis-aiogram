@@ -1,8 +1,13 @@
-"""Redis hands back str when the URL enables decode_responses."""
+"""The helpers around the shared connection, and the str payloads it may hand back.
+
+A URL with `decode_responses=True` makes every read a str, which is why nothing
+downstream may call `.decode()` unconditionally.
+"""
 
 import fakeredis
 import pytest
 from django.test import override_settings
+from redis import Redis
 
 from django_redis_aiogram import TelegramBot
 from django_redis_aiogram.delivery import BlpopDelivery, KeyspaceDelivery
@@ -11,7 +16,7 @@ from django_redis_aiogram.serializers import JsonSerializer, loads
 
 
 @pytest.mark.parametrize(
-    'value,expected',
+    ('value', 'expected'),
     [
         (b'already bytes', b'already bytes'),
         ('a str', b'a str'),
@@ -60,9 +65,7 @@ def test_keyspace_handles_str_payloads(decoded_server):
         JsonSerializer().dumps({'function': 'send_message', 'chat_id': 6}),
     )
     handled = []
-    KeyspaceDelivery(handler=lambda **kwargs: handled.append(kwargs))._on_expired(
-        {'data': b'TELEGRAM_BOT_EXP'}
-    )
+    KeyspaceDelivery(handler=lambda **kwargs: handled.append(kwargs))._on_expired({'data': b'TELEGRAM_BOT_EXP'})
     assert handled == [{'function': 'send_message', 'chat_id': 6}]
 
 
@@ -124,8 +127,6 @@ def test_the_connection_is_built_once_and_reused(monkeypatch):
     Nothing asserted this: a per-call client would leak a connection pool per
     send and still pass every other test in the suite.
     """
-    from redis import Redis
-
     built = []
     closed = []
 
@@ -157,3 +158,29 @@ def test_the_connection_is_built_once_and_reused(monkeypatch):
 
     assert second is not first, 'reset_redis kept the closed client'
     assert len(built) == 2, built
+
+
+def test_get_reads_the_slot_exactly_once_on_the_fast_path():
+    """A reset between two reads of the attribute used to hand the caller None.
+
+    Deterministic where a stress test is not: the second read of the slot
+    answers None, exactly what a concurrent reset() makes it. Code that keeps
+    one local read never performs a second one.
+    """
+    from django_redis_aiogram.redis import _SharedConnection
+
+    sentinel = object()
+    reads = {'count': 0}
+
+    class SecondReadIsReset(_SharedConnection):
+        def __getattribute__(self, name: str):
+            if name == '_client':
+                reads['count'] += 1
+                if reads['count'] > 1:
+                    return None
+            return super().__getattribute__(name)
+
+    holder = SecondReadIsReset()
+    object.__setattr__(holder, '_client', sentinel)
+
+    assert holder.get() is sentinel, 'get() re-read the slot and met the reset'

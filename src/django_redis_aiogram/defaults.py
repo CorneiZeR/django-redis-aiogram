@@ -1,8 +1,10 @@
+"""Every setting the package reads, with its default and the reason for it."""
+
 from typing import Any
 
 
-def no_default_kwargs(function: str) -> dict[str, Any]:
-    """Return no extra kwargs for any aiogram function."""
+def no_default_kwargs(_function: str, /) -> dict[str, Any]:
+    """Return no extra kwargs, whatever aiogram function is asked about."""
     return {}
 
 
@@ -14,9 +16,9 @@ DEFAULTS: dict[str, Any] = {
     # import <app>.<MODULE_NAME> for every installed app on startup
     'AUTODISCOVER': True,
     'MODULE_NAME': 'tg_router',
-    # 'blpop' (recommended) or 'keyspace' (legacy, expiry-event based)
+    # blpop (recommended) or keyspace (legacy, expiry-event based)
     'DELIVERY': 'blpop',
-    # 'json' (recommended) or 'pickle'
+    # either json or pickle, json recommended
     'SERIALIZER': 'json',
     # unpickling queued data means whoever writes the queue can execute code
     # in the bot container; enable only for the 1.x upgrade window, then drop it

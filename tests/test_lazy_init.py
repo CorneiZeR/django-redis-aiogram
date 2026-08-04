@@ -4,6 +4,11 @@ Before 2.0 both were required at import time, which took the whole Django
 project down — including its test suite — whenever they were absent.
 """
 
+import os
+import subprocess
+import sys
+import textwrap
+
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 from django.test import override_settings
@@ -119,3 +124,62 @@ def test_settings_mapping_protocol():
     assert 'TOKEN' in settings
     assert settings.get('missing', 'fallback') == 'fallback'
     assert len(settings) == len(dict(settings))
+
+
+def test_importing_the_package_does_not_import_aiogram():
+    """aiogram costs most of a second; only using the bot may pay it."""
+    script = textwrap.dedent("""
+        import sys
+
+        import django_redis_aiogram
+
+        assert 'aiogram' not in sys.modules, 'importing the package pulled aiogram'
+        assert django_redis_aiogram.__version__
+
+        _ = django_redis_aiogram.bot
+        assert 'aiogram' in sys.modules, 'using the bot did not resolve it'
+        assert django_redis_aiogram.bot is _, 'a second access built a second bot'
+        print('lazy ok')
+    """)
+    result = subprocess.run(  # noqa: S603 - our own interpreter, and a script written right above
+        [sys.executable, '-c', script],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, 'DJANGO_SETTINGS_MODULE': 'tests.settings'},
+    )
+    assert result.returncode == 0, result.stderr
+    assert 'lazy ok' in result.stdout
+
+
+def test_a_disabled_django_boot_never_pays_for_aiogram():
+    """The migration container's whole point: INSTALLED_APPS, no bot, no cost."""
+    script = textwrap.dedent("""
+        import sys
+
+        import django
+
+        django.setup()
+
+        assert 'aiogram' not in sys.modules, 'a disabled boot still imported aiogram'
+        print('cheap boot ok')
+    """)
+    result = subprocess.run(  # noqa: S603 - our own interpreter, and a script written right above
+        [sys.executable, '-c', script],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ,
+            'DJANGO_SETTINGS_MODULE': 'tests.settings',
+            'DJANGO_REDIS_AIOGRAM_ENABLED': '0',
+        },
+    )
+    assert result.returncode == 0, result.stderr
+    assert 'cheap boot ok' in result.stdout
+
+
+def test_dir_lists_the_lazy_exports():
+    import django_redis_aiogram
+
+    assert set(django_redis_aiogram.__all__) <= set(dir(django_redis_aiogram))
