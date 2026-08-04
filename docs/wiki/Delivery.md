@@ -3,6 +3,10 @@
 `send_redis` pushes a serialized call onto a Redis list. The bot container
 consumes that list and makes the call.
 
+This page is about outbound messages: how a queued `bot.send()` reaches
+Telegram. Which way *updates* arrive — polling or webhook — is a separate
+choice, described in **[[Webhook]]**; the queue works the same under both.
+
 Two consumers are available.
 
 | | `blpop` (default) | `keyspace` |

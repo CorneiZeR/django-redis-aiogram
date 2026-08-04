@@ -3,12 +3,14 @@
 import asyncio
 import signal
 import threading
+from io import StringIO
 from types import SimpleNamespace
 
 from django.core.management import call_command
 from django.test import override_settings
 
 from django_redis_aiogram import bot
+from django_redis_aiogram.management.commands.start_tgbot import Command
 
 
 class RecordingDelivery:
@@ -98,3 +100,50 @@ class _NoDelivery:
 
     def stop(self):
         pass
+
+
+@override_settings(
+    TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost:6379/0', 'MODE': 'webhook'}
+)
+def test_webhook_mode_consumes_without_calling_telegram(monkeypatch):
+    """Webhook mode: updates arrive over HTTP, but the queue still needs a worker."""
+    events = []
+
+    class Delivery:
+        def start_thread(self):
+            # the real one starts it, and handle() joins what it is given
+            events.append('consumer-started')
+            thread = threading.Thread(target=lambda: None)
+            thread.start()
+            return thread
+
+        def stop(self):
+            events.append('stopped')
+
+    handlers = []
+    monkeypatch.setattr(
+        'django_redis_aiogram.management.commands.start_tgbot.get_delivery',
+        lambda handler: handlers.append(handler) or Delivery(),
+    )
+    monkeypatch.setattr(bot, 'close', lambda: events.append('closed'))
+    monkeypatch.setattr(bot, 'start_polling', lambda: events.append('POLLED'))
+    release = threading.Event()
+    monkeypatch.setattr(Command, 'idle_event', release)
+
+    out = StringIO()
+    finished = threading.Event()
+
+    def run():
+        call_command('start_tgbot', stdout=out)
+        finished.set()
+
+    threading.Thread(target=run, daemon=True).start()
+    assert not finished.wait(0.4), 'it returned instead of consuming'
+    release.set()
+    assert finished.wait(5)
+
+    assert handlers == [bot.send_raw], 'the consumer was given the wrong handler'
+    assert 'POLLED' not in events, 'it polled Telegram in webhook mode'
+    assert events == ['consumer-started', 'stopped', 'closed'], events
+    assert 'Updates arrive by webhook.' in out.getvalue()
+    assert 'Consuming the queue' in out.getvalue()

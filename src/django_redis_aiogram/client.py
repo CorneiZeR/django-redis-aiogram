@@ -107,7 +107,8 @@ class TelegramBot:
         self._sends: set[asyncio.Task[None]] = set()
         self._polling = False
         self._closing = False
-        self._loop_guard = threading.Lock()
+        # reentrant: _attach_router holds it while reading self.dispatcher
+        self._build_guard = threading.RLock()
 
     @property
     def enabled(self) -> bool:
@@ -138,7 +139,7 @@ class TelegramBot:
             # two first sends from different web threads would otherwise each
             # build one, and loop_lock would then serialize nothing: the two
             # senders would hold locks belonging to different loops
-            with self._loop_guard:
+            with self._build_guard:
                 if self._loop is None:
                     self._loop = asyncio.new_event_loop()
         return self._loop
@@ -151,13 +152,19 @@ class TelegramBot:
                 raise ImproperlyConfigured(
                     f"{SETTINGS_NAME}['TOKEN'] is required to talk to Telegram."
                 )
-            self._bot = Bot(token=token, default=build_default_properties())
+            with self._build_guard:
+                if self._bot is None:
+                    self._bot = Bot(token=token, default=build_default_properties())
         return self._bot
 
     @property
     def dispatcher(self) -> Dispatcher:
         if self._dispatcher is None:
-            self._dispatcher = Dispatcher(storage=build_storage())
+            # two concurrent first requests would otherwise build one each, and
+            # the router would attach to whichever was discarded
+            with self._build_guard:
+                if self._dispatcher is None:
+                    self._dispatcher = Dispatcher(storage=build_storage())
         return self._dispatcher
 
     @property
@@ -174,9 +181,19 @@ class TelegramBot:
         """True only inside the process that runs the bot itself."""
         return self._polling
 
+    def _attach_router(self) -> None:
+        """Attach the router once; aiogram refuses a second attachment.
+
+        Under the build lock: two concurrent first requests would both see no
+        parent and the second would raise.
+        """
+        with self._build_guard:
+            if self._router.parent_router is None:
+                self.dispatcher.include_router(self._router)
+
     def start_polling(self) -> None:
         """Attach the router and block on Telegram long polling."""
-        self.dispatcher.include_router(self._router)
+        self._attach_router()
 
         async def poll() -> None:
             # marked from inside the loop: setting it before run_until_complete
@@ -190,6 +207,29 @@ class TelegramBot:
                 self._polling = False
 
         self.loop.run_until_complete(poll())
+
+    def feed_update(self, update: Any) -> None:
+        """Hand one update to the dispatcher and wait for the handlers.
+
+        Webhook mode calls this from a request thread. It waits rather than
+        scheduling: the response must not be sent before the handlers have run,
+        or a failure would go unreported and the request would look successful.
+        """
+        self._attach_router()
+
+        coroutine = self.dispatcher.feed_update(self.bot, update)
+        loop = self.loop
+        with loop_lock(loop):
+            if not loop.is_running():
+                loop.run_until_complete(coroutine)
+                return
+            # polling drives this loop, so hand the update over. Decided under
+            # the lock: a loop another request is driving looks running until it
+            # stops, and the update would then wait for ever
+            future = asyncio.run_coroutine_threadsafe(coroutine, loop)
+
+        # waiting outside the lock, so the next request is not held up by ours
+        future.result()
 
     def send(self, function: str = 'send_message', **kwargs: Any) -> None:
         """Deliver a message the way this process can.
@@ -328,10 +368,6 @@ class TelegramBot:
             self._register(loop.create_task(coroutine))
             return
 
-        if loop.is_running():
-            self._hand_off(coroutine, loop)
-            return
-
         # several web threads may send at once, and run_until_complete is not
         # reentrant — the second caller would get "this event loop is already
         # running". The lock belongs to the loop, so two bots sharing one are
@@ -342,6 +378,12 @@ class TelegramBot:
             if self._closing or loop.is_closed():
                 coroutine.close()
                 logger.error('send refused: the event loop was closed')
+                return
+            if loop.is_running():
+                # decided under the lock: seen from outside it, a loop another
+                # thread drives for one run_until_complete looks running right
+                # up to the moment it stops, and the handoff would be lost
+                self._hand_off(coroutine, loop)
                 return
             try:
                 loop.run_until_complete(coroutine)

@@ -47,6 +47,16 @@ DEFAULTS: dict[str, Any] = {
     'HEARTBEAT_INTERVAL': 10,
     # a queue longer than this fails the healthcheck; 0 turns the check off
     'HEALTHCHECK_MAX_QUEUE': 0,
+    # where updates come from: 'polling' (a process calling getUpdates) or
+    # 'webhook' (Telegram posting them to a URL you serve). Both are supported;
+    # polling is the default because it needs nothing but an outbound connection
+    'MODE': 'polling',
+    # webhook mode: where Telegram posts updates, and the secret it echoes back
+    # in X-Telegram-Bot-Api-Secret-Token so the view can tell it is Telegram
+    'WEBHOOK_URL': '',
+    'WEBHOOK_SECRET': '',
+    # which update types to receive; empty means Telegram's own default set
+    'WEBHOOK_ALLOWED_UPDATES': (),
     # keyspace delivery only
     'REDIS_EXP_KEY': 'TELEGRAM_BOT_EXP',
     'REDIS_EXP_TIME': 5,

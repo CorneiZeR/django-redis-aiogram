@@ -12,6 +12,7 @@ from django.core.management import BaseCommand
 from django_redis_aiogram import bot
 from django_redis_aiogram.delivery import get_delivery
 from django_redis_aiogram.settings import conf
+from django_redis_aiogram.webhook import MODES, WEBHOOK, current_mode
 
 logger = logging.getLogger('django_redis_aiogram')
 
@@ -26,6 +27,17 @@ class Command(BaseCommand):
     idle_event: threading.Event | None = None
 
     def add_arguments(self, parser: ArgumentParser) -> None:
+        parser.add_argument(
+            '--mode',
+            choices=sorted(MODES),
+            default=None,
+            help=(
+                "how updates reach the bot for this run. Defaults to TELEGRAM_BOT['MODE'] "
+                "(env: DJANGO_REDIS_AIOGRAM_MODE), itself 'polling'. In webhook mode this "
+                'process consumes the queue and never calls getUpdates, because the updates '
+                'arrive over HTTP instead.'
+            ),
+        )
         parser.add_argument(
             '--idle',
             action='store_true',
@@ -50,19 +62,32 @@ class Command(BaseCommand):
                     (self.idle_event or threading.Event()).wait()
             return
 
+        mode = options['mode'] or current_mode()
+        self.stdout.write(f'Updates arrive by {mode}.')
+
         delivery = get_delivery(handler=bot.send_raw)
         threads: list[threading.Thread] = []
 
-        # Starting the consumer before the loop runs would let a backlog reach
-        # send_raw while loop.is_running() is still False, so the coroutine
-        # would be driven from the consumer thread. Deferring the start until
-        # the loop picks up this callback keeps the loop single-threaded.
-        bot.loop.call_soon(lambda: threads.append(delivery.start_thread()))
+        if mode == WEBHOOK:
+            # nothing will run the loop here, so the callback below would never
+            # fire. The consumer drives the loop itself for each send instead,
+            # under the same lock a web thread uses.
+            threads.append(delivery.start_thread())
+        else:
+            # Starting the consumer before the loop runs would let a backlog reach
+            # send_raw while loop.is_running() is still False, so the coroutine
+            # would be driven from the consumer thread. Deferring the start until
+            # the loop picks up this callback keeps the loop single-threaded.
+            bot.loop.call_soon(lambda: threads.append(delivery.start_thread()))
         previous = self._install_sigterm_handler()
 
         try:
             with contextlib.suppress(KeyboardInterrupt, SystemExit):
-                bot.start_polling()
+                if mode == WEBHOOK:
+                    self.stdout.write('Consuming the queue; updates are expected over HTTP.')
+                    (self.idle_event or threading.Event()).wait()
+                else:
+                    bot.start_polling()
         finally:
             logger.info('shutting down')
             delivery.stop()
