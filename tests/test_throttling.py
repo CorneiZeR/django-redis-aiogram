@@ -14,11 +14,15 @@ from django.test import override_settings
 from django_redis_aiogram import TelegramBot
 from django_redis_aiogram.checks import check_settings
 from django_redis_aiogram.defaults import DEFAULTS
+from django_redis_aiogram.enums import RateLimitKey, choices
 from django_redis_aiogram.throttling import (
+    KNOWN_RATE_LIMIT_KEYS,
     MAX_TRACKED_CHATS,
     RateLimiter,
     TokenBucket,
     build_rate_limiter,
+    get_rate_limiter,
+    reset_rate_limiters,
 )
 
 
@@ -313,6 +317,27 @@ def test_defaults_come_from_the_settings_defaults():
 def test_writing_pickle_while_refusing_to_read_it_is_rejected():
     """Otherwise every queued message is written and then silently discarded."""
     assert "django_redis_aiogram.E022" in {message.id for message in check_settings()}
+
+
+def test_the_known_keys_are_the_rate_limit_enum():
+    """A second hand-written list of the same names is a list that drifts."""
+    assert choices(RateLimitKey) == KNOWN_RATE_LIMIT_KEYS
+    assert frozenset(DEFAULTS["RATE_LIMIT"]) == KNOWN_RATE_LIMIT_KEYS
+
+
+@override_settings(TELEGRAM_BOT={})
+def test_one_token_gets_one_limiter():
+    first = get_rate_limiter("42:one")
+    assert get_rate_limiter("42:one") is first
+    assert get_rate_limiter("42:two") is not first
+
+
+@override_settings(TELEGRAM_BOT={})
+def test_resetting_forgets_the_shared_limiters():
+    """override_settings fires this, which is how a changed budget takes effect."""
+    before = get_rate_limiter("42:one")
+    reset_rate_limiters()
+    assert get_rate_limiter("42:one") is not before
 
 
 def test_eviction_caps_the_map_even_when_every_bucket_is_busy():

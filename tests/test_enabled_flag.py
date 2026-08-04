@@ -8,6 +8,7 @@ require credentials.
 from io import StringIO
 
 import pytest
+from django.core.exceptions import ImproperlyConfigured
 from django.core.management import call_command
 from django.test import override_settings
 
@@ -96,7 +97,7 @@ def test_ready_runs_autodiscover_when_enabled(monkeypatch):
     assert called == [True]
 
 
-@pytest.mark.parametrize("raw,expected", [("1", True), ("0", False), ("on", True), ("off", False)])
+@pytest.mark.parametrize(("raw", "expected"), [("1", True), ("0", False), ("on", True), ("off", False)])
 def test_env_boolean_spellings(monkeypatch, raw, expected):
     monkeypatch.setenv("DJANGO_REDIS_AIOGRAM_ENABLED", raw)
     with override_settings(TELEGRAM_BOT={}):
@@ -121,16 +122,12 @@ def test_integers_are_accepted():
 
 @override_settings(TELEGRAM_BOT={"ENABLED": "perhaps"})
 def test_an_unparseable_value_is_reported():
-    from django.core.exceptions import ImproperlyConfigured
-
     with pytest.raises(ImproperlyConfigured, match="must be one of"):
         _ = TelegramBot().enabled
 
 
 @override_settings(TELEGRAM_BOT={"ENABLED": []})
 def test_a_nonsense_type_is_reported():
-    from django.core.exceptions import ImproperlyConfigured
-
     with pytest.raises(ImproperlyConfigured, match="must be a boolean"):
         _ = TelegramBot().enabled
 

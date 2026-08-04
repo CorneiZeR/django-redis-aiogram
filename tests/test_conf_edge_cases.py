@@ -1,5 +1,6 @@
 """Misconfiguration must produce a clear error, not an obscure crash."""
 
+import importlib
 import types
 
 import pytest
@@ -25,16 +26,15 @@ def test_string_settings_are_reported_clearly():
 
 
 @pytest.mark.parametrize(
-    "module,uid",
+    ("module", "uid"),
     [
         ("django_redis_aiogram.settings", "django_redis_aiogram.settings"),
         ("django_redis_aiogram.redis", "django_redis_aiogram.redis"),
+        ("django_redis_aiogram.throttling", "django_redis_aiogram.throttling"),
     ],
 )
 def test_reset_receiver_is_deduplicated(module, uid):
     """Without dispatch_uid, autoreload stacks a fresh receiver every import."""
-    import importlib
-
     receiver = importlib.import_module(module)._reset_on_setting_change
     before = len(setting_changed.receivers)
     setting_changed.connect(receiver, dispatch_uid=uid)
