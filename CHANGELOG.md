@@ -1,10 +1,21 @@
 # Changelog
 
+## 2.1.1 - 2026-08-04
+
+### Fixed
+
+- `manage.py check` no longer warns about an untouched installation. 2.1.0
+  shipped `REDIS_TIMEOUT` at 5 next to `BLPOP_TIMEOUT` at 5, so `W004` fired on
+  every default configuration — and a warning nobody caused is what teaches
+  people to stop reading the checks. The deadline defaults to 10, which also
+  leaves the blocking pop at the 5 seconds it used before 2.1.0. A test now
+  asserts the defaults report nothing at all.
+
 ## 2.1.0 - 2026-08-04
 
 ### Added
 
-- `REDIS_TIMEOUT` (5 seconds) bounds how long any single Redis call may take,
+- `REDIS_TIMEOUT` (10 seconds) bounds how long any single Redis call may take,
   both connecting and waiting for an answer. Without it a server that accepts
   the connection and then stops responding holds the caller until the process
   is killed: redis-py only began applying a read deadline of its own in 8.0, and

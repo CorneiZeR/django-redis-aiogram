@@ -230,3 +230,15 @@ def test_an_unreadable_enabled_still_warns_and_reports_its_own_problem():
 
     assert 'django_redis_aiogram.E001' in reported
     assert 'django_redis_aiogram.W001' in reported
+
+
+@override_settings(TELEGRAM_BOT={'TOKEN': '1:x', 'REDIS_URL': 'redis://localhost:6379/0'})
+def test_the_defaults_report_nothing():
+    """A warning on an untouched install teaches people to ignore the checks.
+
+    2.1.0 shipped `REDIS_TIMEOUT` at 5 next to `BLPOP_TIMEOUT` at 5, so W004
+    fired on every default configuration.
+    """
+    reported = [f'{message.id}: {message.msg}' for message in check_settings()]
+
+    assert reported == [], reported

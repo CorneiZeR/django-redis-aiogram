@@ -23,7 +23,7 @@ itself — it logs `cannot enable keyspace notifications`. Switch to
 
 ## A send hangs instead of failing
 
-`REDIS_TIMEOUT` (5 seconds by default) bounds both connecting and waiting for an
+`REDIS_TIMEOUT` (10 seconds by default) bounds both connecting and waiting for an
 answer, so a Redis that accepts the connection and then stops responding raises
 `redis.exceptions.TimeoutError` rather than holding the request thread.
 
