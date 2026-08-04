@@ -7,6 +7,7 @@ unions. Both cases are pinned here.
 """
 
 import datetime
+import json
 import sys
 from decimal import Decimal
 
@@ -18,7 +19,18 @@ from aiogram.types.input_file import BufferedInputFile, FSInputFile, URLInputFil
 from django.core.exceptions import ImproperlyConfigured
 from django.test import override_settings
 
+from django_redis_aiogram.enums import SerializationTag
 from django_redis_aiogram.serializers import (
+    _CODECS,
+    JSON_SERIALIZER,
+    PICKLE_SERIALIZER,
+    TAG_BYTES,
+    TAG_DATE,
+    TAG_DATETIME,
+    TAG_DECIMAL,
+    TAG_DEFAULT,
+    TAG_INPUT_FILE,
+    TAG_MODEL,
     JsonSerializer,
     PickleSerializer,
     SerializationError,
@@ -120,10 +132,11 @@ def test_tuples_come_back_as_lists():
     assert roundtrip((1, 2)) == [1, 2]
 
 
-def test_fs_input_file():
-    restored = roundtrip(FSInputFile("/tmp/a.png", filename="a.png"))
+def test_fs_input_file(tmp_path):
+    path = tmp_path / "a.png"
+    restored = roundtrip(FSInputFile(path, filename="a.png"))
     assert isinstance(restored, FSInputFile)
-    assert str(restored.path) == "/tmp/a.png"
+    assert str(restored.path) == str(path)
     assert restored.filename == "a.png"
 
 
@@ -154,6 +167,36 @@ def test_full_call_payload():
     assert restored["function"] == "send_photo"
     assert restored["chat_id"] == 100
     assert restored["reply_markup"] == payload["reply_markup"]
+
+
+def test_the_module_constants_are_the_frozen_strings():
+    """They are enum members now; queued payloads and settings still read them as text."""
+    assert (TAG_MODEL, TAG_DEFAULT, TAG_DATETIME, TAG_DATE, TAG_DECIMAL, TAG_BYTES, TAG_INPUT_FILE) == (
+        "__model__",
+        "__default__",
+        "__datetime__",
+        "__date__",
+        "__decimal__",
+        "__bytes__",
+        "__input_file__",
+    )
+    assert (JSON_SERIALIZER, PICKLE_SERIALIZER) == ("json", "pickle")
+
+
+def test_a_tag_lands_in_the_payload_as_a_plain_key():
+    """An enum member used as a dict key must serialize to its value, not its name."""
+    raw = JsonSerializer().dumps({"when": datetime.date(2026, 8, 3)})
+    assert json.loads(raw) == {"when": {"__date__": "2026-08-03"}}
+
+
+def test_every_tag_has_exactly_one_codec():
+    assert sorted(codec.tag for codec in _CODECS) == sorted(SerializationTag)
+
+
+def test_unknown_input_file_kind_is_rejected():
+    payload = b'{"__input_file__": "SmtpInputFile", "filename": "a.png", "chunk_size": 65536}'
+    with pytest.raises(SerializationError, match="Unknown input file type"):
+        JsonSerializer().loads(payload)
 
 
 def test_unknown_model_name_is_rejected():
