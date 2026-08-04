@@ -18,6 +18,8 @@ from django.test import override_settings
 
 import django_redis_aiogram
 from django_redis_aiogram import TelegramBot, bot
+from django_redis_aiogram.checks import check_settings
+from django_redis_aiogram.enums import DeliveryKind, SerializerKind, StorageKind, UpdateMode
 
 #: attributes 1.x code reaches for directly
 ONE_X_ATTRIBUTES = (
@@ -135,3 +137,53 @@ def test_redis_conn_is_the_shared_connection(redis_server):
         assert another.redis_conn is bot.redis_conn, 'a second instance opened its own'
     finally:
         another.close()
+
+
+ENUM_CLASSES = ('DeliveryKind', 'SerializerKind', 'StorageKind', 'UpdateMode', 'RateLimitKey', 'SerializationTag')
+ERROR_CLASSES = ('DjangoRedisAiogramError', 'SerializationError', 'UnknownApiMethodError')
+
+
+@pytest.mark.parametrize('name', ENUM_CLASSES)
+def test_the_enums_page_documents_a_real_class(name):
+    """The API page tells a project to import these; they have to exist."""
+    from django_redis_aiogram import enums
+
+    assert hasattr(enums, name), f'{name} is documented but missing'
+
+
+@pytest.mark.parametrize('name', ERROR_CLASSES)
+def test_the_errors_page_documents_a_real_class(name):
+    from django_redis_aiogram import exceptions
+
+    assert hasattr(exceptions, name)
+
+
+def test_one_family_catches_everything_the_package_raises():
+    """The page promises DjangoRedisAiogramError catches all of them."""
+    from django_redis_aiogram.exceptions import (
+        DjangoRedisAiogramError,
+        SerializationError,
+        UnknownApiMethodError,
+    )
+
+    assert issubclass(SerializationError, DjangoRedisAiogramError)
+    assert issubclass(UnknownApiMethodError, DjangoRedisAiogramError)
+    # and the bases they had before the family existed, so old excepts still work
+    assert issubclass(UnknownApiMethodError, ValueError)
+
+
+@override_settings(
+    TELEGRAM_BOT={
+        'TOKEN': '42:x',
+        'REDIS_URL': 'redis://localhost:6379/0',
+        'DELIVERY': DeliveryKind.BLPOP,
+        'SERIALIZER': SerializerKind.JSON,
+        'FSM_STORAGE': StorageKind.REDIS,
+        'MODE': UpdateMode.POLLING,
+    }
+)
+def test_enum_members_are_accepted_wherever_the_string_is():
+    """The page's settings example, executed: members must satisfy the checks."""
+    serious = [message.id for message in check_settings() if message.is_serious()]
+
+    assert serious == [], serious
