@@ -1,5 +1,26 @@
 # Changelog
 
+## 2.1.0 - 2026-08-04
+
+### Added
+
+- `REDIS_TIMEOUT` (5 seconds) bounds how long any single Redis call may take,
+  both connecting and waiting for an answer. Without it a server that accepts
+  the connection and then stops responding holds the caller until the process
+  is killed: redis-py only began applying a read deadline of its own in 8.0, and
+  the supported floor is 5.0. Measured against a paused Redis 7 container —
+  redis-py 5.0.0 never returned, 8.1.0 gave up after five seconds.
+- Check `E030` for the new setting, and `W004` when `BLPOP_TIMEOUT` is at or
+  above it.
+
+### Fixed
+
+- `BLPOP_TIMEOUT` is capped just below `REDIS_TIMEOUT`. A pop asked to wait
+  longer than the socket will wait for an answer turns every idle round into a
+  logged error — a consumer doing nothing wrong, complaining every few seconds
+  — which is why the deadline could not simply be handed to the blocking read.
+  The cap is reported by `W004` rather than applied silently.
+
 ## 2.0.1 - 2026-08-04
 
 ### Fixed

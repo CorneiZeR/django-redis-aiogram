@@ -31,7 +31,7 @@ from redis.exceptions import ResponseError
 
 from django_redis_aiogram.api import check_function
 from django_redis_aiogram.enums import DeliveryKind
-from django_redis_aiogram.redis import as_bytes, get_db_index, get_redis
+from django_redis_aiogram.redis import as_bytes, get_db_index, get_redis, read_timeout
 from django_redis_aiogram.serializers import PickleReadRefusedError, SerializationError, loads
 from django_redis_aiogram.settings import conf
 
@@ -245,12 +245,14 @@ class BlpopDelivery(Delivery):
 
     def run(self) -> None:
         """Block on the queue until :meth:`stop` is called."""
-        connection = get_redis()
         # 0 means "block for ever" in Redis, which would swallow stop(). The
         # heartbeat is written between reads, so a read longer than its interval
         # would let the key expire under a consumer that is doing fine
         interval = max(1, int(conf['HEARTBEAT_INTERVAL']))
-        timeout = max(1, min(int(conf['BLPOP_TIMEOUT']), interval))
+        # and the read deadline caps it too: asking BLPOP to wait longer than
+        # the socket will wait for an answer turns an idle round into an error
+        timeout = max(1, min(int(conf['BLPOP_TIMEOUT']), interval, read_timeout() - 1))
+        connection = get_redis()
         reclaimed = self.reclaim()
         logger.info(
             'delivery started',

@@ -16,6 +16,27 @@ from redis import Redis
 from django_redis_aiogram.settings import SETTINGS_NAME, conf
 
 
+def read_timeout() -> int:
+    """How long any single Redis call may take before the server is dead to us."""
+    return max(1, int(conf['REDIS_TIMEOUT']))
+
+
+def build_client() -> Redis:
+    """Build a client bounded in time, so no call can hang for ever.
+
+    redis-py only started defaulting to a read deadline in 8.0; on the 5.0 floor
+    a server that accepts the connection and then stops answering blocks the
+    caller until the process is killed. Blocking reads stay inside the deadline
+    by asking for less than it — see :class:`~django_redis_aiogram.delivery.BlpopDelivery`.
+    """
+    url = conf['REDIS_URL']
+    if not url:
+        msg = f"{SETTINGS_NAME}['REDIS_URL'] is required to talk to Redis."
+        raise ImproperlyConfigured(msg)
+    timeout = read_timeout()
+    return Redis.from_url(url, socket_connect_timeout=timeout, socket_timeout=timeout)
+
+
 class _SharedConnection:
     """Holds the shared client, together with the lock that keeps it single."""
 
@@ -38,11 +59,7 @@ class _SharedConnection:
             with self._lock:
                 client = self._client
                 if client is None:
-                    url = conf['REDIS_URL']
-                    if not url:
-                        msg = f"{SETTINGS_NAME}['REDIS_URL'] is required to talk to Redis."
-                        raise ImproperlyConfigured(msg)
-                    client = self._client = Redis.from_url(url)
+                    client = self._client = build_client()
         return client
 
     def reset(self) -> None:
