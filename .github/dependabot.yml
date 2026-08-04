@@ -4,6 +4,12 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # This is a library, so its dependencies are floors rather than pins. The
+    # default strategy raises a floor whenever a newer release exists, which
+    # only drops support for versions that still work — and `test-floors`
+    # installs the lowest supported combination, so such a pull request cannot
+    # pass. Only propose a change when the new version genuinely requires one.
+    versioning-strategy: increase-if-necessary
     groups:
       dev-dependencies:
         patterns: ['ruff', 'mypy', 'pytest*', 'fakeredis', 'django-stubs*']
