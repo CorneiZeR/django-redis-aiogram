@@ -96,6 +96,7 @@ def test_routing_through_a_dispatcher():
 def test_a_catch_all_registered_earlier_swallows_the_update():
     """The ordering caveat on the page — tests/fake_app holds a catch-all."""
     seen = []
+    before = list(bot.router.observers['message'].handlers)
 
     @bot.message(F.text == '/late')
     async def late(message):  # pragma: no cover - the point is that it is not called
@@ -104,9 +105,19 @@ def test_a_catch_all_registered_earlier_swallows_the_update():
     dispatcher = Dispatcher()
     dispatcher.include_router(bot.router)
 
-    asyncio.run(dispatcher.feed_update(Bot(token='42:x'), types.Update(update_id=2, message=a_message('/late'))))
+    observers = bot.router.observers['message'].handlers
+    try:
+        asyncio.run(dispatcher.feed_update(Bot(token='42:x'), types.Update(update_id=2, message=a_message('/late'))))
 
-    assert seen == [], 'a later handler received an update the catch-all should have taken'
+        assert seen == [], 'a later handler received an update the catch-all should have taken'
+    finally:
+        # bot.router is the shared singleton. A handler left registered would
+        # answer updates in every test after this one, and a router left
+        # attached makes the next include_router() raise
+        observers[:] = [handler for handler in observers if handler.callback is not late]
+        bot.router._parent_router = None  # the public setter refuses None
+
+    assert observers == before, 'the recipe left the shared router changed'
 
 
 @override_settings(TELEGRAM_BOT={'DELIVERY': 'blpop'})
