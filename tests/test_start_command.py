@@ -6,6 +6,7 @@ import threading
 from io import StringIO
 from types import SimpleNamespace
 
+import pytest
 from django.core.management import call_command
 from django.test import override_settings
 
@@ -147,3 +148,83 @@ def test_webhook_mode_consumes_without_calling_telegram(monkeypatch):
     assert events == ['consumer-started', 'stopped', 'closed'], events
     assert 'Updates arrive by webhook.' in out.getvalue()
     assert 'Consuming the queue' in out.getvalue()
+
+
+def run_start_command(**options):
+    """Run the command with a consumer that records and an idle release."""
+    events = []
+
+    class Delivery:
+        def start_thread(self):
+            events.append('consumer-started')
+            thread = threading.Thread(target=lambda: None)
+            thread.start()
+            return thread
+
+        def stop(self):
+            events.append('stopped')
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(
+            'django_redis_aiogram.management.commands.start_tgbot.get_delivery',
+            lambda handler: Delivery(),
+        )
+        patch.setattr(bot, 'close', lambda: None)
+        patch.setattr(bot, 'start_polling', lambda: events.append('polled'))
+        release = threading.Event()
+        patch.setattr(Command, 'idle_event', release)
+
+        out = StringIO()
+        finished = threading.Event()
+
+        def run():
+            call_command('start_tgbot', stdout=out, **options)
+            finished.set()
+
+        threading.Thread(target=run, daemon=True).start()
+        if options.get('mode') == 'webhook':
+            assert not finished.wait(0.3)
+            release.set()
+        assert finished.wait(5)
+
+    return out.getvalue(), events
+
+
+@override_settings(
+    TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost:6379/0', 'MODE': 'polling'}
+)
+def test_asking_for_webhook_mode_against_a_polling_setting_warns():
+    """The view reads the setting, so this process would consume updates nobody
+    is serving."""
+    printed, events = run_start_command(mode='webhook')
+
+    assert 'Updates arrive by webhook.' in printed
+    assert 'disagrees' in printed and 'refuses updates' in printed
+    assert 'polled' not in events
+
+
+@override_settings(
+    TELEGRAM_BOT={
+        'TOKEN': '42:x',
+        'REDIS_URL': 'redis://localhost:6379/0',
+        'MODE': 'webhook',
+        'WEBHOOK_URL': 'https://example.test/tg/',
+        'WEBHOOK_SECRET': 'x' * 16,
+    }
+)
+def test_asking_for_polling_against_a_webhook_setting_warns():
+    printed, events = run_start_command(mode='polling')
+
+    assert 'Updates arrive by polling.' in printed
+    assert 'disagrees' in printed and 'getUpdates fails' in printed
+    assert 'polled' in events, 'it did not poll despite being asked to'
+
+
+@override_settings(
+    TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost:6379/0', 'MODE': 'polling'}
+)
+def test_no_warning_when_the_flag_agrees_with_the_setting():
+    printed, events = run_start_command(mode='polling')
+
+    assert 'disagrees' not in printed
+    assert 'polled' in events

@@ -211,12 +211,15 @@ def check_allowed_updates(code: int) -> list[CheckMessage]:
         ]
 
     known = {member.value for member in UpdateType}
-    unknown = [name for name in allowed if name not in known]
-    if unknown:
+    # anything unhashable would raise out of the membership test below, so the
+    # type is settled first and reported by repr rather than by value
+    invalid = [repr(name) for name in allowed if not isinstance(name, str)]
+    invalid += [repr(name) for name in allowed if isinstance(name, str) and name not in known]
+    if invalid:
         return [
             _error(
                 'WEBHOOK_ALLOWED_UPDATES',
-                f'contains update types Telegram does not have: {sorted(unknown)}. '
+                f'contains update types Telegram does not have: {sorted(invalid)}. '
                 f'Valid ones are {sorted(known)}.',
                 code,
             )

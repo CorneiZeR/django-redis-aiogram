@@ -109,7 +109,12 @@ In webhook mode the same command consumes the queue and never calls
 nobody delivers.
 
 `--mode polling` and `--mode webhook` override the setting for one run, which is
-what you want when trying the other mode without editing anything.
+what you want when trying the other mode without editing anything. It changes
+**this process only** — the view reads the setting — so the command warns when
+the two disagree and says what will happen: a webhook worker whose setting says
+polling gets no updates, because the view refuses them, and polling while a
+webhook is registered fails at `getUpdates`. For a real switch, change `MODE` (or
+`DJANGO_REDIS_AIOGRAM_MODE`) everywhere.
 
 ## Going back to polling
 

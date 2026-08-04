@@ -62,8 +62,23 @@ class Command(BaseCommand):
                     (self.idle_event or threading.Event()).wait()
             return
 
-        mode = options['mode'] or current_mode()
+        configured = current_mode()
+        mode = options['mode'] or configured
         self.stdout.write(f'Updates arrive by {mode}.')
+        if mode != configured:
+            # the webhook view reads the setting, not this flag, so it would
+            # refuse the updates this process is no longer polling for
+            self.stdout.write(
+                self.style.WARNING(
+                    f"--mode {mode} disagrees with TELEGRAM_BOT['MODE'] ({configured}), and it "
+                    'changes this process only: '
+                    + (
+                        'the webhook view still refuses updates while the setting says polling'
+                        if mode == WEBHOOK
+                        else 'getUpdates fails while a webhook is registered'
+                    )
+                )
+            )
 
         delivery = get_delivery(handler=bot.send_raw)
         threads: list[threading.Thread] = []

@@ -466,3 +466,14 @@ def test_an_unknown_update_type_is_a_check_error():
 def test_real_update_types_are_accepted():
     assert 'django_redis_aiogram.E029' not in {message.id for message in check_settings()}
     assert webhook_settings()['allowed_updates'] == ['message', 'poll_answer']
+
+
+@override_settings(
+    TELEGRAM_BOT={**SETTINGS, 'WEBHOOK_ALLOWED_UPDATES': (['message'], {'poll': 1}, 7)}
+)
+def test_members_that_are_not_strings_are_reported_not_raised():
+    """A list member is unhashable, so the membership test used to raise out of
+    manage.py check instead of reporting anything."""
+    reported = {message.id for message in check_settings()}
+
+    assert 'django_redis_aiogram.E029' in reported
