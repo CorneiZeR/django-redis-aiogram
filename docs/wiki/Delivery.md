@@ -28,6 +28,12 @@ waits until the worker comes back.
 `BLPOP_TIMEOUT` is only how often the block is interrupted to check whether the
 worker is shutting down. It does not delay delivery.
 
+It is also capped just below `REDIS_TIMEOUT`, the deadline on any single Redis
+call. A pop asked to wait longer than the socket will wait for an answer turns
+every idle round into an error, so raising `BLPOP_TIMEOUT` above the deadline
+would break a consumer that is doing nothing wrong. Check `W004` says so before
+deployment; raise `REDIS_TIMEOUT` too if you want longer blocks.
+
 ## keyspace
 
 This reproduces the 1.x mechanism: `send_redis` also writes a key with a TTL,

@@ -4,6 +4,7 @@ Every claim here is one fakeredis cannot settle: `BLMOVE` exists only on Redis
 6.2+, and the consumer picks its mode from a live server's error message.
 """
 
+import logging
 import threading
 import time
 from io import StringIO
@@ -287,3 +288,41 @@ def test_the_running_consumer_keeps_its_heartbeat_fresh(server, redis_url):
 
         assert first is not None, 'the consumer never reported in'
         assert server.get(key) is not None, 'it stopped reporting while still running'
+
+
+def test_an_idle_consumer_survives_more_rounds_than_the_deadline(server, redis_url, caplog):
+    """The reason a read deadline cannot simply be handed to BLPOP.
+
+    The pop is meant to sit there doing nothing. If it is asked to wait longer
+    than the socket will wait for an answer, every idle round raises instead of
+    returning empty-handed — a working consumer logging an error every few
+    seconds, for ever. Here the queue stays empty for several rounds and the log
+    has to stay clean.
+    """
+    settings = {
+        'DELIVERY': 'blpop',
+        'WORKER_NAME': WORKER,
+        'REDIS_URL': redis_url,
+        'BLPOP_TIMEOUT': 2,
+        'REDIS_TIMEOUT': 2,  # the pop gets capped to 1, and must not exceed it
+    }
+    with override_settings(TELEGRAM_BOT=settings), caplog.at_level(logging.WARNING):
+        server.delete(QUEUE)
+        handled = []
+        delivery = BlpopDelivery(handler=lambda **kwargs: handled.append(kwargs))
+        thread = delivery.start_thread()
+        try:
+            time.sleep(4.5)  # at least four empty rounds at the capped timeout
+            TelegramBot().send_redis(chat_id=99, text='still alive')
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline and not handled:
+                time.sleep(0.05)
+        finally:
+            delivery.stop()
+            thread.join(timeout=10)
+
+        assert handled == [{'function': 'send_message', 'chat_id': 99, 'text': 'still alive'}], (
+            f'the consumer stopped reading while idling: {handled}'
+        )
+        failures = [record for record in caplog.records if 'blocking pop failed' in record.message]
+        assert not failures, f'an idle round raised: {[record.message for record in failures]}'

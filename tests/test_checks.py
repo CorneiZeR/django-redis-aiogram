@@ -98,7 +98,7 @@ DOCUMENTED = re.compile('`([EW]\\d{3})`(?:\\s*[\u2013-]\\s*`([EW]\\d{3})`)?')
 
 # Every id the checks can emit. Two settings dicts are needed: a wrong type
 # stops a check before it can reach its value-level complaint.
-EXPECTED_IDS = {f'E{code:03d}' for code in range(1, 30)} | {'W001', 'W002', 'W003'}
+EXPECTED_IDS = {f'E{code:03d}' for code in range(1, 31)} | {'W001', 'W002', 'W003', 'W004'}
 
 WRONG_TYPES = {
     'ENABLED': 'yes',
@@ -117,6 +117,7 @@ WRONG_TYPES = {
     'MAX_RETRIES': 'ten',
     'REDIS_EXP_TIME': 'five',
     'BLPOP_TIMEOUT': 'five',
+    'REDIS_TIMEOUT': 'five',
     'HEARTBEAT_INTERVAL': 'ten',
     'HEALTHCHECK_MAX_QUEUE': 'lots',
     'WEBHOOK_URL': 42,
@@ -141,6 +142,9 @@ WRONG_VALUES = {
     'WEBHOOK_URL': 'http://example.test/tg/',
     'WEBHOOK_SECRET': '',
     'MODE': 'sideways',
+    # a pop asked to wait longer than a read may take, which the consumer caps
+    'BLPOP_TIMEOUT': 30,
+    'REDIS_TIMEOUT': 5,
     'WEBHOOK_ALLOWED_UPDATES': 'message',
 }
 
@@ -226,3 +230,15 @@ def test_an_unreadable_enabled_still_warns_and_reports_its_own_problem():
 
     assert 'django_redis_aiogram.E001' in reported
     assert 'django_redis_aiogram.W001' in reported
+
+
+@override_settings(TELEGRAM_BOT={'TOKEN': '1:x', 'REDIS_URL': 'redis://localhost:6379/0'})
+def test_the_defaults_report_nothing():
+    """A warning on an untouched install teaches people to ignore the checks.
+
+    2.1.0 shipped `REDIS_TIMEOUT` at 5 next to `BLPOP_TIMEOUT` at 5, so W004
+    fired on every default configuration.
+    """
+    reported = [f'{message.id}: {message.msg}' for message in check_settings()]
+
+    assert reported == [], reported

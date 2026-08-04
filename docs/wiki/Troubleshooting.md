@@ -21,6 +21,16 @@ Managed Redis usually refuses `CONFIG SET`, so the worker cannot enable it
 itself — it logs `cannot enable keyspace notifications`. Switch to
 `'DELIVERY': 'blpop'`, which needs no server configuration.
 
+## A send hangs instead of failing
+
+`REDIS_TIMEOUT` (10 seconds by default) bounds both connecting and waiting for an
+answer, so a Redis that accepts the connection and then stops responding raises
+`redis.exceptions.TimeoutError` rather than holding the request thread.
+
+redis-py only started applying a read deadline of its own in 8.0. On 5.x, 6.x
+and 7.x a stalled server blocks the caller until the process is killed, which is
+why the package sets the deadline itself rather than relying on the client.
+
 ## Messages pile up in Redis
 
 ```shell

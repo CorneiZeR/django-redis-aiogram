@@ -78,7 +78,8 @@ which carries outbound messages in both modes — see **[[Webhook]]**.
 | `DELIVERY` | `'blpop'` | `'blpop'` or `'keyspace'` — see **[[Delivery]]** |
 | `REDIS_MESSAGES_KEY` | `'TELEGRAM_BOT_MESSAGE'` | List holding queued calls |
 | `WORKER_NAME` | hostname | Names this worker's in-flight list — see **[[Delivery]]** |
-| `BLPOP_TIMEOUT` | `5` | How often the consumer checks for shutdown |
+| `BLPOP_TIMEOUT` | `5` | How often the consumer checks for shutdown; capped just below `REDIS_TIMEOUT` |
+| `REDIS_TIMEOUT` | `10` | Seconds a single Redis call may take before the server counts as gone |
 | `HEARTBEAT_INTERVAL` | `10` | Seconds between the consumer's reports; the key lives three times as long |
 | `HEALTHCHECK_MAX_QUEUE` | `0` | Longest queue still considered healthy; the check fails only above it, and `0` disables it |
 | `SERIALIZER` | `'json'` | `'json'` or `'pickle'` — see **[[Serialization]]** |
@@ -114,6 +115,7 @@ if you silenced any.
 | -- | ------- |
 | `W001` / `W002` | `TOKEN` / `REDIS_URL` empty while the bot is enabled |
 | `W003` | `TELEGRAM_BOT` contains unknown keys |
+| `W004` | `BLPOP_TIMEOUT` is at or above `REDIS_TIMEOUT`, so the consumer caps it |
 | `E001`–`E003`, `E017` | a boolean setting is not a boolean |
 | `E004`–`E011` | a string setting is wrong, or not one of the allowed values |
 | `E012`–`E014` | an integer setting is wrong or below its minimum |
@@ -129,3 +131,4 @@ if you silenced any.
 | `E027` | `WEBHOOK_URL` is set without a secret or is not https, or `MODE` is `webhook` with no URL |
 | `E028` | `MODE` is not `polling` or `webhook` |
 | `E029` | `WEBHOOK_ALLOWED_UPDATES` is not a list, or names an update type Telegram does not have |
+| `E030` | `REDIS_TIMEOUT` is wrong or below 1 |
