@@ -6,8 +6,10 @@ Every claim here is one fakeredis cannot settle: `BLMOVE` exists only on Redis
 
 import threading
 import time
+from io import StringIO
 
 import pytest
+from django.core.management import CommandError, call_command
 from django.test import override_settings
 
 from django_redis_aiogram import TelegramBot
@@ -214,3 +216,77 @@ def test_threading_is_not_needed_to_drain(server, redis_url):
         assert [item['chat_id'] for item in delivery.handled] == [4, 5]
         assert server.llen(QUEUE) == 0, 'consume_pending left messages behind'
         assert server.llen(PROCESSING) == 0
+
+
+def test_the_heartbeat_expires_on_its_own(server, redis_url):
+    """A worker that dies must stop looking alive, and only the server can do that."""
+    with override_settings(
+        TELEGRAM_BOT={**SETTINGS, 'REDIS_URL': redis_url, 'HEARTBEAT_INTERVAL': 1}
+    ):
+        delivery = Recording()
+        delivery.heartbeat()
+
+        key = delivery.heartbeat_key
+        assert server.get(key) is not None
+        ttl = server.ttl(key)
+        assert 0 < ttl <= 3, ttl  # three times the interval
+
+        # a value old enough to be stale must fail the command, not merely look old
+        server.set(key, str(int(time.time()) - 600))
+        with pytest.raises(CommandError, match='last reported'):
+            call_command('tgbot_healthcheck', stdout=StringIO())
+
+
+def test_a_read_longer_than_the_heartbeat_interval_keeps_it_fresh(server, redis_url):
+    """BLPOP_TIMEOUT above the interval would let the key expire mid-read."""
+    settings = {
+        **SETTINGS,
+        'REDIS_URL': redis_url,
+        'BLPOP_TIMEOUT': 30,  # ten times the interval
+        'HEARTBEAT_INTERVAL': 3,
+    }
+    with override_settings(TELEGRAM_BOT=settings):
+        delivery = Recording()
+        key = delivery.heartbeat_key
+        thread = delivery.start_thread()
+        try:
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline and server.get(key) is None:
+                time.sleep(0.05)
+            assert server.get(key) is not None, 'it never reported in'
+
+            # past the whole TTL of the first beat (3 x 3s): if the read were
+            # not clamped, the consumer would still be blocked and the key gone
+            time.sleep(10)
+            still_there = server.get(key)
+        finally:
+            delivery.stop()
+            thread.join(timeout=40)
+
+        assert still_there is not None, 'the heartbeat expired while the read was blocked'
+        assert int(time.time()) - int(still_there) <= 3 * 3
+
+
+def test_the_running_consumer_keeps_its_heartbeat_fresh(server, redis_url):
+    with override_settings(
+        TELEGRAM_BOT={**SETTINGS, 'REDIS_URL': redis_url, 'HEARTBEAT_INTERVAL': 1}
+    ):
+        delivery = Recording()
+        key = delivery.heartbeat_key
+        thread = delivery.start_thread()
+        try:
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline and server.get(key) is None:
+                time.sleep(0.05)
+            first = server.get(key)
+
+            server.delete(key)  # it has to come back without any traffic
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline and server.get(key) is None:
+                time.sleep(0.05)
+        finally:
+            delivery.stop()
+            thread.join(timeout=10)
+
+        assert first is not None, 'the consumer never reported in'
+        assert server.get(key) is not None, 'it stopped reporting while still running'

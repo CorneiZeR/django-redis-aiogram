@@ -9,6 +9,7 @@ from dataclasses import fields
 from typing import Any
 
 from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import UpdateType
 from aiogram.fsm.storage.base import BaseStorage
 from django.core.checks import CheckMessage, Error, Warning
 from django.utils.module_loading import import_string
@@ -18,6 +19,7 @@ from django_redis_aiogram.settings import SETTINGS_NAME, conf
 from django_redis_aiogram.throttling import KNOWN_RATE_LIMIT_KEYS
 
 DELIVERY_CHOICES = frozenset({'blpop', 'keyspace'})
+MODE_CHOICES = frozenset({'polling', 'webhook'})
 SERIALIZER_CHOICES = frozenset({'json', 'pickle'})
 
 
@@ -158,6 +160,73 @@ def check_serializer_agrees_with_reads(code: int) -> list[CheckMessage]:
     ]
 
 
+def check_webhook(code: int) -> list[CheckMessage]:
+    """A webhook URL without a secret is an open door to whoever finds it."""
+    url = str(conf.get('WEBHOOK_URL') or '').strip()
+    webhook_mode = str(conf.get('MODE') or '').strip().lower() == 'webhook'
+    if not url:
+        if webhook_mode:
+            return [
+                _error(
+                    'WEBHOOK_URL',
+                    "is required when MODE is 'webhook': Telegram has to be told where to "
+                    "post updates. Switch MODE back to 'polling' if you cannot serve one.",
+                    code,
+                )
+            ]
+        return []
+
+    messages: list[CheckMessage] = []
+    if not str(conf.get('WEBHOOK_SECRET') or '').strip():
+        messages.append(
+            _error(
+                'WEBHOOK_SECRET',
+                'is required when WEBHOOK_URL is set: the view compares it with the header '
+                'Telegram echoes back, and without it anyone who finds the URL can feed '
+                'your bot updates.',
+                code,
+            )
+        )
+    if not url.startswith('https://'):
+        messages.append(
+            _error(
+                'WEBHOOK_URL', f'must be https, got {url!r} — Telegram refuses anything else.', code
+            )
+        )
+    return messages
+
+
+def check_allowed_updates(code: int) -> list[CheckMessage]:
+    """A string here would reach Telegram as a list of single characters."""
+    allowed = conf.get('WEBHOOK_ALLOWED_UPDATES')
+    if not allowed:
+        return []
+    if isinstance(allowed, (str, bytes)) or not isinstance(allowed, Collection):
+        return [
+            _error(
+                'WEBHOOK_ALLOWED_UPDATES',
+                f'must be a list or tuple of update types, got {type(allowed).__name__}.',
+                code,
+            )
+        ]
+
+    known = {member.value for member in UpdateType}
+    # anything unhashable would raise out of the membership test below, so the
+    # type is settled first and reported by repr rather than by value
+    invalid = [repr(name) for name in allowed if not isinstance(name, str)]
+    invalid += [repr(name) for name in allowed if isinstance(name, str) and name not in known]
+    if invalid:
+        return [
+            _error(
+                'WEBHOOK_ALLOWED_UPDATES',
+                f'contains update types Telegram does not have: {sorted(invalid)}. '
+                f'Valid ones are {sorted(known)}.',
+                code,
+            )
+        ]
+    return []
+
+
 def check_unknown_keys(code: int) -> list[CheckMessage]:
     unknown = sorted(set(conf) - set(DEFAULTS))
     if not unknown:
@@ -219,6 +288,13 @@ def check_settings(**kwargs: Any) -> list[CheckMessage]:
         lambda: check_int('MAX_RETRIES', 12, minimum=1),
         lambda: check_int('REDIS_EXP_TIME', 13, minimum=1),
         lambda: check_int('BLPOP_TIMEOUT', 14, minimum=1),
+        lambda: check_int('HEARTBEAT_INTERVAL', 23, minimum=1),
+        lambda: check_int('HEALTHCHECK_MAX_QUEUE', 24, minimum=0),
+        lambda: check_str('MODE', 28, MODE_CHOICES),
+        lambda: check_str('WEBHOOK_URL', 25),
+        lambda: check_str('WEBHOOK_SECRET', 26),
+        lambda: check_webhook(27),
+        lambda: check_allowed_updates(29),
         lambda: check_callable('DEFAULT_KWARGS', 15),
         lambda: check_mapping('DEFAULT_BOT_PROPERTIES', 16),
         lambda: check_bot_properties(18),

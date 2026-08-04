@@ -42,6 +42,21 @@ DEFAULTS: dict[str, Any] = {
     'WORKER_NAME': '',
     # how long a blocking pop waits before re-checking the shutdown flag
     'BLPOP_TIMEOUT': 5,
+    # how often the consumer refreshes the key `tgbot_healthcheck` reads. The key
+    # lives three times as long, so one missed refresh is not a failure
+    'HEARTBEAT_INTERVAL': 10,
+    # a queue longer than this fails the healthcheck; 0 turns the check off
+    'HEALTHCHECK_MAX_QUEUE': 0,
+    # where updates come from: 'polling' (a process calling getUpdates) or
+    # 'webhook' (Telegram posting them to a URL you serve). Both are supported;
+    # polling is the default because it needs nothing but an outbound connection
+    'MODE': 'polling',
+    # webhook mode: where Telegram posts updates, and the secret it echoes back
+    # in X-Telegram-Bot-Api-Secret-Token so the view can tell it is Telegram
+    'WEBHOOK_URL': '',
+    'WEBHOOK_SECRET': '',
+    # which update types to receive; empty means Telegram's own default set
+    'WEBHOOK_ALLOWED_UPDATES': (),
     # keyspace delivery only
     'REDIS_EXP_KEY': 'TELEGRAM_BOT_EXP',
     'REDIS_EXP_TIME': 5,
