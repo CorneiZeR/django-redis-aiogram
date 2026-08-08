@@ -11,7 +11,12 @@ from django.db import connection
 from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
 
-from django_redis_aiogram.admin import COUNT_LIMIT, TelegramEventAdmin, register_event_log_admin
+from django_redis_aiogram.admin import (
+    COUNT_LIMIT,
+    MAX_STAGES,
+    TelegramEventAdmin,
+    register_event_log_admin,
+)
 from django_redis_aiogram.enums import EventKind
 from django_redis_aiogram.events import new_correlation_id
 from django_redis_aiogram.models import TelegramEvent
@@ -181,6 +186,24 @@ def test_a_search_by_correlation_id_finds_the_row(client):
     body = client.get(CHANGELIST, {'q': str(identifier)}).content.decode()
 
     assert '1 result' in body or str(identifier)[:8] in body
+
+
+@pytest.mark.django_db
+@override_settings(TELEGRAM_BOT=ON)
+def test_a_chain_longer_than_the_cap_says_it_was_cut(client):
+    """A page that stops at exactly 200 rows without saying so reads as the
+    whole history of the message, which is the wrong thing to believe about a
+    message that retried thousands of times."""
+    identifier = new_correlation_id()
+    TelegramEvent.objects.bulk_create(
+        TelegramEvent(kind=EventKind.OUTBOUND_RETRIED.value, correlation_id=identifier) for _ in range(MAX_STAGES + 2)
+    )
+    row = TelegramEvent.objects.filter(correlation_id=identifier).first()
+    client.force_login(a_reader('long-chain', 'view_telegramevent'))
+
+    body = client.get(f'{CHANGELIST}{row.pk}/change/').content.decode()
+
+    assert f'only the first {MAX_STAGES} stages are shown' in body
 
 
 @pytest.mark.django_db

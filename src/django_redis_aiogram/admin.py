@@ -220,18 +220,23 @@ class TelegramEventAdmin(ModelAdminBase):
         """Render the whole correlated chain, in order, from one indexed query.
 
         Bounded on purpose: a message that retried ten thousand times is a bug,
-        and rendering all of it would make this page a second one.
+        and rendering all of it would make this page a second one. One row more
+        than the cap is read so the page can say it stopped rather than end at
+        a number that looks like the whole story.
         """
-        rows = (
+        rows = list(
             TelegramEvent.objects.using(log_alias())
             .filter(correlation_id=obj.correlation_id)
             .order_by('id')
-            .values_list('created_at', 'kind', 'worker')[:MAX_STAGES]
+            .values_list('created_at', 'kind', 'worker')[: MAX_STAGES + 1]
         )
-        return format_html(
-            '<table>{}</table>',
-            format_html_join('', '<tr><td>{}</td><td>{}</td><td>{}</td></tr>', rows),
-        )
+        body = format_html_join('', '<tr><td>{}</td><td>{}</td><td>{}</td></tr>', rows[:MAX_STAGES])
+        if len(rows) > MAX_STAGES:
+            body += format_html(
+                '<tr><td colspan="3">and more — only the first {} stages are shown</td></tr>',
+                MAX_STAGES,
+            )
+        return format_html('<table>{}</table>', body)
 
     @admin.display(description='thread', ordering='correlation_id')
     def thread(self, obj: TelegramEvent) -> str:
