@@ -166,3 +166,4 @@ entry naming a retired one is dead but harmless.
 | `W006` | the log is on with `EVENT_LOG_RETENTION_DAYS` at 0, so nothing ever deletes a row |
 | `W007` | `EVENT_LOG_BATCH_SIZE` is above `EVENT_LOG_BUFFER_SIZE`, so the batch can never fill |
 | `W008` | `EVENT_LOG_KINDS` names a kind nothing records |
+| `W009` | `EVENT_LOG_SYNC` is on, so a send waits for the database |

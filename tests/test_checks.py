@@ -102,7 +102,7 @@ DOCUMENTED = re.compile('`([EW]\\d{3})`(?:\\s*[\u2013-]\\s*`([EW]\\d{3})`)?')
 # E008 and E013 guarded the keyspace settings 3.0 removed. Their ids are gone
 # rather than reused: a project silencing one must not start silencing a new rule
 RETIRED_IDS = {'E008', 'E013'}
-EXPECTED_IDS = ({f'E{code:03d}' for code in range(1, 43)} - RETIRED_IDS) | {f'W{code:03d}' for code in range(1, 9)}
+EXPECTED_IDS = ({f'E{code:03d}' for code in range(1, 43)} - RETIRED_IDS) | {f'W{code:03d}' for code in range(1, 10)}
 
 WRONG_TYPES = {
     'ENABLED': 'yes',
@@ -170,7 +170,7 @@ WRONG_VALUES = {
 
 # the log on and pointed at a real alias, which under tests.settings is the
 # dummy backend Django fills an empty DATABASES in with
-LOG_WITHOUT_A_DATABASE = {'EVENT_LOG': True}
+LOG_WITHOUT_A_DATABASE = {'EVENT_LOG': True, 'EVENT_LOG_SYNC': True}
 
 
 def documented_ids():

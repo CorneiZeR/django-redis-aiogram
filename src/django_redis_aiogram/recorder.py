@@ -47,6 +47,17 @@ DROP_REPORT_INTERVAL = 60.0
 
 
 @dataclass(frozen=True)
+class Wake:
+    """A marker that ends the writer's current wait.
+
+    ``done`` is what makes :meth:`EventRecorder.flush` honest: the queue going
+    empty means the writer has *taken* the batch, not that it has written it.
+    """
+
+    done: threading.Event | None = None
+
+
+@dataclass(frozen=True)
 class Event:
     """One thing that happened. Indexed columns first, the rest in ``detail``."""
 
@@ -68,12 +79,19 @@ class Event:
     detail: dict[str, Any] | None = None
 
 
+def _acknowledge(wakes: list[Wake]) -> None:
+    """Release everything waiting on this batch."""
+    for wake in wakes:
+        if wake.done is not None:
+            wake.done.set()
+
+
 class EventRecorder:
     """A bounded queue, and the one thread that drains it into the database."""
 
     def __init__(self) -> None:
         """Hold nothing: no setting is read and no thread starts until the first event."""
-        self._queue: queue.Queue[Event | None] | None = None
+        self._queue: queue.Queue[Event | Wake] | None = None
         self._thread: threading.Thread | None = None
         self._guard = threading.Lock()
         self._stopping = threading.Event()
@@ -82,7 +100,9 @@ class EventRecorder:
         self._owner_pid = os.getpid()
         self._fork_hook = False
         self._dropped = 0
-        self._reported_at = 0.0
+        # far enough back that the first drop always reports: monotonic() is
+        # time since boot on Linux, so a fresh container starts it near zero
+        self._reported_at = -DROP_REPORT_INTERVAL
 
     @property
     def enabled(self) -> bool:
@@ -140,7 +160,7 @@ class EventRecorder:
             extra={'tg_dropped': self._dropped},
         )
 
-    def _buffer(self) -> queue.Queue[Event | None]:
+    def _buffer(self) -> queue.Queue[Event | Wake]:
         """Return the queue, starting the writer the first time anything is recorded."""
         if self._owner_pid != os.getpid():
             # a thread does not survive fork(), but the queue object does, so a
@@ -160,8 +180,10 @@ class EventRecorder:
                 try:
                     thread.start()
                 except RuntimeError:
-                    # out of threads: leave nothing half-built for the next call
+                    # out of threads: leave nothing half-built for the next call,
+                    # and count the event this loses so the gap row still says so
                     self._queue = self._thread = None
+                    self._drop(1)
                     raise
                 # CPython runs atexit callbacks while daemon threads are still
                 # alive, so the writer is still joinable from one
@@ -183,8 +205,9 @@ class EventRecorder:
         self._thread = None
         self._owner_pid = os.getpid()
         self._dropped = 0
+        self._reported_at = -DROP_REPORT_INTERVAL
 
-    def _run(self, buffer: queue.Queue[Event | None]) -> None:
+    def _run(self, buffer: queue.Queue[Event | Wake]) -> None:
         """Drain the queue into the database until stopped.
 
         A thread target: anything escaping it would end recording for the life
@@ -195,15 +218,20 @@ class EventRecorder:
         blocked_until = 0.0
         try:
             while True:
-                batch, woken = self._collect(buffer)
-                if batch:
-                    if time.monotonic() < blocked_until:
-                        # the database has been refusing us; keep draining so
-                        # producers never fill up, but do not hammer it
-                        self._drop(len(batch))
-                    else:
-                        failures, blocked_until = self._flush(batch, failures=failures)
-                if woken and self._stopping.is_set() and buffer.empty():
+                batch, wakes = self._collect(buffer)
+                try:
+                    if batch:
+                        if time.monotonic() < blocked_until:
+                            # the database has been refusing us; keep draining so
+                            # producers never fill up, but do not hammer it
+                            self._drop(len(batch))
+                        else:
+                            failures, blocked_until = self._flush(batch, failures=failures)
+                finally:
+                    # after the write, never before: a waiter released early was
+                    # told the batch was durable while it was still in flight
+                    _acknowledge(wakes)
+                if wakes and self._stopping.is_set() and buffer.empty():
                     return
         except Exception:
             logger.exception('the event writer stopped; it restarts on the next event')
@@ -213,13 +241,13 @@ class EventRecorder:
                     self._queue = self._thread = None
             self._close_connections()
 
-    def _collect(self, buffer: queue.Queue[Event | None]) -> tuple[list[Event], bool]:
-        """Gather up to one batch, returning it and whether a wake-up ended the wait."""
+    def _collect(self, buffer: queue.Queue[Event | Wake]) -> tuple[list[Event], list[Wake]]:
+        """Gather up to one batch, with any wake-ups that ended the wait."""
         interval = max(0.01, float(conf['EVENT_LOG_FLUSH_INTERVAL']))
         limit = max(1, int(conf['EVENT_LOG_BATCH_SIZE']))
         deadline = time.monotonic() + interval
         batch: list[Event] = []
-        woken = False
+        wakes: list[Wake] = []
         while len(batch) < limit:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -228,11 +256,11 @@ class EventRecorder:
                 item = buffer.get(timeout=remaining)
             except queue.Empty:
                 break
-            if item is None:
-                woken = True
+            if isinstance(item, Wake):
+                wakes.append(item)
                 break
             batch.append(item)
-        return batch, woken
+        return batch, wakes
 
     def _flush(self, batch: list[Event], *, failures: int) -> tuple[int, float]:
         """Write one batch, containing whatever it raises."""
@@ -290,28 +318,42 @@ class EventRecorder:
         if buffer is None:
             return 0
         batch: list[Event] = []
+        wakes: list[Wake] = []
         deadline = time.monotonic() + timeout
         while True:
             try:
                 item = buffer.get(timeout=max(0.0, deadline - time.monotonic())) if timeout else buffer.get_nowait()
             except queue.Empty:
                 break
-            if item is not None:
-                batch.append(item)
-        if batch:
-            self._flush(batch, failures=0)
+            if isinstance(item, Wake):
+                wakes.append(item)
+                continue
+            batch.append(item)
+        try:
+            if batch:
+                self._flush(batch, failures=0)
+        finally:
+            _acknowledge(wakes)
         return len(batch)
 
     def flush(self, timeout: float = STOP_TIMEOUT) -> None:
-        """Wait until what has been recorded so far has reached the database."""
+        """Wait until what has been recorded so far has reached the database.
+
+        Waits on an acknowledgement from the writer rather than on the queue
+        going empty: the queue empties when a batch is *taken*, which is before
+        it is written, so polling it would return mid-insert.
+        """
         buffer = self._queue
         if buffer is None:
             return
-        with contextlib.suppress(queue.Full):
-            buffer.put_nowait(None)
-        deadline = time.monotonic() + timeout
-        while not buffer.empty() and time.monotonic() < deadline:
-            time.sleep(0.005)
+        done = threading.Event()
+        try:
+            buffer.put_nowait(Wake(done))
+        except queue.Full:
+            # no room even for the marker, so there is nothing to wait behind
+            return
+        if not done.wait(timeout):
+            logger.warning('the event writer did not flush in time', extra={'tg_timeout': timeout})
 
     def stop(self, timeout: float = STOP_TIMEOUT) -> None:
         """Flush and end the writer. Idempotent: atexit and start_tgbot both call it."""
@@ -324,7 +366,7 @@ class EventRecorder:
             atexit.unregister(self.stop)
         self._stopping.set()
         with contextlib.suppress(queue.Full):
-            buffer.put_nowait(None)
+            buffer.put_nowait(Wake())
         if thread is not None:
             # a thread that never started cannot be joined, and this runs from
             # atexit where raising is noise nobody can act on
