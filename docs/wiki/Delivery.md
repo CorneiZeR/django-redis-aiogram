@@ -57,6 +57,15 @@ other's sends.
 Handler errors are not crashes: a message whose send *failed* is acknowledged
 and logged, not redelivered forever.
 
+`Delivery.dispatch()` is what decides that, and its return value is the whole
+contract: `True` means the consumer acknowledges the message — removing it from
+the in-flight list — and `False` means it does not, leaving the message there
+for a later run to reclaim. Exactly one case returns `False` today: a pickled
+payload refused because `ALLOW_PICKLE` is off, which is the one failure a
+change of configuration can undo. Everything else — undecodable bytes, a method
+that is not Telegram API, a handler that raised — returns `True`, because
+redelivering it would only fail again.
+
 ## What happens to a broken message
 
 A payload that cannot be decoded is logged and dropped; the consumer moves on.
