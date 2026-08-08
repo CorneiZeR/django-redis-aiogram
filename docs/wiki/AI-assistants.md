@@ -37,9 +37,12 @@ Project uses django-redis-aiogram 3.x. Rules:
 - Only the container running `manage.py start_tgbot` runs the bot. Do not set
   DJANGO_REDIS_AIOGRAM_ENABLED=0 on web or Celery processes: it turns their
   sends into no-ops and the messages are dropped.
-- Queued payloads are JSON. Keep SERIALIZER='json'; pickle is refused on read
-  unless ALLOW_PICKLE is explicitly turned on. That is the escape hatch for
-  payloads JSON cannot describe, and it lets queue writers execute code.
+- Queued payloads are JSON. Keep SERIALIZER='json'. Writing pickle takes BOTH
+  SERIALIZER='pickle' and ALLOW_PICKLE=True — the flag alone only lets the
+  reader accept pickle, so a payload JSON cannot describe is still refused at
+  the point it is queued. It is the escape hatch for exactly those payloads,
+  and turning it on means whoever can write to the Redis list can execute code
+  in the bot container, so do it only on a queue nothing untrusted can write to.
 - A queued send cannot raise in the caller. Failures are logged by the worker.
   Use bot.send_raw with RAISE_EXCEPTION only when the caller must see the error.
 - `python manage.py check` validates the settings; treat its E0xx/W0xx output as
