@@ -14,6 +14,7 @@ older than Redis 6.2 lack ``LMOVE``; there the consumer falls back to plain
 pops, which is the 1.x at-most-once behaviour, and says so in the log.
 """
 
+import hashlib
 import logging
 import threading
 import time
@@ -24,8 +25,10 @@ from typing import Any
 from redis.exceptions import ResponseError
 
 from django_redis_aiogram.api import check_function
-from django_redis_aiogram.enums import DeliveryKind
-from django_redis_aiogram.events import worker_identity
+from django_redis_aiogram.enums import DeliveryKind, EventKind
+from django_redis_aiogram.envelope import Envelope, UnknownEnvelopeVersionError, unpack
+from django_redis_aiogram.events import new_correlation_id, worker_identity
+from django_redis_aiogram.recorder import Event, recorder
 from django_redis_aiogram.redis import as_bytes, get_redis, read_timeout
 from django_redis_aiogram.serializers import PickleReadRefusedError, SerializationError, loads
 from django_redis_aiogram.settings import conf
@@ -177,27 +180,87 @@ class Delivery(ABC):
             )
             return False
         except SerializationError:
+            self._record_undecodable(raw, 'serialization')
             logger.exception('dropping undecodable queued message')
             return True
         except Exception:
+            self._record_undecodable(raw, 'unknown')
             logger.exception('dropping queued message that failed to decode')
             return True
         try:
-            check_function(str(payload.get('function', '')))
+            envelope = unpack(payload)
+        except UnknownEnvelopeVersionError:
+            # written by a newer producer than this consumer understands, so
+            # leaving it in flight is what lets an upgrade deliver it
+            logger.exception('leaving a message from a newer version in flight')
+            return False
+        try:
+            check_function(envelope.function)
         except ValueError:
+            self._record(
+                EventKind.QUEUE_REJECTED,
+                envelope,
+                error='not a Telegram API method',
+            )
             logger.exception(
                 'dropping queued message naming a method that is not Telegram API',
-                extra={'tg_function': payload.get('function')},
+                extra={'tg_function': envelope.function},
             )
             return True
+        self._record(EventKind.OUTBOUND_CONSUMED, envelope)
         try:
-            self.handler(**payload)
+            # by keyword, the way 2.x splatted it: a handler taking **kwargs
+            # only — which every documented recipe does — refuses a positional
+            self.handler(
+                function=envelope.function,
+                correlation_id=envelope.correlation_id,
+                queued_at=envelope.queued_at,
+                **envelope.kwargs,
+            )
         except Exception:
             logger.exception(
                 'handler failed for queued message',
-                extra={'tg_function': payload.get('function')},
+                extra={'tg_function': envelope.function},
             )
         return True
+
+    def _record(self, kind: EventKind, envelope: Envelope, error: str = '') -> None:
+        """Record what the consumer did with one message."""
+        chat_id = envelope.kwargs.get('chat_id')
+        recorder.record(
+            Event(
+                kind=kind.value,
+                correlation_id=envelope.correlation_id or new_correlation_id(),
+                function=envelope.function,
+                chat_id=chat_id if isinstance(chat_id, int) and not isinstance(chat_id, bool) else None,
+                worker=worker_identity(),
+                error=error,
+                detail=self._queue_latency(envelope),
+            )
+        )
+
+    @staticmethod
+    def _queue_latency(envelope: Envelope) -> dict[str, Any]:
+        """How long the message waited, when the producer said when it was queued."""
+        if not envelope.queued_at:
+            return {}
+        return {'queue_ms': int((time.time() - envelope.queued_at) * 1000)}
+
+    def _record_undecodable(self, raw: bytes, reason: str) -> None:
+        """Record a payload nothing could read.
+
+        A fingerprint, never the bytes: an undecodable payload is by definition
+        untrusted input and may be a pickle, so putting it in a JSON column
+        would spread it into every log shipper and admin page downstream.
+        """
+        recorder.record(
+            Event(
+                kind=EventKind.QUEUE_UNDECODABLE.value,
+                worker=worker_identity(),
+                error=reason,
+                detail={'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()[:16]},
+            )
+        )
 
     def consume_pending(self) -> None:
         """Drain the queue without blocking, acknowledging each message."""

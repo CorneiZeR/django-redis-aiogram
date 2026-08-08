@@ -445,8 +445,8 @@ def test_a_handler_sending_from_the_web_process_queues(monkeypatch):
     async def answer(message: types.Message) -> None:
         instance.send(chat_id=message.chat.id, text='queued from a handler')
 
-    monkeypatch.setattr(instance, 'send_redis', lambda *args, **kwargs: queued.append(kwargs))
-    monkeypatch.setattr(instance, 'send_raw', lambda *args, **kwargs: direct.append(kwargs))
+    monkeypatch.setattr(instance, 'send_redis', lambda *args, correlation_id=None, **kwargs: queued.append(kwargs))
+    monkeypatch.setattr(instance, 'send_raw', lambda *args, correlation_id=None, **kwargs: direct.append(kwargs))
     monkeypatch.setattr('django_redis_aiogram.webhook.bot', instance)
 
     try:

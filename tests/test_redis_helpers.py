@@ -11,6 +11,7 @@ from redis import Redis
 
 from django_redis_aiogram import TelegramBot
 from django_redis_aiogram.delivery import BlpopDelivery
+from django_redis_aiogram.envelope import unpack
 from django_redis_aiogram.redis import as_bytes, get_redis, read_timeout, reset_redis
 from django_redis_aiogram.serializers import JsonSerializer, loads
 from django_redis_aiogram.settings import conf
@@ -48,7 +49,9 @@ def test_blpop_handles_str_payloads(decoded_server):
         JsonSerializer().dumps({'function': 'send_message', 'chat_id': 4}),
     )
     handled = []
-    delivery = BlpopDelivery(handler=lambda **kwargs: handled.append(kwargs))
+    delivery = BlpopDelivery(
+        handler=lambda function=None, correlation_id=None, queued_at=0.0, **kwargs: handled.append(kwargs)
+    )
     thread = delivery.start_thread()
     for _ in range(200):
         if handled:
@@ -56,7 +59,7 @@ def test_blpop_handles_str_payloads(decoded_server):
         thread.join(0.01)
     delivery.stop()
     thread.join(timeout=5)
-    assert handled == [{'function': 'send_message', 'chat_id': 4}]
+    assert handled == [{'chat_id': 4}]
 
 
 @override_settings(TELEGRAM_BOT={'WORKER_NAME': 'tests'})
@@ -66,8 +69,10 @@ def test_draining_handles_str_payloads(decoded_server):
         JsonSerializer().dumps({'function': 'send_message', 'chat_id': 6}),
     )
     handled = []
-    BlpopDelivery(handler=lambda **kwargs: handled.append(kwargs)).consume_pending()
-    assert handled == [{'function': 'send_message', 'chat_id': 6}]
+    BlpopDelivery(
+        handler=lambda function=None, correlation_id=None, queued_at=0.0, **kwargs: handled.append(kwargs)
+    ).consume_pending()
+    assert handled == [{'chat_id': 6}]
 
 
 @override_settings(TELEGRAM_BOT={'WORKER_NAME': 'tests'})
@@ -115,8 +120,9 @@ def test_draining_pops_atomically(redis_server):
 def test_send_redis_round_trips_through_a_decoded_connection(decoded_server):
     TelegramBot().send_redis(chat_id=1, text='hi')
 
-    queued = loads(as_bytes(decoded_server.lpop('TELEGRAM_BOT_MESSAGE')))
-    assert queued == {'function': 'send_message', 'chat_id': 1, 'text': 'hi'}
+    queued = unpack(loads(as_bytes(decoded_server.lpop('TELEGRAM_BOT_MESSAGE'))))
+    assert queued.function == 'send_message'
+    assert queued.kwargs == {'chat_id': 1, 'text': 'hi'}
 
 
 def test_the_connection_is_built_once_and_reused(monkeypatch):

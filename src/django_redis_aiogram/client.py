@@ -8,9 +8,12 @@ jobs, the test suite — that only ever queue a message.
 import asyncio
 import logging
 import threading
+import time
+import uuid
 import weakref
 from asyncio import AbstractEventLoop
 from collections.abc import Coroutine, Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from aiogram import Bot, Dispatcher, Router, exceptions
@@ -25,13 +28,69 @@ from django.utils.module_loading import import_string
 from redis import Redis
 
 from django_redis_aiogram.api import check_function
-from django_redis_aiogram.enums import StorageKind
+from django_redis_aiogram.context import current_correlation_id
+from django_redis_aiogram.enums import EventKind, StorageKind
+from django_redis_aiogram.envelope import pack
+from django_redis_aiogram.events import new_correlation_id
+from django_redis_aiogram.payloads import describe
+from django_redis_aiogram.recorder import Event, recorder
 from django_redis_aiogram.redis import get_redis
 from django_redis_aiogram.serializers import get_serializer
 from django_redis_aiogram.settings import SETTINGS_NAME, coerce_bool, conf
 from django_redis_aiogram.throttling import RateLimiter, get_rate_limiter
 
 logger = logging.getLogger('django_redis_aiogram')
+
+#: how a scheduled send carries its correlation id, so shutdown can name what
+#: it cancelled without threading an argument through asyncio
+TASK_PREFIX = 'tgbot:'
+
+
+def resolve_correlation_id(supplied: uuid.UUID | str | None) -> uuid.UUID:
+    """Pick the identifier this send belongs to.
+
+    An explicit argument wins, then whatever update is being handled here, then
+    a fresh one. Reading the context variable happens synchronously, before any
+    scheduling: _hand_off creates its task from a call_soon_threadsafe callback
+    whose context belongs to the loop, so a read from in there is empty.
+    """
+    if isinstance(supplied, uuid.UUID):
+        return supplied
+    if isinstance(supplied, str) and supplied:
+        try:
+            return uuid.UUID(supplied)
+        except ValueError:
+            msg = f'correlation_id must be a UUID, got {supplied!r}.'
+            raise ValueError(msg) from None
+    return current_correlation_id() or new_correlation_id()
+
+
+def as_identifier(value: object) -> int | None:
+    """Telegram ids are integers; a @username chat_id is not one to store."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+@dataclass(frozen=True)
+class Outbound:
+    """What every stage of one outbound send needs to name itself."""
+
+    correlation_id: uuid.UUID
+    function: str
+    call_kwargs: dict[str, Any]
+
+
+def task_correlation_id(task: 'asyncio.Task[Any]') -> uuid.UUID:
+    """Recover the id a scheduled send was named with, or mint one to say so."""
+    name = task.get_name()
+    if name.startswith(TASK_PREFIX):
+        try:
+            return uuid.UUID(name.removeprefix(TASK_PREFIX))
+        except ValueError:
+            pass
+    return new_correlation_id()
+
 
 # run_until_complete is not reentrant, and the loop — not the bot — is what
 # cannot be entered twice. Two bots handed the same loop must share one lock.
@@ -237,17 +296,28 @@ class TelegramBot:
         # waiting outside the lock, so the next request is not held up by ours
         future.result()
 
-    def send(self, function: str = 'send_message', **kwargs: Any) -> None:
+    def send(
+        self,
+        function: str = 'send_message',
+        *,
+        correlation_id: uuid.UUID | str | None = None,
+        **kwargs: Any,
+    ) -> uuid.UUID:
         """Deliver a message the way this process can.
 
         Inside the bot container that means calling Telegram directly; anywhere
         else it means handing the call to the queue for the bot to pick up. It
         saves every caller from having to know which process it is running in.
+
+        Returns the correlation id every event about this message carries, so a
+        project can store it next to its own model and join the two.
         """
+        # resolved here so both routes agree on the id, and so a caller reading
+        # the return value gets the same one the rows carry
+        identifier = resolve_correlation_id(correlation_id)
         if self.is_worker:
-            self.send_raw(function, **kwargs)
-        else:
-            self.send_redis(function, **kwargs)
+            return self.send_raw(function, correlation_id=identifier, **kwargs)
+        return self.send_redis(function, correlation_id=identifier, **kwargs)
 
     def close(self, drain_timeout: float = 5.0) -> None:
         """Finish what is in flight, then release everything this bot owns.
@@ -283,24 +353,45 @@ class TelegramBot:
             # a closed bot can be built again, so this must not stick
             self._closing = False
 
-    def send_raw(self, function: str = 'send_message', **kwargs: Any) -> None:
-        """Call an aiogram bot method, retrying on Telegram rate limits."""
+    def send_raw(
+        self,
+        function: str = 'send_message',
+        *,
+        correlation_id: uuid.UUID | str | None = None,
+        queued_at: float = 0.0,
+        **kwargs: Any,
+    ) -> uuid.UUID:
+        """Call an aiogram bot method, retrying on Telegram rate limits.
+
+        Returns the correlation id every event about this message carries.
+        ``queued_at`` is set by the consumer when the call came off the queue,
+        which is what makes time-in-queue measurable and tells the two apart.
+        """
         check_function(function)
+        identifier = resolve_correlation_id(correlation_id)
         if not self.enabled:
             logger.debug('send skipped: bot disabled', extra={'tg_function': function})
-            return
+            return identifier
 
         async def send() -> None:
             last_error: exceptions.TelegramRetryAfter | None = None
             retries = 0
+            started = time.monotonic()
             while retries <= self.max_retries:
                 try:
                     limiter = self.rate_limiter
                     if limiter is not None:
                         await limiter.acquire(call_kwargs.get('chat_id'))
-                    await getattr(self.bot, function)(**call_kwargs)
+                    paced = time.monotonic()
+                    result = await getattr(self.bot, function)(**call_kwargs)
                 except exceptions.TelegramRetryAfter as error:  # noqa: PERF203 - retrying is what the loop is for
                     last_error = error
+                    self._record_send(
+                        EventKind.OUTBOUND_RETRIED,
+                        outbound,
+                        attempt=retries,
+                        detail={'retry_after': error.retry_after},
+                    )
                     logger.warning(
                         'rate limited by telegram',
                         extra={
@@ -311,16 +402,42 @@ class TelegramBot:
                     )
                     retries += 1
                     await asyncio.sleep(error.retry_after)
-                except Exception:
+                except Exception as error:
+                    self._record_send(
+                        EventKind.OUTBOUND_FAILED,
+                        outbound,
+                        attempt=retries,
+                        error=error,
+                    )
                     logger.exception('send failed', extra={'tg_function': function})
                     if conf['RAISE_EXCEPTION']:
                         raise
                     return
                 else:
+                    self._record_send(
+                        EventKind.OUTBOUND_SENT,
+                        outbound,
+                        attempt=retries,
+                        # the return value used to be thrown away, and it carries
+                        # the only id Telegram will ever give for this message
+                        message_id=getattr(result, 'message_id', None),
+                        duration_ms=int((time.monotonic() - started) * 1000),
+                        detail={
+                            'paced_ms': int((paced - started) * 1000),
+                            'queue_ms': int((time.time() - queued_at) * 1000) if queued_at else None,
+                        },
+                    )
                     logger.info('message sent', extra={'tg_function': function})
                     return
 
             # exhausting the retries used to return silently
+            self._record_send(
+                EventKind.OUTBOUND_DROPPED,
+                outbound,
+                attempt=retries,
+                error=last_error,
+                detail={'max_retries': self.max_retries},
+            )
             logger.error(
                 'giving up on message',
                 extra={'tg_function': function, 'tg_max_retries': self.max_retries},
@@ -329,7 +446,36 @@ class TelegramBot:
                 raise last_error
 
         call_kwargs = {**conf['DEFAULT_KWARGS'](function), **kwargs}
-        self._schedule(send())
+        outbound = Outbound(identifier, function, call_kwargs)
+        self._schedule(send(), identifier)
+        return identifier
+
+    @staticmethod
+    def _record_send(kind: EventKind, outbound: 'Outbound', **fields: Any) -> None:
+        """Record one stage of an outbound message.
+
+        Called from inside the send coroutine, which is the only place that
+        knows the outcome: _schedule returns once the task is *created*, so the
+        consumer acknowledges the message before Telegram has seen it.
+        """
+        if not recorder.enabled:
+            return
+        error = fields.pop('error', None)
+        detail = fields.pop('detail', None) or {}
+        recorder.record(
+            Event(
+                kind=kind.value,
+                correlation_id=outbound.correlation_id,
+                function=outbound.function,
+                chat_id=as_identifier(outbound.call_kwargs.get('chat_id')),
+                error_code=type(error).__name__ if error is not None else '',
+                error=str(error) if error is not None else '',
+                # None means 'not measured here', and a column is a better place
+                # for it than a JSON key that reads as a measurement of zero
+                detail={key: value for key, value in detail.items() if value is not None},
+                **fields,
+            )
+        )
 
     def _register(self, task: 'asyncio.Task[None]') -> None:
         """Track a send so :meth:`close` can wait for it.
@@ -351,7 +497,7 @@ class TelegramBot:
         if error is not None:
             logger.error('scheduled send failed', exc_info=error)
 
-    def _schedule(self, coroutine: Coroutine[Any, Any, None]) -> None:
+    def _schedule(self, coroutine: Coroutine[Any, Any, None], correlation_id: uuid.UUID) -> None:
         """Run a coroutine on the bot loop from whichever thread we are on.
 
         The delivery consumer runs in its own thread while the loop belongs to
@@ -361,6 +507,7 @@ class TelegramBot:
         if self._closing:
             # the loop is being torn down, so nothing would ever run this
             coroutine.close()
+            self._record_drop(correlation_id, 'the bot is shutting down')
             logger.error('send refused: the bot is shutting down')
             return
 
@@ -371,7 +518,7 @@ class TelegramBot:
 
         loop = self.loop
         if running is loop:
-            self._register(loop.create_task(coroutine))
+            self._register(self._start(coroutine, loop, correlation_id))
             return
 
         # several web threads may send at once, and run_until_complete is not
@@ -383,13 +530,14 @@ class TelegramBot:
             # teardown while this thread waited for it
             if self._closing or loop.is_closed():
                 coroutine.close()
+                self._record_drop(correlation_id, 'the event loop was closed')
                 logger.error('send refused: the event loop was closed')
                 return
             if loop.is_running():
                 # decided under the lock: seen from outside it, a loop another
                 # thread drives for one run_until_complete looks running right
                 # up to the moment it stops, and the handoff would be lost
-                self._hand_off(coroutine, loop)
+                self._hand_off(coroutine, loop, correlation_id)
                 return
             try:
                 loop.run_until_complete(coroutine)
@@ -397,24 +545,52 @@ class TelegramBot:
                 # polling started between the check above and this call
                 if not loop.is_running():
                     raise
-                self._hand_off(coroutine, loop)
+                self._hand_off(coroutine, loop, correlation_id)
 
-    def _hand_off(self, coroutine: Coroutine[Any, Any, None], loop: AbstractEventLoop) -> None:
+    def _hand_off(
+        self,
+        coroutine: Coroutine[Any, Any, None],
+        loop: AbstractEventLoop,
+        correlation_id: uuid.UUID,
+    ) -> None:
         """Create the task on the loop thread, so it is registered before it runs."""
 
         def start() -> None:
             if self._closing:
                 # close() began after this was queued; the loop will not run it
                 coroutine.close()
+                self._record_drop(correlation_id, 'the bot started shutting down')
                 logger.error('send dropped: the bot started shutting down')
                 return
-            self._register(loop.create_task(coroutine))
+            self._register(self._start(coroutine, loop, correlation_id))
 
         try:
             loop.call_soon_threadsafe(start)
         except RuntimeError:
             coroutine.close()
+            self._record_drop(correlation_id, 'the event loop is closed')
             logger.exception('send dropped: the event loop is closed')
+
+    @staticmethod
+    def _start(
+        coroutine: Coroutine[Any, Any, None],
+        loop: AbstractEventLoop,
+        correlation_id: uuid.UUID,
+    ) -> 'asyncio.Task[None]':
+        """Create the task, named so shutdown can say which message it cancelled."""
+        return loop.create_task(coroutine, name=f'{TASK_PREFIX}{correlation_id.hex}')
+
+    @staticmethod
+    def _record_drop(correlation_id: uuid.UUID, reason: str) -> None:
+        """Record a send that never reached Telegram, and used to leave only a log line."""
+        recorder.record(
+            Event(
+                kind=EventKind.OUTBOUND_DROPPED.value,
+                correlation_id=correlation_id,
+                error_code='NotScheduled',
+                error=reason,
+            )
+        )
 
     def _drain(self, timeout: float) -> None:
         """Let scheduled sends finish, cancelling whatever outlasts the timeout."""
@@ -439,6 +615,7 @@ class TelegramBot:
         if not dropped:
             return
         for task in dropped:
+            self._record_drop(task_correlation_id(task), 'cancelled at shutdown')
             task.cancel()
         loop.run_until_complete(asyncio.gather(*dropped, return_exceptions=True))
         logger.warning(
@@ -446,17 +623,58 @@ class TelegramBot:
             extra={'tg_dropped': len(dropped), 'tg_drain_timeout': timeout},
         )
 
-    def send_redis(self, function: str = 'send_message', **kwargs: Any) -> None:
-        """Queue a message in Redis for the bot worker to deliver."""
+    def send_redis(
+        self,
+        function: str = 'send_message',
+        *,
+        correlation_id: uuid.UUID | str | None = None,
+        **kwargs: Any,
+    ) -> uuid.UUID:
+        """Queue a message in Redis for the bot worker to deliver.
+
+        Returns the correlation id the delivered row will carry too.
+        """
         check_function(function)
+        identifier = resolve_correlation_id(correlation_id)
         if not self.enabled:
             logger.debug('queueing skipped: bot disabled', extra={'tg_function': function})
-            return
+            return identifier
 
-        get_redis().rpush(
-            conf['REDIS_MESSAGES_KEY'],
-            get_serializer().dumps({'function': function, **kwargs}),
-        )
+        queued_at = time.time()
+        try:
+            get_redis().rpush(
+                conf['REDIS_MESSAGES_KEY'],
+                get_serializer().dumps(pack(function, kwargs, identifier, queued_at)),
+            )
+        except Exception as error:
+            # recorded rather than assumed: a failure here means the message was
+            # never queued, and a 'queued' row would say the opposite
+            recorder.record(
+                Event(
+                    kind=EventKind.OUTBOUND_DROPPED.value,
+                    correlation_id=identifier,
+                    function=function,
+                    chat_id=as_identifier(kwargs.get('chat_id')),
+                    error_code=type(error).__name__,
+                    error=str(error),
+                    detail={'stage': 'queueing'},
+                )
+            )
+            raise
+        if recorder.enabled:
+            # guarded: describing the arguments is the one part of this that
+            # costs something when nobody is recording
+            recorder.record(
+                Event(
+                    kind=EventKind.OUTBOUND_QUEUED.value,
+                    correlation_id=identifier,
+                    created_at=queued_at,
+                    function=function,
+                    chat_id=as_identifier(kwargs.get('chat_id')),
+                    detail=describe(kwargs),
+                )
+            )
+        return identifier
 
     def message(self, *args: Any, **kwargs: Any) -> CallbackType:
         """Return a decorator registering a handler for the 'message' observer."""

@@ -5,6 +5,7 @@ import contextlib
 from django.test import override_settings
 
 from django_redis_aiogram import TelegramBot
+from django_redis_aiogram.envelope import unpack
 from django_redis_aiogram.serializers import JsonSerializer
 
 SETTINGS = {'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost:6379/0'}
@@ -18,8 +19,9 @@ def test_outside_the_worker_it_queues(redis_server):
     instance.send(chat_id=1, text='hi')
 
     assert redis_server.llen('TELEGRAM_BOT_MESSAGE') == 1
-    queued = JsonSerializer().loads(redis_server.lindex('TELEGRAM_BOT_MESSAGE', 0))
-    assert queued == {'function': 'send_message', 'chat_id': 1, 'text': 'hi'}
+    queued = unpack(JsonSerializer().loads(redis_server.lindex('TELEGRAM_BOT_MESSAGE', 0)))
+    assert queued.function == 'send_message'
+    assert queued.kwargs == {'chat_id': 1, 'text': 'hi'}
 
 
 @override_settings(TELEGRAM_BOT=SETTINGS)
@@ -27,7 +29,11 @@ def test_inside_the_worker_it_calls_telegram(redis_server, monkeypatch):
     instance = TelegramBot()
     instance._polling = True
     sent = []
-    monkeypatch.setattr(instance, 'send_raw', lambda function='send_message', **kw: sent.append((function, kw)))
+    monkeypatch.setattr(
+        instance,
+        'send_raw',
+        lambda function='send_message', correlation_id=None, **kw: sent.append((function, kw)),
+    )
 
     instance.send(chat_id=1, text='hi')
 
@@ -39,8 +45,8 @@ def test_inside_the_worker_it_calls_telegram(redis_server, monkeypatch):
 def test_the_function_name_is_forwarded(redis_server):
     TelegramBot().send('send_photo', chat_id=1, photo='file_id')
 
-    queued = JsonSerializer().loads(redis_server.lindex('TELEGRAM_BOT_MESSAGE', 0))
-    assert queued['function'] == 'send_photo'
+    queued = unpack(JsonSerializer().loads(redis_server.lindex('TELEGRAM_BOT_MESSAGE', 0)))
+    assert queued.function == 'send_photo'
 
 
 @override_settings(TELEGRAM_BOT={'ENABLED': False})

@@ -24,13 +24,15 @@ nothing.
 ## Asserting that your code queued a message
 
 Point the connection at [fakeredis](https://pypi.org/project/fakeredis/) and
-read the list back. `loads` decodes a payload the same way the worker does:
+read the list back. `loads` decodes a payload the same way the worker does, and
+`unpack` reads the envelope it is wrapped in:
 
 ```python
 import fakeredis
 from django.test import override_settings
 
 from django_redis_aiogram import bot
+from django_redis_aiogram.envelope import unpack
 from django_redis_aiogram.serializers import loads
 
 
@@ -41,9 +43,16 @@ def test_approval_notifies_the_reviewer(monkeypatch):
 
     approve(order)  # your code, which calls bot.send(...)
 
-    queued = [loads(raw) for raw in server.lrange('TELEGRAM_BOT_MESSAGE', 0, -1)]
-    assert queued == [{'function': 'send_message', 'chat_id': 42, 'text': 'Order approved'}]
+    queued = [unpack(loads(raw)) for raw in server.lrange('TELEGRAM_BOT_MESSAGE', 0, -1)]
+    assert [(call.function, call.kwargs) for call in queued] == [
+        ('send_message', {'chat_id': 42, 'text': 'Order approved'}),
+    ]
 ```
+
+3.0 nests the arguments under an envelope so a message can carry a correlation
+id — see **[[Event-log|Event log]]**. Reading through `unpack` is what keeps a
+test from having to know that: `call.correlation_id` is there if you want it,
+and `bot.send()` returns the same value.
 
 Patch `django_redis_aiogram.client.get_redis` — the name the sending code looks
 up. Patching `django_redis_aiogram.redis.get_redis` alone leaves the real
@@ -189,10 +198,15 @@ from django_redis_aiogram.delivery import BlpopDelivery
 bot.send_redis(chat_id=42, text='hi')
 
 handled = []
-delivery = BlpopDelivery(handler=lambda **payload: handled.append(payload))
+# the consumer also passes correlation_id and queued_at, which a handler
+# standing in for send_raw can ignore
+delivery = BlpopDelivery(handler=lambda function, **payload: handled.append((function, payload)))
 delivery.consume_pending()  # drains the list without blocking
 
-assert handled == [{'function': 'send_message', 'chat_id': 42, 'text': 'hi'}]
+function, payload = handled[0]
+assert function == 'send_message'
+assert payload['chat_id'] == 42
+assert payload['text'] == 'hi'
 ```
 
 `consume_pending()` returns as soon as the list is empty, so it needs no thread

@@ -19,6 +19,7 @@ from django.test import override_settings
 
 from django_redis_aiogram import bot
 from django_redis_aiogram.delivery import BlpopDelivery
+from django_redis_aiogram.envelope import unpack
 from django_redis_aiogram.serializers import loads
 
 QUEUE = 'TELEGRAM_BOT_MESSAGE'
@@ -41,8 +42,11 @@ def test_the_fakeredis_queue_assertion(monkeypatch):
 
     approve({'reviewer': 42})
 
-    queued = [loads(raw) for raw in server.lrange(QUEUE, 0, -1)]
-    assert queued == [{'function': 'send_message', 'chat_id': 42, 'text': 'Order approved'}]
+    queued = [unpack(loads(raw)) for raw in server.lrange(QUEUE, 0, -1)]
+    assert [(call.function, call.kwargs) for call in queued] == [
+        ('send_message', {'chat_id': 42, 'text': 'Order approved'}),
+    ]
+    assert queued[0].correlation_id is not None, 'the envelope lost the id the page promises'
 
 
 def approve(order):
@@ -127,9 +131,12 @@ def test_draining_the_queue_without_a_thread(redis_server):
     assert redis_server.llen(QUEUE) == 1
 
     handled = []
-    BlpopDelivery(handler=lambda **payload: handled.append(payload)).consume_pending()
+    BlpopDelivery(handler=lambda function, **payload: handled.append((function, payload))).consume_pending()
 
-    assert handled == [{'function': 'send_message', 'chat_id': 42, 'text': 'hi'}]
+    function, payload = handled[0]
+    assert function == 'send_message'
+    assert payload['chat_id'] == 42
+    assert payload['text'] == 'hi'
     assert redis_server.llen(QUEUE) == 0
 
 

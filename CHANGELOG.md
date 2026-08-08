@@ -23,6 +23,24 @@
   worker starts. Checks `E008` and `E013` are gone with the settings they
   guarded, and their ids are not reused — a `SILENCED_SYSTEM_CHECKS` entry
   naming one is now dead but harmless.
+- **Queued payloads carry an envelope.** 2.x wrote
+  `{'function': name, **kwargs}` and the consumer splatted it straight back into
+  aiogram, so there was nowhere to put a correlation id without it arriving at
+  Telegram as an unexpected argument. 3.0 nests the arguments under
+  `__envelope__` instead. The reader accepts the old flat shape, so a backlog
+  drains — but the reverse does not hold: a 2.x consumer handed a new payload
+  calls the Telegram method with `__envelope__` as a keyword, raises, logs it
+  and swallows it, and the message is lost. **Deploy the bot container before
+  the web tier.** A test reproduces the failure so the constraint is not
+  folklore.
+- `bot.send()`, `send_redis()` and `send_raw()` return the correlation id
+  instead of `None`, and take one as a keyword argument. Source-compatible at
+  every existing call site. A handler replying to an update inherits that
+  update's id through a context variable, so a reply is joined to its cause
+  without any project code passing it along.
+- Asserting on the queue in your own tests now goes through
+  `envelope.unpack` — see **Testing** in the wiki, whose recipes are executed
+  by the suite and were updated with the format.
 - `DeliveryKind` has one member, `BLPOP`. `DELIVERY` stays as a setting so a
   stale `'keyspace'` produces an error naming the legal value, rather than an
   unknown-key warning and a silently different delivery mode.

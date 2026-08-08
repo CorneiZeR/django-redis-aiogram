@@ -9,6 +9,7 @@ from django.test import override_settings
 
 from django_redis_aiogram import TelegramBot
 from django_redis_aiogram.delivery import BlpopDelivery, get_delivery
+from django_redis_aiogram.events import new_correlation_id
 from django_redis_aiogram.serializers import JsonSerializer, PickleSerializer
 
 
@@ -41,7 +42,9 @@ def drain(delivery, expected, timeout=5):
 class RecordingBlpop(BlpopDelivery):
     def __init__(self):
         self.handled = []
-        super().__init__(handler=lambda **kwargs: self.handled.append(kwargs))
+        # the consumer also passes correlation_id and queued_at; the call this
+        # records is what a handler cares about
+        super().__init__(handler=lambda correlation_id=None, queued_at=0.0, **kwargs: self.handled.append(kwargs))
 
 
 @override_settings(TELEGRAM_BOT={'DELIVERY': 'blpop', 'BLPOP_TIMEOUT': 1})
@@ -140,7 +143,7 @@ def test_schedule_hops_to_the_loop_thread():
         ran_on.append(threading.get_ident())
         done.set()
 
-    instance._schedule(coroutine())
+    instance._schedule(coroutine(), new_correlation_id())
     assert done.wait(5), 'coroutine never ran on the loop thread'
     assert ran_on == [thread.ident]
 
@@ -157,7 +160,7 @@ def test_schedule_runs_inline_when_no_loop_is_running():
     async def coroutine():
         ran.append(True)
 
-    instance._schedule(coroutine())
+    instance._schedule(coroutine(), new_correlation_id())
     assert ran == [True]
     instance.close()
 
