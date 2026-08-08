@@ -31,11 +31,11 @@ for expected in (
     'django_redis_aiogram/management/commands/start_tgbot.py',
 ):
     assert expected in names, f'{expected} missing from the wheel'
-# 3.0 removed the 1.x package name; packaging it again would revive the collision
-# the rename existed to fix, silently
+# 3.0 removed the 1.x package name; packaging it again would silently recreate
+# the site-packages collision the rename was made to fix
 shim = [name for name in names if name == 'telegram_bot.py' or name.startswith('telegram_bot/')]
 assert not shim, f'the removed telegram_bot package is back in the wheel: {shim}'
-print('py.typed and the management command are in, and the 1.x name is not')
+print('py.typed and the management command are present; the 1.x name is absent')
 PY
 
 echo "--- installing into a fresh environment"
