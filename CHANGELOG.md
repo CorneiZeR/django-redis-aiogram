@@ -37,6 +37,16 @@
   own qualified name on newer Pythons. The values are unchanged, so nothing in
   Redis or in your settings has to move.
 
+### Changed
+
+- `ALLOW_PICKLE` is documented as what it is: the escape hatch for payloads JSON
+  cannot describe, and not the 1.x upgrade window it was introduced as. Nothing
+  about its behaviour changed — it is still off by default, the reader still
+  refuses pickled payloads without it, and a refused payload is still left in
+  flight rather than destroyed. What changed is that the documentation no longer
+  tells you to remove a setting you may need, and now says why the read path has
+  a refusal branch at all.
+
 ### Documentation
 
 - **Migrating from 1.x** is now **Upgrading**, covering each major release

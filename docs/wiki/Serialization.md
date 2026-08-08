@@ -84,20 +84,28 @@ and rebuilt on the way out.
 Class lookup is limited to `aiogram.types` members that subclass
 `TelegramObject`, so a payload cannot name an arbitrary import path.
 
-## Switching formats
+## Pickle, the escape hatch
 
-Reads detect the format per message, but pickled payloads are **refused by
-default** — unpickling queue data is code execution. If the queue still holds
-1.x messages when you deploy, open the door for the upgrade window only:
+JSON is the format. Pickle is what is left when a payload has no JSON form at
+all — `UnsupportedInputFileError` names it for exactly that reason when you try
+to queue an open file. It is not a migration aid: 3.0 removed the shim and the
+1.x queue is long drained, and the setting is still here because the escape
+hatch is still needed.
+
+It is off by default because **unpickling queue data is code execution**.
+Whoever can write to the Redis list can run code in the bot container, so this
+is a trust boundary, not a preference.
+
+Reading pickled payloads takes one key:
 
 ```python
 TELEGRAM_BOT = {
-    'ALLOW_PICKLE': True,  # remove once the queue has drained
+    'ALLOW_PICKLE': True,
 }
 ```
 
-Writing pickled payloads again takes both keys — writing a format the reader
-refuses would discard every message, which is what `E022` reports:
+Writing them takes both — writing a format the reader refuses would discard
+every message, which is what `E022` reports before deployment:
 
 ```python
 TELEGRAM_BOT = {
@@ -106,8 +114,19 @@ TELEGRAM_BOT = {
 }
 ```
 
+Two behaviours make the mixed case work, and they are why this is safe to turn
+on and off on a running deployment:
+
+- **Reads sniff the format per message.** A queue holding both formats drains
+  without being stopped, so switching `SERIALIZER` needs no downtime.
+- **A refused pickle stays in flight**, rather than being acknowledged. Turning
+  `ALLOW_PICKLE` off while a producer is still writing pickled payloads leaves
+  them in the worker's processing list with a log line saying so; set it back,
+  restart the worker, and they are delivered. On a server without `LMOVE` there
+  is no in-flight list, so there they are lost.
+
 Only worth it if you must queue objects JSON cannot represent, and only with a
-Redis nothing else can write to.
+Redis nothing untrusted can write to.
 
 ## Failures
 
