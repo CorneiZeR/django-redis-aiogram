@@ -28,6 +28,11 @@ src/django_redis_aiogram/
     recorder.py     the bounded queue and the writer thread; no django.db here
     eventlog.py     the only module that touches the ORM
     dbrouter.py     optional routing of the log to its own database
+    admin.py        the read-only changelist; registered from ready(), not on import
+    instrumentation.py  the update middleware and the storage wrapper
+    envelope.py     what a queued payload looks like, both shapes
+    context.py      the correlation id a handler's replies inherit
+    payloads.py     summarise, redact, cap — in that order, and never lossless
 docs/wiki/          the wiki, published from master
 tests/              pytest, fakeredis, no network
 ```
@@ -95,11 +100,14 @@ Packaging-only work does not need the Redis suite, and vice versa.
   `TelegramBot` that predates 2.0 — attributes, methods and the observer
   decorators. Adding to that surface is fine; moving or removing anything on it
   is a breaking change and needs the changelog entry to say so.
-- **`models.py` imports no aiogram.** Django imports it on every
-  `django.setup()`, before `ready()` and regardless of `ENABLED`, so a migration
-  container pays for whatever it pulls. `django.db.models` and
-  `django_redis_aiogram.enums`/`events` only — never `client`, `serializers` or
-  `api`. `tests/test_event_log_off.py` boots a subprocess to prove it.
+- **`models.py` and `admin.py` import no aiogram.** Django imports the model on
+  every `django.setup()`, before `ready()` and regardless of `ENABLED`, and
+  `admin.autodiscover` imports the other on every boot of a project with the
+  admin installed — so a migration container pays for whatever either pulls.
+  `django.db.models` and `django_redis_aiogram.enums`/`events` only — never
+  `client`, `serializers` or `api`. A subprocess test pins each:
+  `tests/test_event_log_off.py` for the model, `tests/db/test_admin.py` for the
+  admin.
 - **`recorder.py` imports no `django.db`.** Only `eventlog.py` does, and the
   writer thread imports it on its first flush. That is what makes a disabled log
   cost nothing and what makes `record()` legal from a coroutine — `put_nowait`
