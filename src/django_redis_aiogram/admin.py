@@ -8,13 +8,15 @@ settings are already safe to read.
 """
 
 import json
-from typing import TYPE_CHECKING, Any
+import uuid
+from typing import TYPE_CHECKING, Any, cast
 
 from django.contrib import admin
 from django.core.exceptions import ImproperlyConfigured
 from django.core.paginator import Paginator
 from django.db.models import QuerySet
 from django.http import HttpRequest
+from django.utils.functional import cached_property
 from django.utils.html import format_html, format_html_join
 
 from django_redis_aiogram.eventlog import log_alias
@@ -32,8 +34,8 @@ else:
 
 #: how many stages of one message the detail page will render
 MAX_STAGES = 200
-#: what the changelist claims a filtered count is, rather than running COUNT(*)
-ESTIMATED_TOTAL = 1_000_000_000
+#: rows the changelist will count before it stops asking
+COUNT_LIMIT = 10_000
 
 
 def log_is_on() -> bool:
@@ -95,18 +97,27 @@ class OutcomeFilter(admin.SimpleListFilter):
         return queryset
 
 
-class EstimatedPaginator(Paginator):  # type: ignore[type-arg]
-    """Never counts the table.
+class BoundedPaginator(Paginator):  # type: ignore[type-arg]
+    """Counts, but never past ``COUNT_LIMIT`` rows.
 
     Django's changelist runs ``COUNT(*)`` over the filtered queryset to build
     the page list. On a table sized by traffic that is a sequential scan on
     every page load, and the number it produces is stale by the time it renders.
+
+    Counting inside a ``LIMIT`` keeps the answer honest for the filtered views
+    people actually read, and turns the unfiltered one into a bounded index
+    scan rather than the whole table. Past the limit the count stops growing,
+    so the deepest pages are unreachable — by then the answer is a filter, not
+    another page.
     """
 
-    @property
+    @cached_property
     def count(self) -> int:
-        """Report a number large enough to keep paging, without asking the database."""
-        return ESTIMATED_TOTAL
+        """Count what fits inside the cap, in one query the index can serve."""
+        # the changelist always paginates a queryset; the base class is typed
+        # for anything sliceable, which has no count()
+        rows = cast('QuerySet[TelegramEvent]', self.object_list)
+        return int(rows[:COUNT_LIMIT].count())
 
 
 class TelegramEventAdmin(ModelAdminBase):
@@ -119,7 +130,7 @@ class TelegramEventAdmin(ModelAdminBase):
     search_fields = ('=correlation_id', '=chat_id')
     search_help_text = 'An exact correlation id, or an exact chat id.'
     show_full_result_count = False
-    paginator = EstimatedPaginator
+    paginator = BoundedPaginator
     list_per_page = 50
     # nothing to join: the model holds no foreign key, which is what keeps an
     # insert from becoming a constraint check
@@ -236,8 +247,6 @@ class TelegramEventAdmin(ModelAdminBase):
 
 def _is_searchable(term: str) -> bool:
     """Whether a term could match either typed column."""
-    import uuid  # noqa: PLC0415 - only needed when somebody searches
-
     if term.lstrip('-').isdigit():
         return True
     try:

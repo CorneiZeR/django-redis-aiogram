@@ -146,10 +146,15 @@ alias, leave `auth` where it is — the router in this package moves only its ow
 app, and dragging `auth` along would move your users with it.
 
 What the admin deliberately does not do, because the table is sized by traffic:
-no full result count (the changelist would otherwise run `COUNT(*)` over the
-filtered queryset on every page load), no date drilldown (its truncation is a
-scan no index can serve), and no substring search — the two searchable columns
-are matched exactly, so both use their index.
+no full result count, no date drilldown (its truncation is a scan no index can
+serve), and no substring search — the two searchable columns are matched
+exactly, so both use their index.
+
+Paging counts at most **10 000 rows**, inside a `LIMIT`. The number is exact for
+the filtered views people actually read and stops growing past the cap, so the
+deepest pages are unreachable; at that depth the answer is a filter, not another
+page. Django would otherwise run `COUNT(*)` over the whole filtered queryset on
+every page load.
 
 ## Growth, and the job that bounds it
 

@@ -6,7 +6,7 @@ from django.db import connection
 from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
 
-from django_redis_aiogram.admin import TelegramEventAdmin, register_event_log_admin
+from django_redis_aiogram.admin import COUNT_LIMIT, TelegramEventAdmin, register_event_log_admin
 from django_redis_aiogram.enums import EventKind
 from django_redis_aiogram.events import new_correlation_id
 from django_redis_aiogram.models import TelegramEvent
@@ -51,10 +51,14 @@ def test_the_changelist_renders(client):
 
 @pytest.mark.django_db
 @override_settings(TELEGRAM_BOT=ON)
-def test_the_changelist_never_counts_the_table(client):
+def test_the_changelist_never_counts_past_the_cap(client):
     """Django's changelist runs COUNT(*) to build the page list. On a table
     sized by traffic that is a sequential scan on every page load, which is
-    what show_full_result_count and the paginator are for."""
+    what show_full_result_count and the paginator are for.
+
+    Every count it does run has to carry the cap, or the page is back to
+    scanning the table to tell someone a number they did not ask for.
+    """
     an_event()
     client.force_login(a_reader('counter', 'view_telegramevent'))
 
@@ -62,7 +66,8 @@ def test_the_changelist_never_counts_the_table(client):
         client.get(CHANGELIST)
 
     counts = [query['sql'] for query in queries if 'COUNT(' in query['sql'].upper()]
-    assert counts == [], counts
+    assert counts, 'the paginator stopped counting entirely, so the numbers are made up'
+    assert all(f'LIMIT {COUNT_LIMIT}' in sql for sql in counts), counts
 
 
 @pytest.mark.django_db
@@ -141,15 +146,23 @@ def test_the_stages_of_one_message_are_shown_together(client):
 
 @pytest.mark.django_db
 @override_settings(TELEGRAM_BOT=ON)
-def test_a_search_the_columns_cannot_hold_is_refused_not_raised(client):
-    """Both searchable columns are typed; an exact lookup for 'hello' against a
-    uuid column raises out of the changelist on PostgreSQL."""
+def test_a_search_the_columns_cannot_hold_is_refused_before_the_query(client):
+    """Both searchable columns are typed, and PostgreSQL raises out of the
+    changelist rather than matching nothing when a term cannot be cast.
+
+    Asserted on the refusal itself rather than on a 200: SQLite matches nothing
+    quietly, so a status code would pass here with the guard deleted and fail
+    for a project running the backend the guard is for.
+    """
     an_event()
     client.force_login(a_reader('searcher', 'view_telegramevent'))
+    admin_instance = TelegramEventAdmin(TelegramEvent, None)
 
-    response = client.get(CHANGELIST, {'q': 'hello'})
+    narrowed, _ = admin_instance.get_search_results(None, TelegramEvent.objects.all(), 'hello')
 
-    assert response.status_code == 200
+    assert not narrowed.exists()
+    assert narrowed.query.is_empty(), 'the term was handed to the database instead of refused'
+    assert client.get(CHANGELIST, {'q': 'hello'}).status_code == 200
 
 
 @pytest.mark.django_db
@@ -163,6 +176,22 @@ def test_a_search_by_correlation_id_finds_the_row(client):
     body = client.get(CHANGELIST, {'q': str(identifier)}).content.decode()
 
     assert '1 result' in body or str(identifier)[:8] in body
+
+
+@pytest.mark.django_db
+@override_settings(TELEGRAM_BOT=ON)
+def test_a_search_by_chat_id_finds_the_rows(client):
+    """The other half of what the help text promises, and the half a support
+    reader actually types."""
+    an_event(chat_id=42)
+    an_event(chat_id=43)
+    client.force_login(a_reader('by-chat', 'view_telegramevent'))
+    admin_instance = TelegramEventAdmin(TelegramEvent, None)
+
+    narrowed, _ = admin_instance.get_search_results(None, TelegramEvent.objects.all(), '42')
+
+    assert [row.chat_id for row in narrowed] == [42]
+    assert client.get(CHANGELIST, {'q': '42'}).status_code == 200
 
 
 @pytest.mark.django_db
