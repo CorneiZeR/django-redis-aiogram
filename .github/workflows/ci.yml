@@ -162,6 +162,7 @@ jobs:
           expected_names = (
               'django_redis_aiogram/py.typed',
               'django_redis_aiogram/api.py',
+              'django_redis_aiogram/migrations/0001_initial.py',
           )
           for expected in expected_names:
               assert expected in names, f'{expected} missing from {wheel}: {names}'

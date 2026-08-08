@@ -63,6 +63,39 @@ class RateLimitKey(str, Enum):
     GROUP_PER_MINUTE = 'group_per_minute'
 
 
+@unique
+class EventKind(str, Enum):
+    """What one row of the event log records.
+
+    Namespaced by direction and dotted, so a project registering its own kinds
+    has an obvious convention to follow. These land in a database column and in
+    saved admin filters, which is why the values are frozen like the rest.
+    """
+
+    OUTBOUND_QUEUED = 'outbound.queued'
+    OUTBOUND_CONSUMED = 'outbound.consumed'
+    OUTBOUND_SENT = 'outbound.sent'
+    OUTBOUND_RETRIED = 'outbound.retried'
+    OUTBOUND_FAILED = 'outbound.failed'
+    OUTBOUND_DROPPED = 'outbound.dropped'
+    INBOUND_RECEIVED = 'inbound.received'
+    INBOUND_HANDLED = 'inbound.handled'
+    INBOUND_FAILED = 'inbound.failed'
+    FSM_TRANSITION = 'fsm.transition'
+    QUEUE_UNDECODABLE = 'queue.undecodable'
+    QUEUE_REJECTED = 'queue.rejected'
+    LOG_DROPPED = 'log.dropped'
+
+
+@unique
+class PayloadDetail(str, Enum):
+    """How much of a call's arguments the event log keeps."""
+
+    NONE = 'none'
+    SUMMARY = 'summary'
+    FULL = 'full'
+
+
 def choices(kind: type[Enum]) -> frozenset[str]:
     """Return the values of ``kind`` as a frozenset, for membership checks."""
     return frozenset(member.value for member in kind)

@@ -19,6 +19,8 @@ class TelegramBotAppConfig(AppConfig):
     name = 'django_redis_aiogram'
     label = 'django_redis_aiogram'
     verbose_name = 'django-redis-aiogram'
+    # app-local, so it does not touch the project's DEFAULT_AUTO_FIELD
+    default_auto_field = 'django.db.models.BigAutoField'
 
     def ready(self) -> None:
         """Register the checks and autodiscover routers, unless disabled here."""

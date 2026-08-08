@@ -30,6 +30,7 @@ bot.send(chat_id=CHAT_ID, text='hello')
 * **[[Rate limits]]** — staying inside Telegram's published limits
 * **[[Deployment]]** — docker-compose recipes, disabling the bot per process
 * **[[Logging]]** — the logger and its structured fields
+* **[[Event-log|Event log]]** — recording what the bot did to a table
 * **[[Serialization]]** — what can be queued, and the pickle-to-JSON move
 * **[[Troubleshooting]]** — symptoms and their usual causes
 
