@@ -27,6 +27,34 @@ ON = {'EVENT_LOG': True}
 TOKEN = '123456:AAFakeTokenThatLooksLikeARealOneXXXXXXX'
 
 
+class SpyStorage(MemoryStorage):
+    """Records which forwarded call arrived, since MemoryStorage.close() is silent."""
+
+    def __init__(self):
+        super().__init__()
+        self.calls = []
+
+    async def set_state(self, key, state=None):
+        self.calls.append('set_state')
+        await super().set_state(key, state)
+
+    async def get_state(self, key):
+        self.calls.append('get_state')
+        return await super().get_state(key)
+
+    async def set_data(self, key, data):
+        self.calls.append('set_data')
+        await super().set_data(key, data)
+
+    async def get_data(self, key):
+        self.calls.append('get_data')
+        return await super().get_data(key)
+
+    async def close(self):
+        self.calls.append('close')
+        await super().close()
+
+
 class Form(StatesGroup):
     """A state to move into."""
 
@@ -162,20 +190,29 @@ def test_a_state_change_is_recorded_where_it_happens():
 @pytest.mark.django_db(transaction=True)
 @override_settings(TELEGRAM_BOT=ON)
 def test_the_wrapper_forwards_everything_else():
-    storage = instrumented(MemoryStorage())
+    """Built directly rather than through instrumented(), and against a spy.
+
+    MemoryStorage.close() is a no-op, so a close() that forwarded nothing would
+    have passed — the wrapper has to be watched, not just exercised.
+    """
+    inner = SpyStorage()
+    storage = RecordingStorage(inner)
     key = StorageKey(bot_id=1, chat_id=1, user_id=1)
 
     async def exercise():
         await storage.set_state(key, Form.name)
         await storage.set_data(key, {'answer': 42})
-        return await storage.get_state(key), await storage.get_data(key)
+        state = await storage.get_state(key)
+        data = await storage.get_data(key)
+        await storage.close()
+        return state, data
 
     state, data = asyncio.run(exercise())
 
     assert state == 'Form:name'
     assert data == {'answer': 42}
-    # close() must forward: TelegramBot.close releases the storage through it
-    asyncio.run(storage.close())
+    # TelegramBot.close releases the storage through this, so it has to arrive
+    assert inner.calls == ['set_state', 'set_data', 'get_state', 'get_data', 'close'], inner.calls
 
 
 def test_nothing_is_installed_while_the_log_is_off():

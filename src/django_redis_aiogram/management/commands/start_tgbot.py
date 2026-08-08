@@ -121,10 +121,13 @@ class Command(BaseCommand):
             delivery.stop()
             for thread in threads:
                 thread.join(timeout=float(conf['BLPOP_TIMEOUT']) + 1)
-            bot.close()
-            # after close(), never before: closing drains in-flight sends, and
-            # those are what produce the final rows
-            recorder.stop()
+            try:
+                bot.close()
+            finally:
+                # after close(), never before: closing drains in-flight sends,
+                # and those are what produce the final rows. In its own finally
+                # because a close() that raises must not also lose the rows
+                recorder.stop()
             if previous is not None:
                 # the command may be called in-process; leaving our handler
                 # installed would turn a later SIGTERM into a stray interrupt

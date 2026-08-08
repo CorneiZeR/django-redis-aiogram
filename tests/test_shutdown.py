@@ -8,6 +8,7 @@ import threading
 import time
 from io import StringIO
 
+import pytest
 from django.core.management import call_command
 from django.test import override_settings
 
@@ -351,3 +352,30 @@ def test_close_refuses_to_tear_down_a_running_loop(caplog):
     instance.close(drain_timeout=0.1)
     assert instance._loop is None
     assert instance._bot is None
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'EVENT_LOG': True})
+def test_the_recorder_is_stopped_even_when_close_raises(monkeypatch, redis_server):
+    """A close() that raises must not also lose the rows the shutdown produced."""
+    from django_redis_aiogram.recorder import recorder
+
+    stopped = []
+    monkeypatch.setattr(recorder, 'stop', lambda *args, **kwargs: stopped.append(True))
+
+    instance = TelegramBot()
+
+    def explode(*args, **kwargs):
+        msg = 'close blew up'
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(instance, 'close', explode)
+    monkeypatch.setattr('django_redis_aiogram.management.commands.start_tgbot.bot', instance)
+
+    command = StartCommand()
+    command.idle_event = threading.Event()
+    command.idle_event.set()
+
+    with pytest.raises(RuntimeError, match='close blew up'):
+        command.handle(mode='webhook', idle=False)
+
+    assert stopped, 'the recorder was not stopped when close() raised'
