@@ -1,5 +1,10 @@
 """The admin: what it shows, what it refuses, and what it will not ask the database."""
 
+import os
+import subprocess
+import sys
+import textwrap
+
 import pytest
 from django.contrib.auth.models import Permission, User
 from django.db import connection
@@ -192,6 +197,45 @@ def test_a_search_by_chat_id_finds_the_rows(client):
 
     assert [row.chat_id for row in narrowed] == [42]
     assert client.get(CHANGELIST, {'q': '42'}).status_code == 200
+
+
+def test_the_admin_module_pulls_no_aiogram():
+    """`admin.autodiscover` imports this module on every boot of any project
+    with the admin installed, so what it imports is paid by processes that
+    never talk to Telegram — including the migration container.
+
+    A subprocess because the suite has aiogram loaded long before this runs.
+    """
+    script = textwrap.dedent("""
+        import sys
+
+        import django
+
+        django.setup()
+
+        from django.contrib import admin
+
+        admin.autodiscover()
+
+        assert 'django_redis_aiogram.admin' in sys.modules, 'the admin never loaded, so nothing was checked'
+        assert 'aiogram' not in sys.modules, 'the admin pulled aiogram into a process that has no bot'
+        print('the admin stays cheap')
+    """)
+    result = subprocess.run(  # noqa: S603 - our own interpreter, and a script written right above
+        [sys.executable, '-c', script],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ,
+            'DJANGO_SETTINGS_MODULE': 'tests.db_settings',
+            'DJANGO_REDIS_AIOGRAM_ENABLED': '0',
+            'DJANGO_REDIS_AIOGRAM_EVENT_LOG': '1',
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert 'the admin stays cheap' in result.stdout
 
 
 @pytest.mark.django_db
