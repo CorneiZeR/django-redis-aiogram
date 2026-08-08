@@ -279,7 +279,11 @@ def test_an_idle_consumer_survives_more_rounds_than_the_deadline(server, redis_u
     with override_settings(TELEGRAM_BOT=settings), caplog.at_level(logging.WARNING):
         server.delete(QUEUE)
         handled = []
-        delivery = BlpopDelivery(handler=lambda **kwargs: handled.append(kwargs))
+        # the consumer also passes correlation_id and queued_at; what this test
+        # is about is that a message still arrives after the idle rounds
+        delivery = BlpopDelivery(
+            handler=lambda function, correlation_id=None, queued_at=0.0, **kwargs: handled.append((function, kwargs))
+        )
         thread = delivery.start_thread()
         try:
             time.sleep(4.5)  # at least four empty rounds at the capped timeout
@@ -291,7 +295,7 @@ def test_an_idle_consumer_survives_more_rounds_than_the_deadline(server, redis_u
             delivery.stop()
             thread.join(timeout=10)
 
-        assert handled == [{'function': 'send_message', 'chat_id': 99, 'text': 'still alive'}], (
+        assert handled == [('send_message', {'chat_id': 99, 'text': 'still alive'})], (
             f'the consumer stopped reading while idling: {handled}'
         )
         failures = [record for record in caplog.records if 'blocking pop failed' in record.message]
