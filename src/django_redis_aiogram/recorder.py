@@ -376,8 +376,13 @@ class EventRecorder:
                 logger.warning('the event writer did not finish in time', extra={'tg_timeout': timeout})
 
     def reset(self) -> None:
-        """Re-read the settings next time; used by override_settings."""
-        self.flush(timeout=1.0)
+        """Re-read the settings next time; used by override_settings.
+
+        It does not flush. Every ``override_settings(TELEGRAM_BOT=...)`` in a
+        consumer's own test suite fires this twice, and waiting for the writer
+        there would put a second on each one. A test that needs its rows calls
+        :meth:`flush`; queued events survive the reset either way.
+        """
         self._enabled = None
         self._kinds = None
 

@@ -182,3 +182,43 @@ def test_the_router_moves_only_this_app():
     assert router.allow_migrate('default', 'django_redis_aiogram') is False
     # None, not False: where somebody else's table belongs is not ours to say
     assert router.allow_migrate('default', 'auth') is None
+
+
+def test_every_setting_is_documented():
+    """A setting nobody can look up is a setting nobody configures on purpose.
+
+    The check-id table has its own test; this is the other half, and it fails
+    when a setting lands without a row on the page.
+    """
+    import pathlib
+
+    from django_redis_aiogram.defaults import DEFAULTS
+
+    page = pathlib.Path(__file__).resolve().parent.parent / 'docs' / 'wiki' / 'Settings.md'
+    text = page.read_text(encoding='utf-8')
+    missing = sorted(name for name in DEFAULTS if f'`{name}`' not in text)
+
+    assert missing == [], f'settings missing from Settings.md: {missing}'
+
+
+def test_every_shipped_kind_is_documented():
+    """The kinds table is what an operator reads to know what a row means."""
+    import pathlib
+
+    page = pathlib.Path(__file__).resolve().parent.parent / 'docs' / 'wiki' / 'Event-log.md'
+    text = page.read_text(encoding='utf-8')
+    missing = sorted(kind.value for kind in EventKind if kind.value not in text)
+
+    assert missing == [], f'kinds missing from Event-log.md: {missing}'
+
+
+def test_every_kind_the_enum_ships_is_registered():
+    """A kind the recorder would refuse, because nothing registered it, is a
+    seam that silently records nothing.
+
+    A subset, not an equality: other tests register kinds of their own, and
+    this must not depend on which of them ran first.
+    """
+    missing = sorted({kind.value for kind in EventKind} - known_kinds())
+
+    assert missing == [], f'shipped but unregistered: {missing}'
