@@ -54,6 +54,22 @@ jobs:
       - run: pip install -e '.[dev]' 'django~=${{ matrix.django-version }}.0'
       - run: python -m pytest -q
 
+  test-db:
+    # the default run ignores tests/db, because tests.settings has no database
+    # on purpose — proving the package boots without one is part of the suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e '.[dev]'
+      - run: python -m pytest -q --ds=tests.db_settings tests/db
+
   test-floors:
     # CI otherwise installs the newest releases, so the declared minimums are
     # never exercised. Exact pins, not 5.2.* — that resolved to 5.2.16

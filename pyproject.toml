@@ -62,6 +62,9 @@ include = ["src", "tests", "README.md", "CHANGELOG.md", "LICENSE"]
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "tests.settings"
 testpaths = ["tests"]
+# tests/db needs a database, and tests.settings deliberately has none; it runs
+# as a second invocation with --ds=tests.db_settings
+addopts = "--ignore=tests/db"
 markers = [
     "integration: needs a real Redis; set DJANGO_REDIS_AIOGRAM_TEST_REDIS_URL to run",
 ]
