@@ -101,12 +101,12 @@ second to the same chat, 20 per minute to a group. Verify with `RATE_LIMIT`
 set to `None`; if it speeds up, tune the numbers rather than removing them, or
 Telegram will start refusing.
 
-## Something imports differently after upgrading
+## `ModuleNotFoundError: No module named 'telegram_bot'`
 
-The package is `django_redis_aiogram`; `telegram_bot` still works as a
-deprecated shim. `TelegramBot` moved to `django_redis_aiogram.client`, and the
-settings module is `django_redis_aiogram.settings`. See
-**[[Migrating from 1.x]]**.
+The 1.x package name was a deprecated shim in 2.x and is gone in 3.0. The
+package is `django_redis_aiogram`: use it in `INSTALLED_APPS`, import from it,
+and note that `TelegramBot` lives in `django_redis_aiogram.client` while the
+settings module is `django_redis_aiogram.settings`. See **[[Upgrading]]**.
 
 ## Getting more detail
 

@@ -23,7 +23,6 @@ src/django_redis_aiogram/
     settings.py     lazy settings with an environment fallback
     redis.py        lazy connection
     routers.py      autodiscover
-src/telegram_bot/   deprecated shim for the 1.x package name, removed in 3.0
 docs/wiki/          the wiki, published from master
 tests/              pytest, fakeredis, no network
 ```
@@ -52,8 +51,9 @@ FSM persistence, keyspace notifications or connection cleanup. It flushes the
 database it is pointed at, so point it at a throwaway one.
 
 The second builds and installs the wheel; run it when you touch packaging,
-Django startup or the shim. Packaging-only work does not need the Redis suite,
-and vice versa.
+Django startup or the public surface — it type-checks a consumer file against
+the installed package, so a moved export fails there and nowhere else.
+Packaging-only work does not need the Redis suite, and vice versa.
 
 ## Rules that are not negotiable
 
@@ -80,8 +80,10 @@ and vice versa.
 - **Anything reaching the network can fail.** `run()` is a thread target: an
   exception escaping it ends the consumer for the life of the container. Log and
   continue, or retry.
-- **The shim stays working.** `telegram_bot` must remain importable and usable in
-  `INSTALLED_APPS` until 3.0.
+- **`tests/test_public_surface.py` is a contract.** It pins the shape of
+  `TelegramBot` that predates 2.0 — attributes, methods and the observer
+  decorators. Adding to that surface is fine; moving or removing anything on it
+  is a breaking change and needs the changelog entry to say so.
 
 ## Style
 

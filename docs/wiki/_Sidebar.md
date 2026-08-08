@@ -18,5 +18,5 @@
 * [[API]]
 * [[Serialization]]
 * [[Troubleshooting]]
-* [[Migrating-from-1.x|Migrating from 1.x]]
+* [[Upgrading]]
 * [[AI-assistants|AI assistants]]

@@ -1,14 +1,35 @@
-# Migrating from 1.x
+# Upgrading
 
-**Almost nothing is required.** `telegram_bot` still imports and still works
-in `INSTALLED_APPS`, with a deprecation warning. The shim is removed in 3.0.
+What each major release changed, newest first. Start at the section for the
+version you are on and work down.
 
-The one exception: if the Redis queue holds messages written by 1.x at the
-moment you deploy, set `'ALLOW_PICKLE': True` for the upgrade window —
-unpickling queue data is code execution, so 2.0 refuses it by default. Remove
-the setting once the queue has drained.
+# From 2.x to 3.0
 
-What follows is what you get by doing the work.
+## The `telegram_bot` package name is gone
+
+2.0 renamed the package and kept `telegram_bot` as a deprecated shim; 3.0
+removes it. A project that upgrades without touching `INSTALLED_APPS` fails at
+startup with `ModuleNotFoundError: No module named 'telegram_bot'`, which is the
+loudest this could reasonably be.
+
+```python
+INSTALLED_APPS = ['django_redis_aiogram']
+```
+
+```python
+from django_redis_aiogram import bot, conf, redis_conn
+from django_redis_aiogram.client import TelegramBot
+```
+
+If you are still on 1.x, do the 2.x section below first — the shim exists only
+in 2.x, so 1.x to 3.0 is one jump with no compatibility layer to lean on.
+
+# From 1.x to 2.x
+
+If the Redis queue holds messages written by 1.x at the moment you deploy, set
+`'ALLOW_PICKLE': True` for the upgrade window — unpickling queue data is code
+execution, so it is refused by default. Remove the setting once the queue has
+drained.
 
 ## Requirements
 
@@ -28,7 +49,8 @@ from django_redis_aiogram.client import TelegramBot
 
 `TelegramBot` moved out of `telegram_bot.telegram_bot`, and the settings module
 is `django_redis_aiogram.settings`. The package exports `bot` and `conf`, which
-would otherwise shadow submodules of the same name.
+would otherwise shadow submodules of the same name. In 2.x the old name kept
+working through a shim; in 3.0 it does not exist at all.
 
 ## 2. Drop placeholder tokens
 

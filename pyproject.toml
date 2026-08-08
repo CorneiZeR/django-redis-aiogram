@@ -54,7 +54,7 @@ Issues = "https://github.com/CorneiZeR/django-redis-aiogram/issues"
 path = "src/django_redis_aiogram/__init__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/django_redis_aiogram", "src/telegram_bot"]
+packages = ["src/django_redis_aiogram"]
 
 [tool.hatch.build.targets.sdist]
 include = ["src", "tests", "README.md", "CHANGELOG.md", "LICENSE"]
@@ -81,7 +81,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["django_redis_aiogram", "telegram_bot"]
+known-first-party = ["django_redis_aiogram"]
 
 [tool.ruff.lint.flake8-annotations]
 # Any is unavoidable for **kwargs passthroughs into aiogram bot methods

@@ -90,12 +90,12 @@ the same pull request as the code they describe and published from `master`.
 | [Logging](https://github.com/CorneiZeR/django-redis-aiogram/wiki/Logging) | the logger and its structured fields |
 | [Serialization](https://github.com/CorneiZeR/django-redis-aiogram/wiki/Serialization) | what can be queued |
 | [Troubleshooting](https://github.com/CorneiZeR/django-redis-aiogram/wiki/Troubleshooting) | symptoms and their usual causes |
-| [Migrating from 1.x](https://github.com/CorneiZeR/django-redis-aiogram/wiki/Migrating-from-1.x) | what changed, and what you must do |
+| [Upgrading](https://github.com/CorneiZeR/django-redis-aiogram/wiki/Upgrading) | what each major release changed, and what you must do |
 | [AI assistants](https://github.com/CorneiZeR/django-redis-aiogram/wiki/AI-assistants) | the brief to hand a coding agent |
 
-Upgrading from 1.x: `telegram_bot` still imports and still works in
-`INSTALLED_APPS` until 3.0, so nothing breaks on the version bump alone. The
-migration page lists the settings that do need attention.
+Upgrading to 3.0: the deprecated `telegram_bot` package name is gone, so
+`INSTALLED_APPS` and imports have to name `django_redis_aiogram`. The upgrading
+page lists everything else that needs attention.
 
 ## Contributing
 

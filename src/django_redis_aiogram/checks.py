@@ -4,7 +4,7 @@ Every check is a row in :data:`CHECKS`: an id, the setting it guards and a rule.
 The id is spelled out in the row, so grepping ``E019`` finds both the check and
 the ``docs/wiki/Settings.md`` entry that explains it.
 
-Check ids moved from ``telegram_bot.EXXX`` to ``django_redis_aiogram.EXXX`` in
+Check ids are ``django_redis_aiogram.EXXX``; they moved from ``telegram_bot.EXXX`` in
 2.0; update ``SILENCED_SYSTEM_CHECKS`` if you silenced any of them.
 """
 

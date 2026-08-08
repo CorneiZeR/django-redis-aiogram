@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+### Breaking
+
+- **The `telegram_bot` package is gone.** 2.0 kept it as a deprecated shim and
+  said it would be removed in 3.0; this is that. Put `django_redis_aiogram` in
+  `INSTALLED_APPS` and import from it — `TelegramBot` is in
+  `django_redis_aiogram.client`, the settings module is
+  `django_redis_aiogram.settings`, and the management commands keep their names.
+  A project that upgrades without touching `INSTALLED_APPS` fails at startup with
+  `ModuleNotFoundError: No module named 'telegram_bot'`, which is the loudest
+  this could reasonably be.
+
+### Documentation
+
+- **Migrating from 1.x** is now **Upgrading**, covering each major release
+  newest first. A 1.x to 3.0 jump has no shim to lean on, so it needed a page
+  rather than a deleted one.
+
 ## 2.2.0 - 2026-08-04
 
 ### Changed

@@ -12,7 +12,7 @@ correctly, short enough to sit in a system prompt or a `CLAUDE.md` /
 `AGENTS.md` / `.cursor/rules` file:
 
 ```text
-Project uses django-redis-aiogram 2.x. Rules:
+Project uses django-redis-aiogram 3.x. Rules:
 
 - Import the shared instance: `from django_redis_aiogram import bot`. Never
   construct TelegramBot() per task or per request — that builds an event loop and
@@ -64,11 +64,12 @@ depending on redis, sharing the same image and `.env` as `back`. Leave
 `DJANGO_REDIS_AIOGRAM_ENABLED` unset on the other services — they queue
 messages."*
 
-**Migrate a 1.x project.** *"This project uses `telegram_bot` 1.x. Move it to
-`django_redis_aiogram` 2.x following the wiki's migration page: replace the
-import, move `parse_mode` into `DEFAULT_BOT_PROPERTIES`, drop the placeholder
-token from settings, use `bot.router` instead of `bot._router`, and set
-`ALLOW_PICKLE` only until the queue has drained."*
+**Migrate an older project.** *"This project imports `telegram_bot`, which
+django-redis-aiogram 3.0 removed. Move it to `django_redis_aiogram` 3.x
+following the wiki's Upgrading page: rename it in `INSTALLED_APPS`, replace the
+imports, move `parse_mode` into `DEFAULT_BOT_PROPERTIES`, drop the placeholder
+token from settings, and use `bot.router` instead of `bot._router`."* See
+**[[Upgrading]]**.
 
 **Debug delivery.** *"Messages are queued but never arrive. Check in this order:
 is the `start_tgbot` container running and is `ENABLED` true there, does
@@ -82,7 +83,7 @@ Each of these has been seen in real integrations, and each is a 1.x habit:
 
 | Mistake | Why it happens | What to do instead |
 | --- | --- | --- |
-| A placeholder `TOKEN` in settings so imports work | 1.x built the bot at import time and crashed without one | Nothing. 2.x imports fine with no credentials |
+| A placeholder `TOKEN` in settings so imports work | 1.x built the bot at import time and crashed without one | Nothing. Since 2.0 it imports fine with no credentials |
 | `parse_mode` in every `send` call | 1.x had no other way | `DEFAULT_BOT_PROPERTIES` once |
 | `DJANGO_REDIS_AIOGRAM_ENABLED=0` on web and Celery | it reads like "do not run the bot here" | Leave it unset; only `start_tgbot` runs the bot |
 | `TelegramBot()` inside a task | the shared instance looks stateful | Import `bot` |
