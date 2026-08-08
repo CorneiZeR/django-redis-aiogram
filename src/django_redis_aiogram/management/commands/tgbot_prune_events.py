@@ -51,7 +51,13 @@ class Command(BaseCommand):
             default=None,
             help="delete rows older than this. Defaults to TELEGRAM_BOT['EVENT_LOG_RETENTION_DAYS'].",
         )
-        parser.add_argument('--chunk', type=int, default=1000, help='rows per transaction (default 1000)')
+        parser.add_argument(
+            '--chunk',
+            type=int,
+            default=1000,
+            help='width of the id range each transaction covers. Rows inside it that are still '
+            'within the window are left alone, so a chunk deletes at most this many (default 1000)',
+        )
         parser.add_argument(
             '--sleep',
             type=float,
@@ -79,8 +85,9 @@ class Command(BaseCommand):
         cutoff = timezone.now() - datetime.timedelta(days=days)
         rows = TelegramEvent.objects.using(alias)
 
-        # one indexed probe, not a scan: everything older than the cutoff lies
-        # at or below this id
+        # where the walk stops: nothing older than the cutoff lives above this
+        # id. Reading it costs one pass over the rows about to be deleted, on
+        # the created_at index — not over the table
         watermark = rows.filter(created_at__lt=cutoff).aggregate(models.Max('id'))['id__max']
         if watermark is None:
             self.stdout.write(f'Nothing older than {cutoff.isoformat()}.')

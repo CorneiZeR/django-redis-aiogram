@@ -91,6 +91,22 @@ def test_it_deletes_in_bounded_ranges_not_one_statement():
 
 @pytest.mark.django_db
 @override_settings(TELEGRAM_BOT={'EVENT_LOG': True})
+def test_the_pause_happens_between_chunks_and_not_after_the_last(monkeypatch):
+    """`--sleep` is the valve for replica lag, and a valve nothing turns is a
+    flag that lies. Patched rather than waited on, so this stays a test about
+    the command and not about the clock."""
+    slept = []
+    monkeypatch.setattr(prune_command.time, 'sleep', slept.append)
+    for _ in range(4):
+        an_event(days_old=40)
+
+    prune(days=30, chunk=1, sleep=0.25)
+
+    assert slept == [0.25, 0.25, 0.25], slept
+
+
+@pytest.mark.django_db
+@override_settings(TELEGRAM_BOT={'EVENT_LOG': True})
 def test_max_chunks_bounds_a_nightly_run():
     for _ in range(6):
         an_event(days_old=40)
