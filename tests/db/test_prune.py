@@ -149,8 +149,8 @@ def test_a_recent_row_inside_the_id_range_survives():
 @pytest.mark.django_db(databases=['default', 'logs'])
 @override_settings(TELEGRAM_BOT={'EVENT_LOG': True, 'EVENT_LOG_DATABASE': 'logs'})
 def test_it_prunes_the_configured_alias_and_leaves_the_other_alone():
-    """Without this, a handle() that ignored --database and always used the
-    configured alias would pass every other test in this file."""
+    """Every other test in this file runs against one alias, so a handle() that
+    pruned whatever `default` happens to be would pass them all."""
     on_logs = TelegramEvent.objects.using('logs').create(
         kind=EventKind.OUTBOUND_SENT.value, correlation_id=new_correlation_id()
     )
@@ -168,18 +168,21 @@ def test_it_prunes_the_configured_alias_and_leaves_the_other_alone():
 
 
 @pytest.mark.django_db(databases=['default', 'logs'])
-@override_settings(TELEGRAM_BOT={'EVENT_LOG': True})
-def test_the_database_flag_overrides_the_setting():
-    on_logs = TelegramEvent.objects.using('logs').create(
-        kind=EventKind.OUTBOUND_SENT.value, correlation_id=new_correlation_id()
-    )
-    TelegramEvent.objects.using('logs').filter(pk=on_logs.pk).update(
-        created_at=timezone.now() - datetime.timedelta(days=40)
-    )
+@override_settings(TELEGRAM_BOT={'EVENT_LOG': True, 'EVENT_LOG_DATABASE': 'logs'})
+def test_the_database_flag_wins_over_the_configured_alias():
+    """The two put in conflict, which is the only arrangement that pins the
+    precedence: with the setting unset, either order picks the same alias."""
+    stale = timezone.now() - datetime.timedelta(days=40)
+    for alias in ('logs', 'default'):
+        row = TelegramEvent.objects.using(alias).create(
+            kind=EventKind.OUTBOUND_SENT.value, correlation_id=new_correlation_id()
+        )
+        TelegramEvent.objects.using(alias).filter(pk=row.pk).update(created_at=stale)
 
-    prune(days=30, sleep=0, database='logs')
+    prune(days=30, sleep=0, database='default')
 
-    assert not TelegramEvent.objects.using('logs').exists()
+    assert not TelegramEvent.objects.using('default').exists(), 'the flag was ignored'
+    assert TelegramEvent.objects.using('logs').exists(), 'it pruned the configured alias instead'
 
 
 @pytest.mark.django_db
