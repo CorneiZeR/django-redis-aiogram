@@ -104,7 +104,13 @@
   still arriving at the hot end. `--sleep` paces it for replicas, `--max-chunks`
   bounds a nightly run, `--dry-run` reports without deleting. With
   `EVENT_LOG_RETENTION_DAYS` unset it deletes nothing and says so — guessing a
-  window would be a data-loss bug — and `W006` warns while it is unset.
+  window would be a data-loss bug — and `W006` warns while it is unset. Two
+  things the wiki page spells out and that bite after the fact: on PostgreSQL
+  the space returns through autovacuum rather than immediately, so a large first
+  prune wants a plain `VACUUM` afterwards (never `FULL`, which takes an
+  exclusive lock); and attaching a `ForeignKey` to `TelegramEvent` disables
+  Django's fast-delete path, so every prune then has to fetch primary keys
+  first.
 - **This package now ships a migration.** Run `manage.py migrate` after
   upgrading whether or not you turn the log on: the table is created either way,
   and creating it later on a live database is the more expensive order. It

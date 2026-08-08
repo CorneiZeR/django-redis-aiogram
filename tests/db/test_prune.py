@@ -12,6 +12,7 @@ from django.utils import timezone
 
 from django_redis_aiogram.enums import EventKind
 from django_redis_aiogram.events import new_correlation_id
+from django_redis_aiogram.management.commands import tgbot_prune_events as prune_command
 from django_redis_aiogram.models import TelegramEvent
 
 
@@ -127,3 +128,64 @@ def test_a_recent_row_inside_the_id_range_survives():
 
     assert TelegramEvent.objects.filter(pk=recent.pk).exists(), 'an id-only delete swept up a recent row'
     assert not TelegramEvent.objects.filter(pk=old.pk).exists()
+
+
+@pytest.mark.django_db(databases=['default', 'logs'])
+@override_settings(TELEGRAM_BOT={'EVENT_LOG': True, 'EVENT_LOG_DATABASE': 'logs'})
+def test_it_prunes_the_configured_alias_and_leaves_the_other_alone():
+    """Without this, a handle() that ignored --database and always used the
+    configured alias would pass every other test in this file."""
+    on_logs = TelegramEvent.objects.using('logs').create(
+        kind=EventKind.OUTBOUND_SENT.value, correlation_id=new_correlation_id()
+    )
+    on_default = TelegramEvent.objects.using('default').create(
+        kind=EventKind.OUTBOUND_SENT.value, correlation_id=new_correlation_id()
+    )
+    stale = timezone.now() - datetime.timedelta(days=40)
+    TelegramEvent.objects.using('logs').filter(pk=on_logs.pk).update(created_at=stale)
+    TelegramEvent.objects.using('default').filter(pk=on_default.pk).update(created_at=stale)
+
+    prune(days=30, sleep=0)
+
+    assert not TelegramEvent.objects.using('logs').exists(), 'the configured alias was not pruned'
+    assert TelegramEvent.objects.using('default').exists(), 'it pruned an alias it was not pointed at'
+
+
+@pytest.mark.django_db(databases=['default', 'logs'])
+@override_settings(TELEGRAM_BOT={'EVENT_LOG': True})
+def test_the_database_flag_overrides_the_setting():
+    on_logs = TelegramEvent.objects.using('logs').create(
+        kind=EventKind.OUTBOUND_SENT.value, correlation_id=new_correlation_id()
+    )
+    TelegramEvent.objects.using('logs').filter(pk=on_logs.pk).update(
+        created_at=timezone.now() - datetime.timedelta(days=40)
+    )
+
+    prune(days=30, sleep=0, database='logs')
+
+    assert not TelegramEvent.objects.using('logs').exists()
+
+
+@pytest.mark.django_db
+@override_settings(TELEGRAM_BOT={'EVENT_LOG': True})
+def test_each_chunk_gets_its_own_transaction(monkeypatch):
+    """Counting the DELETEs is not enough: moving atomic() outside the loop
+    would leave the statement count identical and the lock held throughout."""
+    for _ in range(5):
+        an_event(days_old=40)
+
+    entered = []
+    original = prune_command.transaction.atomic
+
+    def counting_atomic(*args, **kwargs):
+        # Django's own Collector.delete() opens one too, with savepoint=False.
+        # Counting both would report two per chunk and say nothing about ours
+        if 'savepoint' not in kwargs:
+            entered.append(kwargs)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(prune_command.transaction, 'atomic', counting_atomic)
+    prune(days=30, chunk=2, sleep=0)
+
+    assert len(entered) == 3, f'expected one transaction per chunk, got {len(entered)}'
+    assert TelegramEvent.objects.count() == 0

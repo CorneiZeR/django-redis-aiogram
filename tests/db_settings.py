@@ -16,6 +16,8 @@ USE_TZ = True
 # which is what lets a background thread's own connection see the same rows
 DATABASES = {
     'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'},
+    # a second alias, so EVENT_LOG_DATABASE and the router are testable at all
+    'logs': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'},
 }
 
 INSTALLED_APPS = [
