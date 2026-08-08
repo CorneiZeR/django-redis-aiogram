@@ -17,6 +17,24 @@ from django_redis_aiogram import TelegramBot, bot, conf, redis_conn
 from django_redis_aiogram.settings import Settings, parse_bool
 
 
+def test_the_suite_still_boots_without_a_database():
+    """The invariant tests/settings.py exists to hold.
+
+    A migration container installs the app and runs with whatever it has; the
+    package must never make a database a condition of importing it. The
+    database-backed tests live in tests/db under their own settings, so this
+    module has to keep proving the empty case.
+
+    The engine is what gets asked, not whether DATABASES is empty: Django fills
+    an empty setting in with the dummy backend the first time anything touches
+    connections, so the dict stops being empty as soon as something looks.
+    """
+    from django.db import DEFAULT_DB_ALIAS, connections
+
+    engine = connections[DEFAULT_DB_ALIAS].settings_dict.get('ENGINE')
+    assert engine == 'django.db.backends.dummy', f'this suite must have no usable database, got {engine!r}'
+
+
 def test_package_exposes_public_api():
     assert isinstance(bot, TelegramBot)
     assert bot.router is not None
