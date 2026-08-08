@@ -68,7 +68,17 @@ If you touch these areas, keep them covered:
   trap: dropping unset fields silently turns one into an `InputMediaAudio`.
 - **Thread boundaries.** The delivery consumer runs in its own thread while the
   event loop belongs to the polling thread. Never call `create_task` across
-  that boundary.
+  that boundary. There is a third now — the event writer — and it owns its own
+  database connection; nothing else closes it.
+- **A schema change ships with its migration**, in the same pull request. CI
+  runs `makemigrations --check`, and `smoke_install.sh` applies the migration
+  against the built wheel, so a `migrations/` directory left out of packaging
+  fails there rather than in someone's deployment.
+- **A new setting goes in three places**: `DEFAULTS`, a check in `checks.py`,
+  and `docs/wiki/Settings.md`. Miss the first and `W003` warns about it; miss
+  the third and the check-id test fails.
+- **A new event kind is registered in `events.py`** and documented on the Event
+  log page. It is not a schema change, which is the point of the registry.
 
 ## Style
 

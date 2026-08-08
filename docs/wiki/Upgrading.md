@@ -21,6 +21,31 @@ from django_redis_aiogram import bot, conf, redis_conn
 from django_redis_aiogram.client import TelegramBot
 ```
 
+## Deploy the bot container before the web tier
+
+3.0 nests a queued call under an envelope so it can carry a correlation id. The
+3.0 consumer reads both shapes, so a backlog written by 2.x drains — but a **2.x
+consumer handed a 3.0 payload** calls the Telegram method with `__envelope__` as
+a keyword, raises, logs it and swallows it. The message is gone, with nothing
+left to redeliver.
+
+So: upgrade and restart the container running `start_tgbot` **first**, then the
+web and Celery processes. A brief window where the new consumer reads old
+payloads is fine; the reverse is not.
+
+## Run migrate
+
+The package ships one table now, and `migrate` creates it whether or not you
+turn the event log on. Creating it later on a live database is the more
+expensive order, so do it with the upgrade — see **[[Event-log|Event log]]**
+before switching the feature on.
+
+## Everything else that moved
+
+`keyspace` delivery is gone: remove `'DELIVERY': 'keyspace'`, which check `E009`
+now refuses rather than ignoring. The module-level string constants that
+aliased enum members are gone too — import the member and interpolate `.value`.
+
 If you are still on 1.x, do the 2.x section below first — the shim exists only
 in 2.x, so 1.x to 3.0 is one jump with no compatibility layer to lean on.
 

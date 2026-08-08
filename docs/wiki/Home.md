@@ -41,7 +41,7 @@ bot.send(chat_id=CHAT_ID, text='hello')
 
 ---
 
-Requires Python 3.10–3.14, Django 5.2+, aiogram 3.30+.
+Requires Python 3.10–3.14, Django 5.2+, aiogram 3.30+, redis 6.2+.
 [Source](https://github.com/CorneiZeR/django-redis-aiogram) ·
 [PyPI](https://pypi.org/project/django-redis-aiogram/) ·
 [Changelog](https://github.com/CorneiZeR/django-redis-aiogram/blob/master/CHANGELOG.md)

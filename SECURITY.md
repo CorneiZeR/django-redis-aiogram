@@ -10,8 +10,27 @@ rather than opening a public issue.
 
 | Version | Supported |
 |---------|-----------|
-| 2.x     | yes       |
+| 3.x     | yes       |
+| 2.x     | no        |
 | 1.x     | no        |
+
+## The event log stores what the bot did
+
+`TELEGRAM_BOT['EVENT_LOG']` is off by default. Turning it on writes a row per
+event, and two things follow from that.
+
+Message bodies are **not** stored unless `EVENT_LOG_PAYLOAD` is `'full'`. That
+default is deliberate: enabling a log should not silently start collecting
+personal data, and a table holding message text is a subject-access and
+retention obligation, not just disk.
+
+Credentials are stripped from the `detail` and `error` columns as a row is
+built, not only where the row is produced. The realistic leak is not a caller
+passing a token: the token is in the Telegram API URL, aiogram puts that URL in
+its exception messages, and those messages are what an `error` column holds.
+
+The table grows without bound until `manage.py tgbot_prune_events` runs. Set
+`EVENT_LOG_RETENTION_DAYS` and schedule it; `W006` warns while it is unset.
 
 ## The Redis queue is a trust boundary
 

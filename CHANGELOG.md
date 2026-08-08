@@ -1,6 +1,17 @@
 # Changelog
 
-## Unreleased
+## 3.0.0 - 2026-08-09
+
+Two kinds of change at once: everything 2.0 kept for compatibility is gone, and
+the package can now record what it did to a table. The removals are mechanical
+and `manage.py check` names each one. The event log is opt-in and off by
+default.
+
+**Upgrade the bot container before the web tier.** Queued payloads now carry an
+envelope, and a 2.x consumer handed one loses the message.
+
+**Run `manage.py migrate`.** The package ships a table for the first time,
+created whether or not you turn the log on.
 
 ### Breaking
 
