@@ -269,3 +269,28 @@ def test_a_dropped_connection_is_retried_once_on_a_fresh_one(paused_writer):
 
     assert len(attempts) == 2, 'the batch was not retried on a fresh connection'
     assert TelegramEvent.objects.filter(chat_id=8).count() == 1
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT={**ON, 'WORKER_NAME': 'web-3'})
+def test_every_row_says_which_process_recorded_it(paused_writer):
+    """The column is documented as "which container recorded it", and before
+    this only the consumer filled it — so the rows that say a message actually
+    went out named nobody."""
+    recorder = EventRecorder()
+    recorder.record(an_event())
+    recorder.drain_once()
+
+    assert TelegramEvent.objects.get().worker == 'web-3'
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT={**ON, 'WORKER_NAME': 'web-3'})
+def test_a_producer_that_names_itself_keeps_its_name(paused_writer):
+    """The consumer records on behalf of the worker it is, so a name already on
+    the event is the answer, not something to overwrite."""
+    recorder = EventRecorder()
+    recorder.record(an_event(worker='bot-1'))
+    recorder.drain_once()
+
+    assert TelegramEvent.objects.get().worker == 'bot-1'

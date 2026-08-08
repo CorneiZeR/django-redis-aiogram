@@ -10,11 +10,13 @@ and of anything that reads Django settings at import time.
 """
 
 import os
+import socket
 import time
 import uuid
 from dataclasses import dataclass
 
 from django_redis_aiogram.enums import EventKind
+from django_redis_aiogram.settings import conf
 
 #: the width of the model's ``kind`` column; a longer code would be truncated by
 #: MySQL in non-strict mode and rejected in strict mode, so it is refused here
@@ -88,6 +90,19 @@ def new_correlation_id() -> uuid.UUID:
     raw[6] = (raw[6] & 0x0F) | 0x70
     raw[8] = (raw[8] & 0x3F) | 0x80
     return uuid.UUID(bytes=bytes(raw))
+
+
+def worker_identity() -> str:
+    """Name this process, for the in-flight list and for the rows it records.
+
+    Defaults to the hostname, which a container keeps across restarts — that is
+    what lets a restarted worker find its own interrupted messages. Set
+    WORKER_NAME when several workers share a host.
+    """
+    configured = conf.get('WORKER_NAME')
+    if configured:
+        return str(configured)
+    return os.environ.get('HOSTNAME') or socket.gethostname()
 
 
 register_kind(EventKind.OUTBOUND_QUEUED.value, 'Queued')

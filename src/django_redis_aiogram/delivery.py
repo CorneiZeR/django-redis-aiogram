@@ -15,8 +15,6 @@ pops, which is the 1.x at-most-once behaviour, and says so in the log.
 """
 
 import logging
-import os
-import socket
 import threading
 import time
 from abc import ABC, abstractmethod
@@ -27,6 +25,7 @@ from redis.exceptions import ResponseError
 
 from django_redis_aiogram.api import check_function
 from django_redis_aiogram.enums import DeliveryKind
+from django_redis_aiogram.events import worker_identity
 from django_redis_aiogram.redis import as_bytes, get_redis, read_timeout
 from django_redis_aiogram.serializers import PickleReadRefusedError, SerializationError, loads
 from django_redis_aiogram.settings import conf
@@ -34,19 +33,6 @@ from django_redis_aiogram.settings import conf
 logger = logging.getLogger('django_redis_aiogram')
 
 Handler = Callable[..., Any]
-
-
-def worker_identity() -> str:
-    """Name this worker's processing list.
-
-    Defaults to the hostname, which a container keeps across restarts — that is
-    what lets a restarted worker find its own interrupted messages. Set
-    WORKER_NAME when several workers share a host.
-    """
-    configured = conf.get('WORKER_NAME')
-    if configured:
-        return str(configured)
-    return os.environ.get('HOSTNAME') or socket.gethostname()
 
 
 class Delivery(ABC):

@@ -25,13 +25,13 @@ import queue
 import threading
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from django.core.signals import setting_changed
 
 from django_redis_aiogram.enums import EventKind
-from django_redis_aiogram.events import known_kinds, new_correlation_id
+from django_redis_aiogram.events import known_kinds, new_correlation_id, worker_identity
 from django_redis_aiogram.settings import SETTINGS_NAME, coerce_bool, conf
 
 logger = logging.getLogger('django_redis_aiogram')
@@ -97,6 +97,7 @@ class EventRecorder:
         self._stopping = threading.Event()
         self._enabled: bool | None = None
         self._kinds: frozenset[str] | None = None
+        self._worker: str | None = None
         self._owner_pid = os.getpid()
         self._fork_hook = False
         self._dropped = 0
@@ -112,6 +113,15 @@ class EventRecorder:
         if enabled is None:
             enabled = self._enabled = self._read_flag()
         return enabled
+
+    @property
+    def worker(self) -> str:
+        """Name the process recording, cached: gethostname() is a system call."""
+        # one read, kept local, for the same reason `enabled` does it
+        worker = self._worker
+        if worker is None:
+            worker = self._worker = worker_identity()
+        return worker
 
     def _read_flag(self) -> bool:
         """Read the flag once, treating an unreadable one as off."""
@@ -138,6 +148,10 @@ class EventRecorder:
         try:
             if not self.wants(event.kind):
                 return
+            if not event.worker:
+                # every row says which process recorded it, and only the
+                # consumer knew its own name before
+                event = replace(event, worker=self.worker)
             if coerce_bool(conf['EVENT_LOG_SYNC'], f"{SETTINGS_NAME}['EVENT_LOG_SYNC']"):
                 self._write([event])
                 return
@@ -385,6 +399,7 @@ class EventRecorder:
         """
         self._enabled = None
         self._kinds = None
+        self._worker = None
 
 
 recorder = EventRecorder()
