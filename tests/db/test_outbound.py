@@ -74,6 +74,7 @@ def test_a_delivered_send_records_the_id_telegram_gave():
     assert row.message_id == Sent.message_id, 'the aiogram return value was thrown away again'
     assert row.chat_id == 7
     assert row.duration_ms is not None
+    assert row.worker, 'the row does not say which container sent it'
 
 
 @pytest.mark.django_db(transaction=True)
