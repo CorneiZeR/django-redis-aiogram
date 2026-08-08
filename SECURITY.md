@@ -24,23 +24,25 @@ Keep Redis reachable only from your own services, and require authentication.
 
 ### Pickle
 
-1.x serialized queue payloads with `pickle`, which turns "can write to the
-list" into "can execute code in the bot container". 2.0 defaults to JSON and
-**refuses pickled payloads by default**.
+Unpickling queue data turns "can write to the list" into "can execute code in
+the bot container". Payloads are JSON, and pickled ones are **refused by
+default**.
 
-If the queue still holds messages written by 1.x at the moment you upgrade,
-open the door for the upgrade window only, then close it again:
+`ALLOW_PICKLE` lifts the refusal. It exists as the escape hatch for payloads
+JSON cannot describe — not as a migration aid — so treat turning it on as
+extending the bot container's trust boundary to everything that can write to
+the Redis list:
 
 ```python
 TELEGRAM_BOT = {
-    'ALLOW_PICKLE': True,  # remove once the queue has drained
+    'ALLOW_PICKLE': True,
 }
 ```
 
 Setting `'SERIALIZER': 'pickle'` is not enough on its own: the reader still
 refuses pickled payloads, so writing them means `'ALLOW_PICKLE': True` as well.
 Only do so if you must queue objects JSON cannot represent, and only with a
-trusted Redis.
+Redis nothing untrusted can write to.
 
 Decoding a JSON payload will only instantiate `aiogram.types` members that
 subclass `TelegramObject`; a payload cannot name an arbitrary import path. Of

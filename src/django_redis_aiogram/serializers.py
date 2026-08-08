@@ -1,7 +1,8 @@
 """Serialization of queued aiogram calls.
 
-1.x pickled the queue payload, which makes anything able to write to the Redis
-list able to execute code in the bot container. JSON is the default now.
+JSON is the format. Pickle stays behind ``ALLOW_PICKLE`` as the escape hatch for
+payloads JSON cannot describe, off by default because unpickling the queue makes
+anything able to write to the Redis list able to execute code in the container.
 
 Two aiogram details make plain ``model_dump(mode='json')`` insufficient:
 
@@ -126,11 +127,11 @@ class PickleReadRefusedError(SerializationError):
     """A pickled payload was read while ``ALLOW_PICKLE`` was off."""
 
     def __init__(self) -> None:
-        """Explain the refusal and the upgrade window that lifts it."""
+        """Explain the refusal and the setting that lifts it."""
         super().__init__(
-            'Refusing to unpickle a queued payload. If this queue still holds '
-            "messages written by 1.x, set TELEGRAM_BOT['ALLOW_PICKLE'] = True "
-            'for the upgrade window and remove it once the queue has drained.',
+            'Refusing to unpickle a queued payload, because unpickling queue data '
+            "is code execution. Set TELEGRAM_BOT['ALLOW_PICKLE'] = True to accept "
+            'it, and only on a queue nothing untrusted can write to.',
         )
 
 

@@ -38,7 +38,8 @@ Project uses django-redis-aiogram 3.x. Rules:
   DJANGO_REDIS_AIOGRAM_ENABLED=0 on web or Celery processes: it turns their
   sends into no-ops and the messages are dropped.
 - Queued payloads are JSON. Keep SERIALIZER='json'; pickle is refused on read
-  unless ALLOW_PICKLE is explicitly turned on for a 1.x drain.
+  unless ALLOW_PICKLE is explicitly turned on. That is the escape hatch for
+  payloads JSON cannot describe, and it lets queue writers execute code.
 - A queued send cannot raise in the caller. Failures are logged by the worker.
   Use bot.send_raw with RAISE_EXCEPTION only when the caller must see the error.
 - `python manage.py check` validates the settings; treat its E0xx/W0xx output as

@@ -20,8 +20,8 @@ DEFAULTS: dict[str, Any] = {
     'DELIVERY': 'blpop',
     # either json or pickle, json recommended
     'SERIALIZER': 'json',
-    # unpickling queued data means whoever writes the queue can execute code
-    # in the bot container; enable only for the 1.x upgrade window, then drop it
+    # the escape hatch for payloads JSON cannot describe. Off by default because
+    # unpickling queued data lets whoever writes the queue execute code
     'ALLOW_PICKLE': False,
     # 'redis', 'memory', or a dotted path to a BaseStorage subclass
     'FSM_STORAGE': 'redis',
