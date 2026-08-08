@@ -83,7 +83,7 @@ which carries outbound messages in both modes — see **[[Webhook]]**.
 | `HEARTBEAT_INTERVAL` | `10` | Seconds between the consumer's reports; the key lives three times as long |
 | `HEALTHCHECK_MAX_QUEUE` | `0` | Longest queue still considered healthy; the check fails only above it, and `0` disables it |
 | `SERIALIZER` | `'json'` | `'json'` or `'pickle'` — see **[[Serialization]]** |
-| `ALLOW_PICKLE` | `False` | Migration-only opt-in: `loads()` unpickles without restriction, so enable it for the upgrade window and only on a queue nothing untrusted can write |
+| `ALLOW_PICKLE` | `False` | Let the reader accept pickled payloads. Needed to *read* them at all, and needed alongside `SERIALIZER: 'pickle'` to write them. Unpickling queue data is code execution, so only on a queue nothing untrusted can write to |
 
 ## Rate limits
 
