@@ -125,9 +125,8 @@ class TelegramEventAdmin(ModelAdminBase):
 
     list_display = ('created_at', 'kind', 'function', 'chat_id', 'thread', 'worker')
     list_filter = (KindFilter, OutcomeFilter)
-    # `=` means exact, so both lookups use their index; without it the admin
-    # searches with LIKE '%term%', which no index can serve
-    search_fields = ('=correlation_id', '=chat_id')
+    # what makes the box appear; the lookup itself is get_search_results below
+    search_fields = ('correlation_id', 'chat_id')
     search_help_text = 'An exact correlation id, or an exact chat id.'
     show_full_result_count = False
     paginator = BoundedPaginator
@@ -176,18 +175,36 @@ class TelegramEventAdmin(ModelAdminBase):
 
     def get_search_results(
         self,
-        request: HttpRequest,
+        _request: HttpRequest,
         queryset: QuerySet[TelegramEvent],
         search_term: str,
     ) -> tuple[QuerySet[TelegramEvent], bool]:
-        """Refuse a term the columns cannot hold, rather than raising a 500.
+        """Match the two typed columns exactly, each on its own index.
 
-        Both searchable columns are typed; an exact lookup for 'hello' against a
-        uuid column raises out of the changelist on PostgreSQL.
+        Django's own search cannot: even the `=` prefix builds `iexact`, which
+        renders as `UPPER(correlation_id::text) = ...` — a function on the
+        column, so no index applies and the search becomes a sequential scan of
+        a table sized by traffic. Typed equality is what the indexes are for.
+
+        The cost of typed equality is that a term the column cannot hold raises
+        while the query is built, which is why anything neither column can hold
+        is answered with nothing rather than handed to the database.
         """
-        if search_term and not _is_searchable(search_term):
+        term = search_term.strip()
+        if not term:
+            return queryset, False
+        if term.lstrip('-').isdigit():
+            number = int(term)
+            # a chat_id is a BIGINT; a longer number is not one, and asking
+            # would be an error from the backend rather than an empty page
+            if -(2**63) <= number < 2**63:
+                return queryset.filter(chat_id=number), False
             return queryset.none(), False
-        return super().get_search_results(request, queryset, search_term)
+        try:
+            identifier = uuid.UUID(term)
+        except ValueError:
+            return queryset.none(), False
+        return queryset.filter(correlation_id=identifier), False
 
     @admin.display(description='detail')
     def pretty_detail(self, obj: TelegramEvent) -> str:
@@ -243,17 +260,6 @@ class TelegramEventAdmin(ModelAdminBase):
     def has_module_permission(self, request: HttpRequest) -> bool:
         """Keep the app off the admin index entirely while the log is off."""
         return log_is_on() and bool(super().has_module_permission(request))
-
-
-def _is_searchable(term: str) -> bool:
-    """Whether a term could match either typed column."""
-    if term.lstrip('-').isdigit():
-        return True
-    try:
-        uuid.UUID(term)
-    except ValueError:
-        return False
-    return True
 
 
 def register_event_log_admin(site: admin.AdminSite | None = None) -> None:

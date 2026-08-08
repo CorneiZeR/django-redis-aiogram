@@ -152,12 +152,12 @@ def test_the_stages_of_one_message_are_shown_together(client):
 @pytest.mark.django_db
 @override_settings(TELEGRAM_BOT=ON)
 def test_a_search_the_columns_cannot_hold_is_refused_before_the_query(client):
-    """Both searchable columns are typed, and PostgreSQL raises out of the
-    changelist rather than matching nothing when a term cannot be cast.
+    """Typed equality raises while the query is built — `ValidationError` for
+    the uuid column, `ValueError` for the integer one, on every backend — so a
+    term neither column can hold has to be answered before it is used.
 
-    Asserted on the refusal itself rather than on a 200: SQLite matches nothing
-    quietly, so a status code would pass here with the guard deleted and fail
-    for a project running the backend the guard is for.
+    Asserted on the refusal itself rather than on a 200, which the changelist
+    would return either way.
     """
     an_event()
     client.force_login(a_reader('searcher', 'view_telegramevent'))
@@ -181,6 +181,43 @@ def test_a_search_by_correlation_id_finds_the_row(client):
     body = client.get(CHANGELIST, {'q': str(identifier)}).content.decode()
 
     assert '1 result' in body or str(identifier)[:8] in body
+
+
+@pytest.mark.django_db
+@override_settings(TELEGRAM_BOT=ON)
+def test_a_search_asks_the_column_and_not_a_function_of_it(client):
+    """The regression that made the search a sequential scan.
+
+    Django builds `iexact` even from the `=` prefix, and that renders as
+    `UPPER(correlation_id::text) = ...` on PostgreSQL and a `LIKE` on SQLite —
+    either way something other than the column, so neither index applies. On a
+    table sized by traffic that is the one query the page exists for, done the
+    one way it must not be.
+    """
+    an_event()
+    admin_instance = TelegramEventAdmin(TelegramEvent, None)
+
+    by_id, _ = admin_instance.get_search_results(None, TelegramEvent.objects.all(), str(new_correlation_id()))
+    by_chat, _ = admin_instance.get_search_results(None, TelegramEvent.objects.all(), '42')
+
+    for sql in (str(by_id.query), str(by_chat.query)):
+        where = sql.upper().split('WHERE', 1)[1]
+        assert 'UPPER' not in where, sql
+        assert '::TEXT' not in where, sql
+        assert 'LIKE' not in where, sql
+
+
+@pytest.mark.django_db
+@override_settings(TELEGRAM_BOT=ON)
+def test_a_chat_id_too_large_for_the_column_is_refused(client):
+    """int() accepts any number of digits and BIGINT does not; asking anyway is
+    an error from the backend rather than an empty page."""
+    an_event()
+    admin_instance = TelegramEventAdmin(TelegramEvent, None)
+
+    narrowed, _ = admin_instance.get_search_results(None, TelegramEvent.objects.all(), '9' * 40)
+
+    assert narrowed.query.is_empty()
 
 
 @pytest.mark.django_db
