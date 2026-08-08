@@ -9,13 +9,14 @@ import threading
 import time
 
 import pytest
-from django.db import DatabaseError
+from django.db import DatabaseError, OperationalError
+from django.db.models import QuerySet
 from django.test import override_settings
 
 from django_redis_aiogram.enums import EventKind
 from django_redis_aiogram.eventlog import write_batch
 from django_redis_aiogram.models import TelegramEvent
-from django_redis_aiogram.recorder import Event, EventRecorder
+from django_redis_aiogram.recorder import FAILURE_LIMIT, Event, EventRecorder, recorder
 
 ON = {'EVENT_LOG': True}
 
@@ -71,20 +72,23 @@ def test_a_poison_row_costs_only_itself(paused_writer):
     for chat_id in (1, 2, 3):
         recorder.record(an_event(chat_id=chat_id))
 
-    original = TelegramEvent.objects.bulk_create
+    # QuerySet, not Manager: write_batch goes through objects.using(alias),
+    # and patching the manager leaves the real insert in place
+    original = QuerySet.bulk_create
     calls = []
 
-    def refuse_the_batch(rows, *args, **kwargs):
+    def refuse_the_batch(self, rows, *args, **kwargs):
         calls.append(len(rows))
         if len(calls) == 1:
             msg = 'no'
             raise DatabaseError(msg)
-        return original(rows, *args, **kwargs)
+        return original(self, rows, *args, **kwargs)
 
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(TelegramEvent.objects.__class__, 'bulk_create', refuse_the_batch, raising=False)
+        patch.setattr(QuerySet, 'bulk_create', refuse_the_batch)
         recorder.drain_once()
 
+    assert calls, 'the refusal never fired, so nothing was tested'
     assert TelegramEvent.objects.count() == 3, 'the whole batch was lost over one refusal'
 
 
@@ -203,3 +207,65 @@ def test_flush_waits_for_the_write_not_for_the_queue():
             assert TelegramEvent.objects.filter(chat_id=77).count() == 1
         finally:
             recorder.stop(timeout=5)
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT={**ON, 'EVENT_LOG_BATCH_SIZE': 2})
+def test_the_batch_size_is_what_one_insert_carries(paused_writer):
+    """Otherwise a batch of one is indistinguishable from a batch of hundreds,
+    and the setting is a number nobody has ever exercised."""
+    for chat_id in range(5):
+        recorder.record(an_event(chat_id=chat_id))
+
+    # _collect is what caps a batch; drain_once deliberately takes everything
+    batch, _ = recorder._collect(recorder._queue)
+
+    assert len(batch) == 2, f'the batch size was ignored: {len(batch)}'
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT=ON)
+def test_a_batch_the_database_refuses_repeatedly_suspends_rather_than_hammers(paused_writer, caplog):
+    """Draining and discarding keeps producers from filling up while the
+    database is down, and stops the writer retrying a dead server every second."""
+    recorder = EventRecorder()
+    recorder.record(an_event(chat_id=1))
+
+    failures = 0
+    with pytest.MonkeyPatch.context() as patch, caplog.at_level('ERROR', logger='django_redis_aiogram'):
+
+        def refuse(_batch):
+            msg = 'database is down'
+            raise RuntimeError(msg)
+
+        patch.setattr(EventRecorder, '_write', staticmethod(refuse))
+        for _ in range(FAILURE_LIMIT):
+            failures, blocked = recorder._flush([an_event()], failures=failures)
+
+    assert blocked > 0, 'the writer never backed off'
+    assert 'suspended after repeated failures' in caplog.text
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT=ON)
+def test_a_dropped_connection_is_retried_once_on_a_fresh_one(paused_writer):
+    """A management command sees none of the request signals that recycle a
+    connection, so the first write after a database restart hits a dead handle."""
+    recorder.record(an_event(chat_id=8))
+
+    attempts = []
+    original = QuerySet.bulk_create
+
+    def dead_first_time(self, rows, *args, **kwargs):
+        attempts.append(True)
+        if len(attempts) == 1:
+            msg = 'server closed the connection unexpectedly'
+            raise OperationalError(msg)
+        return original(self, rows, *args, **kwargs)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(QuerySet, 'bulk_create', dead_first_time)
+        recorder.drain_once()
+
+    assert len(attempts) == 2, 'the batch was not retried on a fresh connection'
+    assert TelegramEvent.objects.filter(chat_id=8).count() == 1

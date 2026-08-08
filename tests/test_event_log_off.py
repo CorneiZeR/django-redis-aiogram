@@ -166,6 +166,13 @@ def test_the_router_stays_quiet_without_an_alias():
 
 
 @override_settings(TELEGRAM_BOT={'EVENT_LOG_DATABASE': 'logs'})
+def test_the_router_has_no_opinion_on_relations():
+    """None, not True: this app owns no relation in either direction, and
+    claiming otherwise would let Django allow one across databases."""
+    assert TelegramEventLogRouter().allow_relation(TelegramEvent(), TelegramEvent()) is None
+
+
+@override_settings(TELEGRAM_BOT={'EVENT_LOG_DATABASE': 'logs'})
 def test_the_router_moves_only_this_app():
     router = TelegramEventLogRouter()
 
