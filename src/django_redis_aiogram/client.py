@@ -25,7 +25,7 @@ from django.utils.module_loading import import_string
 from redis import Redis
 
 from django_redis_aiogram.api import check_function
-from django_redis_aiogram.enums import DeliveryKind, StorageKind
+from django_redis_aiogram.enums import StorageKind
 from django_redis_aiogram.redis import get_redis
 from django_redis_aiogram.serializers import get_serializer
 from django_redis_aiogram.settings import SETTINGS_NAME, coerce_bool, conf
@@ -459,13 +459,10 @@ class TelegramBot:
             logger.debug('queueing skipped: bot disabled', extra={'tg_function': function})
             return
 
-        connection = get_redis()
-        connection.rpush(
+        get_redis().rpush(
             conf['REDIS_MESSAGES_KEY'],
             get_serializer().dumps({'function': function, **kwargs}),
         )
-        if conf['DELIVERY'] == DeliveryKind.KEYSPACE:
-            connection.set(conf['REDIS_EXP_KEY'], '1', ex=conf['REDIS_EXP_TIME'])
 
     def message(self, *args: Any, **kwargs: Any) -> CallbackType:
         """Return a decorator registering a handler for the 'message' observer."""

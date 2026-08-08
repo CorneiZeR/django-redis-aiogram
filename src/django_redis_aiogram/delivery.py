@@ -1,22 +1,19 @@
-"""Backends that move queued messages from Redis to Telegram.
+"""The backend that moves queued messages from Redis to Telegram.
 
-``blpop`` is the default: a blocking pop needs no server configuration, works
-on any database index, delivers immediately and leaves messages in the list
-while the worker is down.
+``blpop`` is the only consumer: a blocking pop needs no server configuration,
+works on any database index, delivers immediately and leaves messages in the
+list while the worker is down. The keyspace consumer 1.x used was removed in
+3.0 — it needed ``CONFIG SET notify-keyspace-events``, which managed Redis
+providers usually refuse, and it could not deliver before the TTL elapsed.
 
-``keyspace`` reproduces the 1.x mechanism — write a key with a TTL and react to
-its expiry event. It needs ``CONFIG SET notify-keyspace-events``, which managed
-Redis providers usually refuse, and it only delivers once the TTL elapses.
-
-Both consume crash-safely where the server allows it: a message is moved to a
+It consumes crash-safely where the server allows it: a message is moved to a
 processing list while it is being sent and removed afterwards, so a worker
 killed mid-send leaves it behind to be reclaimed on the next start. That makes
 delivery at-least-once — after a crash a message may be sent twice. Servers
-older than Redis 6.2 lack ``LMOVE``; there the consumers fall back to plain
-pops, which is the 1.x at-most-once behaviour, and say so in the log.
+older than Redis 6.2 lack ``LMOVE``; there the consumer falls back to plain
+pops, which is the 1.x at-most-once behaviour, and says so in the log.
 """
 
-import contextlib
 import logging
 import os
 import socket
@@ -26,12 +23,11 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from typing import Any
 
-from redis.client import PubSub
 from redis.exceptions import ResponseError
 
 from django_redis_aiogram.api import check_function
 from django_redis_aiogram.enums import DeliveryKind
-from django_redis_aiogram.redis import as_bytes, get_db_index, get_redis, read_timeout
+from django_redis_aiogram.redis import as_bytes, get_redis, read_timeout
 from django_redis_aiogram.serializers import PickleReadRefusedError, SerializationError, loads
 from django_redis_aiogram.settings import conf
 
@@ -44,7 +40,6 @@ Handler = Callable[..., Any]
 # aliases carry the plain strings 2.0 shipped: a (str, Enum) member would
 # interpolate as its qualified name on newer Pythons, and these are public
 BLPOP_DELIVERY = DeliveryKind.BLPOP.value
-KEYSPACE_DELIVERY = DeliveryKind.KEYSPACE.value
 
 
 def worker_identity() -> str:
@@ -285,90 +280,9 @@ class BlpopDelivery(Delivery):
                 self.acknowledge(raw)
 
 
-class KeyspaceDelivery(Delivery):
-    """Waits for the expiry event of the key each send writes alongside."""
-
-    def run(self) -> None:
-        """Read the expiry channel until :meth:`stop` is called."""
-        channel = f'__keyevent@{get_db_index()}__:expired'
-        pubsub: PubSub | None = None
-        reclaimed = False
-        try:
-            while not self._stop.is_set():
-                try:
-                    self.heartbeat()
-                    if pubsub is None:
-                        pubsub = self._subscribe(channel)
-                    if not reclaimed:
-                        reclaimed = self.reclaim()
-                        if reclaimed:
-                            # no expiry event announces what the retry put back
-                            self.consume_pending()
-                    pubsub.get_message(timeout=1.0)
-                except Exception:  # noqa: PERF203 - catching per iteration is the resilience this loop exists for
-                    # setting up is as much a network call as reading: a Redis
-                    # that is not up yet must not end the consumer thread
-                    logger.exception('keyspace consumer error, retrying')
-                    self._close(pubsub)
-                    pubsub = None
-                    self._stop.wait(1.0)
-        finally:
-            self._close(pubsub)
-
-    def _subscribe(self, channel: str) -> PubSub:
-        self._enable_notifications()
-        pubsub: PubSub = get_redis().pubsub(  # type: ignore[no-untyped-call]
-            ignore_subscribe_messages=True
-        )
-        pubsub.subscribe(**{channel: self._on_expired})
-        logger.info(
-            'delivery started',
-            extra={
-                'tg_delivery': KEYSPACE_DELIVERY,
-                'tg_channel': channel,
-                'tg_crash_safe': self._reliable,
-            },
-        )
-        return pubsub
-
-    @staticmethod
-    def _close(pubsub: PubSub | None) -> None:
-        if pubsub is not None:
-            with contextlib.suppress(Exception):
-                pubsub.close()
-
-    def _enable_notifications(self) -> None:
-        connection = get_redis()
-        try:
-            current = connection.config_get('notify-keyspace-events')
-            flags = str(current.get('notify-keyspace-events', ''))
-            if 'E' in flags and ('x' in flags or 'A' in flags):
-                return
-            connection.config_set('notify-keyspace-events', f'{flags}Ex')
-        except ResponseError as error:
-            logger.warning(
-                'cannot enable keyspace notifications; enable them server-side or '
-                "switch TELEGRAM_BOT['DELIVERY'] to 'blpop'",
-                extra={'tg_error': str(error)},
-            )
-        except Exception:
-            # a refusal is normal; anything else is retried by the loop above,
-            # but it must be logged where it happened
-            logger.exception('could not probe keyspace notifications, continuing')
-
-    def _on_expired(self, message: dict[str, Any]) -> None:
-        data = message['data']
-        # pubsub hands back str when the URL enables decode_responses
-        text = data.decode('utf-8') if isinstance(data, bytes) else str(data)
-        if text != conf['REDIS_EXP_KEY']:
-            return
-        self.consume_pending()
-
-
 # keyed by the enum's value, so the keys are the plain strings the setting holds
 DELIVERIES: dict[str, type[Delivery]] = {
     DeliveryKind.BLPOP.value: BlpopDelivery,
-    DeliveryKind.KEYSPACE.value: KeyspaceDelivery,
 }
 
 

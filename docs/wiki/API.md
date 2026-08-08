@@ -135,7 +135,7 @@ TELEGRAM_BOT = {
 
 | | Members |
 | --- | --- |
-| `DeliveryKind` | `BLPOP`, `KEYSPACE` |
+| `DeliveryKind` | `BLPOP` |
 | `SerializerKind` | `JSON`, `PICKLE` |
 | `StorageKind` | `REDIS`, `MEMORY` |
 | `UpdateMode` | `POLLING`, `WEBHOOK` |

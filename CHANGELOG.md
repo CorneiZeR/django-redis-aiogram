@@ -12,6 +12,20 @@
   A project that upgrades without touching `INSTALLED_APPS` fails at startup with
   `ModuleNotFoundError: No module named 'telegram_bot'`, which is the loudest
   this could reasonably be.
+- **`keyspace` delivery is gone**, and with it `REDIS_EXP_KEY` and
+  `REDIS_EXP_TIME`. It reproduced the 1.x mechanism — write a key with a TTL and
+  react to its expiry event — and needed `CONFIG SET notify-keyspace-events`,
+  which managed Redis providers refuse; it also could not deliver anything
+  before the TTL elapsed. `blpop` has been the default since 2.0, needs no
+  server configuration and delivers as the message arrives. Remove
+  `'DELIVERY': 'keyspace'` from your settings: the value is now refused by check
+  `E009` rather than silently ignored, so `manage.py check` tells you before the
+  worker starts. Checks `E008` and `E013` are gone with the settings they
+  guarded, and their ids are not reused — a `SILENCED_SYSTEM_CHECKS` entry
+  naming one is now dead but harmless.
+- `DeliveryKind` has one member, `BLPOP`. `DELIVERY` stays as a setting so a
+  stale `'keyspace'` produces an error naming the legal value, rather than an
+  unknown-key warning and a silently different delivery mode.
 
 ### Documentation
 

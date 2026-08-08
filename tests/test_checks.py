@@ -98,7 +98,10 @@ DOCUMENTED = re.compile('`([EW]\\d{3})`(?:\\s*[\u2013-]\\s*`([EW]\\d{3})`)?')
 
 # Every id the checks can emit. Two settings dicts are needed: a wrong type
 # stops a check before it can reach its value-level complaint.
-EXPECTED_IDS = {f'E{code:03d}' for code in range(1, 31)} | {'W001', 'W002', 'W003', 'W004'}
+# E008 and E013 guarded the keyspace settings 3.0 removed. Their ids are gone
+# rather than reused: a project silencing one must not start silencing a new rule
+RETIRED_IDS = {'E008', 'E013'}
+EXPECTED_IDS = ({f'E{code:03d}' for code in range(1, 31)} - RETIRED_IDS) | {'W001', 'W002', 'W003', 'W004'}
 
 WRONG_TYPES = {
     'ENABLED': 'yes',
@@ -110,12 +113,10 @@ WRONG_TYPES = {
     'MODULE_NAME': 42,
     'REDIS_MESSAGES_KEY': 42,
     'WORKER_NAME': 42,
-    'REDIS_EXP_KEY': 42,
     'DELIVERY': 42,
     'SERIALIZER': 42,
     'FSM_STORAGE': 42,
     'MAX_RETRIES': 'ten',
-    'REDIS_EXP_TIME': 'five',
     'BLPOP_TIMEOUT': 'five',
     'REDIS_TIMEOUT': 'five',
     'HEARTBEAT_INTERVAL': 'ten',

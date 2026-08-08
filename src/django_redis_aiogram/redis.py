@@ -90,11 +90,6 @@ def as_bytes(value: bytes | str) -> bytes:
     return value if isinstance(value, bytes) else value.encode('utf-8')
 
 
-def get_db_index() -> int:
-    """Return the database number encoded in REDIS_URL."""
-    return int(get_redis().connection_pool.connection_kwargs.get('db', 0) or 0)
-
-
 class RedisProxy:
     """Forwards attribute access to the lazily created connection.
 
