@@ -15,7 +15,6 @@ class DeliveryKind(str, Enum):
     """How the consumer learns that a message is waiting."""
 
     BLPOP = 'blpop'
-    KEYSPACE = 'keyspace'
 
 
 @unique

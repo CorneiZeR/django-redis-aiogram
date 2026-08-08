@@ -8,22 +8,13 @@ from aiogram.methods import SendMessage
 from django.test import override_settings
 
 from django_redis_aiogram import TelegramBot
-from django_redis_aiogram.delivery import (
-    BlpopDelivery,
-    KeyspaceDelivery,
-    get_delivery,
-)
+from django_redis_aiogram.delivery import BlpopDelivery, get_delivery
 from django_redis_aiogram.serializers import JsonSerializer, PickleSerializer
 
 
 @override_settings(TELEGRAM_BOT={'DELIVERY': 'blpop'})
 def test_get_delivery_blpop():
     assert isinstance(get_delivery(handler=lambda **kwargs: None), BlpopDelivery)
-
-
-@override_settings(TELEGRAM_BOT={'DELIVERY': 'keyspace'})
-def test_get_delivery_keyspace():
-    assert isinstance(get_delivery(handler=lambda **kwargs: None), KeyspaceDelivery)
 
 
 @override_settings(TELEGRAM_BOT={'DELIVERY': 'smoke-signals'})
@@ -115,40 +106,11 @@ def test_failing_handler_does_not_kill_the_consumer(redis_server):
     assert len(calls) == 2
 
 
-@override_settings(TELEGRAM_BOT={'DELIVERY': 'keyspace'})
-def test_keyspace_handler_drains_the_list(redis_server):
-    handled = []
-    delivery = KeyspaceDelivery(handler=lambda **kwargs: handled.append(kwargs))
-    redis_server.rpush('TELEGRAM_BOT_MESSAGE', JsonSerializer().dumps({'function': 'send_message', 'chat_id': 3}))
-    delivery._on_expired({'data': b'TELEGRAM_BOT_EXP'})
-    assert handled == [{'function': 'send_message', 'chat_id': 3}]
-    assert redis_server.llen('TELEGRAM_BOT_MESSAGE') == 0
-
-
-@override_settings(TELEGRAM_BOT={'DELIVERY': 'keyspace'})
-def test_keyspace_ignores_other_keys(redis_server):
-    handled = []
-    delivery = KeyspaceDelivery(handler=lambda **kwargs: handled.append(kwargs))
-    redis_server.rpush('TELEGRAM_BOT_MESSAGE', JsonSerializer().dumps({'function': 'send_message', 'chat_id': 3}))
-    delivery._on_expired({'data': b'SOMETHING_ELSE'})
-    assert handled == []
-    # an unrelated expiry must not consume the queue either
-    assert redis_server.llen('TELEGRAM_BOT_MESSAGE') == 1
-
-
 @override_settings(TELEGRAM_BOT={'DELIVERY': 'blpop'})
 def test_send_redis_does_not_write_an_expiry_key(redis_server):
     TelegramBot().send_redis(chat_id=1, text='hi')
     assert redis_server.llen('TELEGRAM_BOT_MESSAGE') == 1
     assert redis_server.get('TELEGRAM_BOT_EXP') is None
-
-
-@override_settings(TELEGRAM_BOT={'DELIVERY': 'keyspace', 'REDIS_EXP_TIME': 5})
-def test_send_redis_sets_an_expiring_key_for_keyspace(redis_server):
-    TelegramBot().send_redis(chat_id=1, text='hi')
-    assert redis_server.llen('TELEGRAM_BOT_MESSAGE') == 1
-    # 1.x passed 'EX' as the value and the TTL positionally, so the key never expired properly
-    assert 0 < redis_server.ttl('TELEGRAM_BOT_EXP') <= 5
 
 
 def test_schedule_hops_to_the_loop_thread():

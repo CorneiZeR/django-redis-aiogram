@@ -14,7 +14,7 @@ from django.core.management import CommandError, call_command
 from django.test import override_settings
 
 from django_redis_aiogram import TelegramBot
-from django_redis_aiogram.delivery import BlpopDelivery, KeyspaceDelivery
+from django_redis_aiogram.delivery import BlpopDelivery
 from django_redis_aiogram.serializers import JsonSerializer, PickleSerializer
 
 pytestmark = pytest.mark.integration
@@ -113,36 +113,6 @@ def test_a_mixed_backlog_drains(server, redis_url):
         drain(delivery, expected=3)
 
         assert sorted(item['chat_id'] for item in delivery.handled) == [1, 2, 3]
-
-
-def test_keyspace_delivery_with_notifications_from_the_server(server, redis_url):
-    """The mode 1.x used: it needs CONFIG SET, which the worker does at startup."""
-    settings = {
-        'DELIVERY': 'keyspace',
-        'WORKER_NAME': WORKER,
-        'REDIS_URL': redis_url,
-        'REDIS_EXP_TIME': 1,
-    }
-    with override_settings(TELEGRAM_BOT=settings):
-        server.config_set('notify-keyspace-events', '')  # the worker must turn it on itself
-        handled = []
-        delivery = KeyspaceDelivery(handler=lambda **kwargs: handled.append(kwargs['chat_id']))
-        thread = delivery.start_thread()
-        try:
-            time.sleep(0.5)  # let it subscribe before the key is written
-            TelegramBot().send_redis(chat_id=11, text='hi')
-
-            deadline = time.monotonic() + 10
-            while time.monotonic() < deadline and not handled:
-                time.sleep(0.05)
-        finally:
-            delivery.stop()
-            thread.join(timeout=10)
-
-        assert handled == [11], f'the expiry event never arrived: {handled}'
-        flags = str(server.config_get('notify-keyspace-events')['notify-keyspace-events'])
-        assert 'E' in flags, flags
-        assert 'x' in flags or 'A' in flags, flags
 
 
 def test_two_workers_split_the_queue_without_duplicating(server, redis_url):

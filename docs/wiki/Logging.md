@@ -33,9 +33,8 @@ All prefixed with `tg_`, to avoid colliding with `LogRecord` attributes.
 | `tg_retry_after` | seconds Telegram asked to wait |
 | `tg_retries` | attempts made so far |
 | `tg_max_retries` | the limit that was reached |
-| `tg_delivery` | `blpop` or `keyspace` |
+| `tg_delivery` | the consumer that started, always `blpop` |
 | `tg_key` | Redis list being consumed |
-| `tg_channel` | keyspace channel subscribed to |
 | `tg_timeout` | blocking-pop timeout |
 | `tg_error` | text of a non-fatal error |
 
@@ -47,7 +46,6 @@ All prefixed with `tg_`, to avoid colliding with `LogRecord` attributes.
 | `handler failed for queued message` | ERROR | the send itself raised |
 | `dropping undecodable queued message` | ERROR | a payload could not be deserialized |
 | `blocking pop failed, retrying` | ERROR | lost the Redis connection; it retries |
-| `cannot enable keyspace notifications` | WARNING | the server refused `CONFIG SET` |
 | `rate limited by telegram` | WARNING | refused and backing off |
 | `delivery started` | INFO | the consumer is up |
 | `message sent` | INFO | one call succeeded |

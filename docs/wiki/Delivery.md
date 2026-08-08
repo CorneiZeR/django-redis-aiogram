@@ -7,18 +7,6 @@ This page is about outbound messages: how a queued `bot.send()` reaches
 Telegram. Which way *updates* arrive — polling or webhook — is a separate
 choice, described in **[[Webhook]]**; the queue works the same under both.
 
-Two consumers are available.
-
-| | `blpop` (default) | `keyspace` |
-| --- | --- | --- |
-| Server configuration | none | `CONFIG SET notify-keyspace-events` |
-| Managed Redis | works | usually refused |
-| Latency | immediate | `REDIS_EXP_TIME` at the earliest |
-| Worker was down | messages wait in the list | the list is drained at the next start |
-| Several workers | safe, one takes each message | safe, but pointless duplication of effort |
-
-Use `blpop` unless you have a reason not to.
-
 ## blpop
 
 The consumer blocks on `BLPOP`, so a message is picked up the moment it is
@@ -34,32 +22,16 @@ every idle round into an error, so raising `BLPOP_TIMEOUT` above the deadline
 would break a consumer that is doing nothing wrong. Check `W004` says so before
 deployment; raise `REDIS_TIMEOUT` too if you want longer blocks.
 
-## keyspace
-
-This reproduces the 1.x mechanism: `send_redis` also writes a key with a TTL,
-and the consumer subscribes to the expiry event for that key.
-
-```python
-TELEGRAM_BOT = {'DELIVERY': 'keyspace'}
-```
-
-Two things to know:
-
-- it needs `notify-keyspace-events` to include `Ex`. The worker tries to set it
-  at startup; managed providers refuse `CONFIG SET`, in which case you get a
-  warning and have to enable it server-side
-- nothing is delivered until the TTL elapses, and Redis emits the expiry event
-  when it gets to it, so `REDIS_EXP_TIME` is a floor on latency, not a bound
-- expiry events are not replayed, so anything queued while the worker was down
-  would sit there unseen. The consumer drains the list once at startup to cover
-  that; between restarts a missed event still means waiting for the next one
-
-The channel is derived from the database index in `REDIS_URL`. In 1.x it was
-hardcoded to database 0, so any other index silently delivered nothing.
+`DELIVERY` names the consumer and `'blpop'` is its only value. The `keyspace`
+consumer 1.x used — write a key with a TTL, react to its expiry event — was
+removed in 3.0: it needed `CONFIG SET notify-keyspace-events`, which managed
+providers refuse, and nothing could be delivered before the TTL elapsed. If your
+settings still say `'keyspace'`, check `E009` fails `manage.py check` and names
+the value to use.
 
 ## Running more than one worker
 
-Both consumers take each message once — `blpop` and `LPOP` are atomic. Running
+The consumer takes each message once — `BLMOVE` and `BLPOP` are atomic. Running
 several bot containers is safe, though a single one handles a lot: the limits
 in **[[Rate limits]]** bind long before the consumer does.
 

@@ -11,7 +11,7 @@ import pytest
 from django.core.management import CommandError, call_command
 from django.test import override_settings
 
-from django_redis_aiogram.delivery import BlpopDelivery, KeyspaceDelivery
+from django_redis_aiogram.delivery import BlpopDelivery
 
 QUEUE = 'TELEGRAM_BOT_MESSAGE'
 WORKER = 'tests'
@@ -75,14 +75,6 @@ def test_a_redis_that_refuses_the_write_does_not_stop_the_loop(redis_server, cap
         delivery.heartbeat()  # must not raise
 
     assert 'could not write the heartbeat' in caplog.text
-
-
-@override_settings(TELEGRAM_BOT={**SETTINGS, 'DELIVERY': 'keyspace'})
-def test_both_consumers_report_under_the_same_key(redis_server):
-    blpop = BlpopDelivery(handler=lambda **kwargs: None)
-    keyspace = KeyspaceDelivery(handler=lambda **kwargs: None)
-
-    assert blpop.heartbeat_key == keyspace.heartbeat_key == HEARTBEAT
 
 
 @override_settings(TELEGRAM_BOT={**SETTINGS, 'WORKER_NAME': 'worker-b'})
@@ -165,23 +157,6 @@ def test_a_heartbeat_that_is_not_a_timestamp_is_reported(redis_server):
 
     with pytest.raises(CommandError, match='not a timestamp'):
         healthcheck()
-
-
-@override_settings(TELEGRAM_BOT={**SETTINGS, 'DELIVERY': 'keyspace', 'HEARTBEAT_INTERVAL': 1})
-def test_the_keyspace_consumer_reports_in_too(redis_server):
-    """Both loops have to beat; only one of them blocks on the queue."""
-    delivery = KeyspaceDelivery(handler=lambda **kwargs: None)
-    thread = delivery.start_thread()
-    try:
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline and redis_server.get(HEARTBEAT) is None:
-            time.sleep(0.02)
-    finally:
-        delivery.stop()
-        thread.join(timeout=5)
-
-    assert redis_server.get(HEARTBEAT) is not None, 'the keyspace consumer never reported in'
-    assert not thread.is_alive()
 
 
 @override_settings(TELEGRAM_BOT={**SETTINGS, 'BLPOP_TIMEOUT': 300, 'HEARTBEAT_INTERVAL': 5})

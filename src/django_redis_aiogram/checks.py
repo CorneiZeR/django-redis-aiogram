@@ -4,8 +4,9 @@ Every check is a row in :data:`CHECKS`: an id, the setting it guards and a rule.
 The id is spelled out in the row, so grepping ``E019`` finds both the check and
 the ``docs/wiki/Settings.md`` entry that explains it.
 
-Check ids are ``django_redis_aiogram.EXXX``; they moved from ``telegram_bot.EXXX`` in
-2.0; update ``SILENCED_SYSTEM_CHECKS`` if you silenced any of them.
+Check ids are ``django_redis_aiogram.EXXX``, and an id is never reused once its
+setting is gone: a project silencing ``E013`` must not silently start silencing
+whatever came after it.
 """
 
 from collections.abc import Callable, Collection, Mapping
@@ -311,12 +312,10 @@ CHECKS: tuple[Check, ...] = (
     Check('E006', 'MODULE_NAME', _a_string),
     Check('E007', 'REDIS_MESSAGES_KEY', _a_string),
     Check('E021', 'WORKER_NAME', _a_string),
-    Check('E008', 'REDIS_EXP_KEY', _a_string),
     Check('E009', 'DELIVERY', partial(_a_string, allowed=DELIVERY_CHOICES)),
     Check('E010', 'SERIALIZER', partial(_a_string, allowed=SERIALIZER_CHOICES)),
     Check('E011', 'FSM_STORAGE', _a_string),
     Check('E012', 'MAX_RETRIES', partial(_an_integer, minimum=1)),
-    Check('E013', 'REDIS_EXP_TIME', partial(_an_integer, minimum=1)),
     Check('E014', 'BLPOP_TIMEOUT', partial(_an_integer, minimum=1)),
     Check('E030', 'REDIS_TIMEOUT', partial(_an_integer, minimum=1)),
     Check('W004', 'BLPOP_TIMEOUT', _a_pop_inside_the_deadline),

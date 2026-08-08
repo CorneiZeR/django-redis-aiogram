@@ -11,15 +11,12 @@ docker compose logs telegram_bot | grep 'delivery started'
 No such line means either `ENABLED` is off in that container, or the command
 never got past startup. `manage.py check` will say which.
 
-If you are on `keyspace` delivery, confirm the notifications are enabled:
+## `manage.py check` fails with `E009` after upgrading
 
-```shell
-redis-cli config get notify-keyspace-events   # needs to contain E and x
-```
-
-Managed Redis usually refuses `CONFIG SET`, so the worker cannot enable it
-itself — it logs `cannot enable keyspace notifications`. Switch to
-`'DELIVERY': 'blpop'`, which needs no server configuration.
+`'DELIVERY': 'keyspace'` was the 1.x mechanism and 3.0 removed it. Drop the key,
+or set it to `'blpop'` — see **[[Delivery]]**. The check fails rather than
+falling back silently, because a delivery mode that quietly changes is worse
+than one that refuses to start.
 
 ## A send hangs instead of failing
 
