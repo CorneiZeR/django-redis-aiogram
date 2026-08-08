@@ -149,5 +149,8 @@ jobs:
           )
           for expected in expected_names:
               assert expected in names, f'{expected} missing from {wheel}: {names}'
-          print(f'{wheel} ships py.typed')
+          # 3.0 removed the 1.x package name; shipping it again would be silent
+          shim = [n for n in names if n == 'telegram_bot.py' or n.startswith('telegram_bot/')]
+          assert not shim, f'the removed telegram_bot package is back in {wheel}: {shim}'
+          print(f'{wheel} ships py.typed and not the 1.x name')
           EOF

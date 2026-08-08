@@ -31,7 +31,11 @@ for expected in (
     'django_redis_aiogram/management/commands/start_tgbot.py',
 ):
     assert expected in names, f'{expected} missing from the wheel'
-print('py.typed and the management command are both in')
+# 3.0 removed the 1.x package name; packaging it again would revive the collision
+# the rename existed to fix, silently
+shim = [name for name in names if name == 'telegram_bot.py' or name.startswith('telegram_bot/')]
+assert not shim, f'the removed telegram_bot package is back in the wheel: {shim}'
+print('py.typed and the management command are in, and the 1.x name is not')
 PY
 
 echo "--- installing into a fresh environment"
@@ -57,6 +61,14 @@ PY
 cd "$work/project"
 echo "check:"
 "$work/venv/bin/python" manage.py check 2>&1 | sed 's/^/    /'
+
+echo "--- the 1.x package name is gone from the installed environment"
+"$work/venv/bin/python" - <<'PY'
+import importlib.util
+
+assert importlib.util.find_spec('telegram_bot') is None, 'telegram_bot is still importable'
+print('    telegram_bot no longer resolves')
+PY
 
 echo "--- disabled, the command exits cleanly"
 disabled_output="$(DJANGO_REDIS_AIOGRAM_ENABLED=0 "$work/venv/bin/python" manage.py start_tgbot 2>&1)"

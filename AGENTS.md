@@ -50,9 +50,10 @@ The first needs a real server; run it when you touch delivery, serialization,
 FSM persistence, keyspace notifications or connection cleanup. It flushes the
 database it is pointed at, so point it at a throwaway one.
 
-The second builds and installs the wheel; run it when you touch packaging or
-Django startup. Packaging-only work does not need the Redis suite, and vice
-versa.
+The second builds and installs the wheel; run it when you touch packaging,
+Django startup or the public surface — it type-checks a consumer file against
+the installed package, so a moved export fails there and nowhere else.
+Packaging-only work does not need the Redis suite, and vice versa.
 
 ## Rules that are not negotiable
 
