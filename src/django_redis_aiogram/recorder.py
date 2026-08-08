@@ -17,6 +17,7 @@ This module must not import ``django.db``. :mod:`django_redis_aiogram.eventlog`
 does, and the writer thread imports it on its first flush.
 """
 
+import asyncio
 import atexit
 import contextlib
 import logging
@@ -173,7 +174,7 @@ class EventRecorder:
                 # every row says which process recorded it, and only the
                 # consumer knew its own name before
                 event = replace(event, worker=self.worker)
-            if coerce_bool(conf['EVENT_LOG_SYNC'], f"{SETTINGS_NAME}['EVENT_LOG_SYNC']"):
+            if self._write_here():
                 self._write([event])
                 return
             self._buffer().put_nowait(event)
@@ -182,6 +183,22 @@ class EventRecorder:
         except Exception:
             # the recorder failing is not the caller's problem to handle
             logger.exception('could not record an event', extra={'tg_kind': event.kind})
+
+    @staticmethod
+    def _write_here() -> bool:
+        """Whether to write on this thread instead of handing it to the writer.
+
+        Only when asked to, and never from inside a running loop: the ORM is
+        @async_unsafe there, so the seam that records an update would raise
+        SynchronousOnlyOperation instead of recording anything.
+        """
+        if not coerce_bool(conf['EVENT_LOG_SYNC'], f"{SETTINGS_NAME}['EVENT_LOG_SYNC']"):
+            return False
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return True
+        return False
 
     def _drop(self, count: int) -> None:
         """Count lost events, and say so at most once a minute."""

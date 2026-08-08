@@ -32,6 +32,7 @@ from django_redis_aiogram.context import current_correlation_id
 from django_redis_aiogram.enums import EventKind, StorageKind
 from django_redis_aiogram.envelope import pack
 from django_redis_aiogram.events import new_correlation_id
+from django_redis_aiogram.instrumentation import install_instrumentation, instrumented
 from django_redis_aiogram.payloads import describe
 from django_redis_aiogram.recorder import Event, as_identifier, recorder
 from django_redis_aiogram.redis import get_redis
@@ -118,13 +119,13 @@ def build_storage() -> BaseStorage:
     """Build the FSM storage: 'redis', 'memory', or a dotted path to a BaseStorage."""
     name: str = conf['FSM_STORAGE']
     if name == StorageKind.MEMORY:
-        return MemoryStorage()
+        return instrumented(MemoryStorage())
     if name == StorageKind.REDIS:
         url = str(conf['REDIS_URL'] or '').strip()
         if not url:
             msg = f"{SETTINGS_NAME}['REDIS_URL'] is required for the redis FSM storage."
             raise ImproperlyConfigured(msg)
-        return RedisStorage.from_url(url)
+        return instrumented(RedisStorage.from_url(url))
 
     try:
         storage_class = import_string(name)
@@ -134,7 +135,8 @@ def build_storage() -> BaseStorage:
     if not (isinstance(storage_class, type) and issubclass(storage_class, BaseStorage)):
         msg = f"{SETTINGS_NAME}['FSM_STORAGE'] must point to a BaseStorage subclass, got {name!r}."
         raise ImproperlyConfigured(msg)
-    return storage_class()
+    # wrapped last, so the project's own class is validated before it is hidden
+    return instrumented(storage_class())
 
 
 class TelegramBot:
@@ -223,6 +225,9 @@ class TelegramBot:
             with self._build_guard:
                 if self._dispatcher is None:
                     self._dispatcher = Dispatcher(storage=build_storage())
+                    # one place: polling and webhook both feed this dispatcher,
+                    # so one update middleware sees every update exactly once
+                    install_instrumentation(self._dispatcher)
         return self._dispatcher
 
     @property

@@ -5,6 +5,7 @@ the writer and racing it — the same trick `TokenBucket`'s injectable clock pla
 for the rate limiter.
 """
 
+import asyncio
 import threading
 import time
 
@@ -17,7 +18,7 @@ from django.test.utils import CaptureQueriesContext
 from django_redis_aiogram.enums import EventKind
 from django_redis_aiogram.eventlog import write_batch
 from django_redis_aiogram.models import TelegramEvent
-from django_redis_aiogram.recorder import FAILURE_LIMIT, WRITER_THREAD, Event, EventRecorder
+from django_redis_aiogram.recorder import FAILURE_LIMIT, Event, EventRecorder
 
 ON = {'EVENT_LOG': True}
 
@@ -98,13 +99,17 @@ def test_a_poison_row_costs_only_itself(paused_writer):
 def test_the_writer_thread_writes_and_stops():
     recorder = EventRecorder()
     recorder.record(an_event(chat_id=11))
+    # this recorder's own thread, not any thread by that name: the module-level
+    # singleton has one too, and asserting on the name would test that instead
+    writer = recorder._thread
     try:
         recorder.flush(timeout=5)
         assert TelegramEvent.objects.filter(chat_id=11).count() == 1
     finally:
         recorder.stop(timeout=5)
 
-    assert not any(thread.name == WRITER_THREAD for thread in threading.enumerate())
+    assert writer is not None
+    assert not writer.is_alive()
 
 
 @pytest.mark.django_db(transaction=True)
@@ -359,3 +364,25 @@ def test_the_batch_insert_takes_a_savepoint_inside_the_caller_transaction():
     statements = [query['sql'] for query in queries]
     assert any(sql.startswith('SAVEPOINT') for sql in statements), statements
     assert TelegramEvent.objects.count() == 1
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT={**ON, 'EVENT_LOG_SYNC': True})
+def test_sync_mode_falls_back_to_the_writer_inside_a_loop():
+    """The ORM is @async_unsafe on a running loop, so writing on the calling
+    thread there raises SynchronousOnlyOperation instead of recording anything.
+
+    Every inbound seam runs inside a loop, so without this the setting would
+    turn the update middleware from a recorder into a source of exceptions.
+    """
+    recorder = EventRecorder()
+
+    async def record_from_a_coroutine():
+        recorder.record(an_event(chat_id=55))
+
+    asyncio.run(record_from_a_coroutine())
+    try:
+        recorder.flush(timeout=5)
+        assert TelegramEvent.objects.filter(chat_id=55).count() == 1
+    finally:
+        recorder.stop(timeout=5)

@@ -38,6 +38,17 @@
   every existing call site. A handler replying to an update inherits that
   update's id through a context variable, so a reply is joined to its cause
   without any project code passing it along.
+- **Inbound updates and FSM transitions are recorded too.** One outer
+  middleware on the dispatcher sees every update exactly once, whether it
+  arrived by polling or by webhook, and records when it arrived, how long the
+  handlers took and whether they raised. FSM transitions come from wrapping the
+  configured storage: `set_state` *is* the transition, so it costs no extra
+  round trip and misses none of the ones a filter or a scene makes.
+- With the log off, no middleware is registered and the storage is handed back
+  unwrapped — the cost per update is zero rather than one branch.
+- `EVENT_LOG_SYNC` falls back to the writer thread inside a running loop. The
+  ORM is unusable there, so writing on the calling thread would turn the update
+  middleware from a recorder into a source of `SynchronousOnlyOperation`.
 - Asserting on the queue in your own tests now goes through
   `envelope.unpack` — see **Testing** in the wiki, whose recipes are executed
   by the suite and were updated with the format.
