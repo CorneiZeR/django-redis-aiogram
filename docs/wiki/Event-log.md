@@ -103,6 +103,56 @@ Credentials are stripped from `detail` and `error` either way. That matters more
 than it sounds: the bot token is in the API URL, aiogram puts the URL in its
 exception messages, and those messages are what an `error` column holds.
 
+## The admin, and who may see what
+
+With the flag on and `django.contrib.admin` installed, the feed appears in the
+admin as a read-only list. Add, change and delete are refused outright — rows
+leave through `tgbot_prune_events`, not one at a time.
+
+Three permissions, and each gates something real:
+
+| Permission | Grants |
+| ---------- | ------ |
+| `view_telegramevent` | the list and the detail page: when, which kind, which chat, which method, the error code |
+| `view_telegramevent_payload` | the `detail` and `error` columns — message bodies under `EVENT_LOG_PAYLOAD: 'full'`, and exception text |
+| `prune_telegramevent` | pruning the log |
+
+Add, change and delete are **not** created at all. The feed is append-only, so
+they would be permissions nothing can act on, and they only make a group's
+permission picker harder to read.
+
+The split between the first two is the point: support needs to see that a
+message went out and when, without reading what it said.
+
+```python
+from django.contrib.auth.models import Group, Permission
+
+support = Group.objects.create(name='Telegram support')
+support.permissions.add(Permission.objects.get(codename='view_telegramevent'))
+
+operators = Group.objects.create(name='Telegram operators')
+operators.permissions.set(
+    Permission.objects.filter(
+        content_type__app_label='django_redis_aiogram',
+        codename__in=[
+            'view_telegramevent',
+            'view_telegramevent_payload',
+            'prune_telegramevent',
+        ],
+    )
+)
+```
+
+Permissions live wherever `django.contrib.auth` does. If the log is on another
+alias, leave `auth` where it is — the router in this package moves only its own
+app, and dragging `auth` along would move your users with it.
+
+What the admin deliberately does not do, because the table is sized by traffic:
+no full result count (the changelist would otherwise run `COUNT(*)` over the
+filtered queryset on every page load), no date drilldown (its truncation is a
+scan no index can serve), and no substring search — the two searchable columns
+are matched exactly, so both use their index.
+
 ## Growth, and the job that bounds it
 
 Budget roughly **0.3 kB per event** including indexes. A million events a day is
