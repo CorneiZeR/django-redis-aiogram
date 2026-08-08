@@ -53,6 +53,13 @@
   newest first. A 1.x to 3.0 jump has no shim to lean on, so it needed a page
   rather than a deleted one.
 
+### Infrastructure
+
+- The suite is two pytest invocations. `tests/settings.py` still configures no
+  database — proving the package boots without one is part of what it tests —
+  so database-backed tests live in `tests/db` under their own settings module
+  and the default run ignores that directory. A new CI job runs it.
+
 ## 2.2.0 - 2026-08-04
 
 ### Changed

@@ -24,9 +24,15 @@ ruff check .
 ruff format --check .
 mypy
 python -m pytest
+python -m pytest --ds=tests.db_settings tests/db
 ```
 
-A second suite needs a real Redis and is skipped without one:
+`tests/settings.py` configures no database at all, because proving the package
+boots without one is part of what the suite tests. Anything that needs a
+database therefore lives in `tests/db` with its own settings module, and the
+default run ignores that directory — so it takes a second invocation.
+
+A third suite needs a real Redis and is skipped without one:
 
 ```shell
 docker run -d --name drai-redis -p 6399:6379 redis:7-alpine
