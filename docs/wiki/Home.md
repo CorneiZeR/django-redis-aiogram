@@ -35,7 +35,7 @@ bot.send(chat_id=CHAT_ID, text='hello')
 
 ## Upgrading
 
-* **[[Migrating from 1.x]]** — what changed in 2.0 and what you have to do
+* **[[Upgrading]]** — what each major release changed, and what you have to do
 * **[[AI-assistants|AI assistants]]** — the brief to hand a coding agent, and what they get wrong
 
 ---

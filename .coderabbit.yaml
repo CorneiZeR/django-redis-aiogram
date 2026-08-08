@@ -47,12 +47,6 @@ reviews:
 
         Skip style nits that ruff and mypy already enforce.
 
-    - path: 'src/telegram_bot/**'
-      instructions: >-
-        Deprecated compatibility shim for the 1.x package name. It must keep
-        re-exporting the same singleton — never construct a second one — and
-        must stay usable in INSTALLED_APPS until 3.0.
-
     - path: 'tests/**'
       instructions: >-
         Check that a test would actually fail if the behaviour it covers

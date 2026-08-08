@@ -1,4 +1,4 @@
-"""The surface 1.x exposed is API, not implementation.
+"""The surface predating 2.0 is API, not implementation.
 
 1.x `TelegramBot` was a dataclass, so its internals were part of how people used
 it: driving `loop` by hand, feeding `dispatcher`, reusing `redis_conn`. The lazy
@@ -22,8 +22,8 @@ from django_redis_aiogram import TelegramBot, bot
 from django_redis_aiogram.checks import check_settings
 from django_redis_aiogram.enums import DeliveryKind, SerializerKind, StorageKind, UpdateMode
 
-#: attributes 1.x code reaches for directly
-ONE_X_ATTRIBUTES = (
+#: attributes that predate 2.0 and are reached for directly
+INHERITED_ATTRIBUTES = (
     'bot',  # the aiogram Bot
     'dispatcher',
     'loop',
@@ -31,11 +31,11 @@ ONE_X_ATTRIBUTES = (
     'redis_conn',
 )
 
-#: methods 1.x code calls
-ONE_X_METHODS = ('start_polling', 'send_raw', 'send_redis')
+#: methods that predate 2.0
+INHERITED_METHODS = ('start_polling', 'send_raw', 'send_redis')
 
-#: every observer aiogram had a decorator for
-ONE_X_DECORATORS = (
+#: every observer aiogram has a decorator for
+OBSERVER_DECORATORS = (
     'message',
     'edited_message',
     'channel_post',
@@ -53,7 +53,7 @@ ONE_X_DECORATORS = (
     'error',
 )
 
-#: what 2.x added on top, and must keep
+#: what 2.0 added on top, and must keep
 TWO_X_ADDITIONS = ('send', 'router', 'enabled', 'is_worker', 'rate_limiter', 'close')
 
 MODULE_EXPORTS = ('TelegramBot', 'bot', 'conf', 'redis_conn', 'get_redis', '__version__')
@@ -61,12 +61,12 @@ MODULE_EXPORTS = ('TelegramBot', 'bot', 'conf', 'redis_conn', 'get_redis', '__ve
 SETTINGS = {'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost:6379/0', 'FSM_STORAGE': 'memory'}
 
 
-@pytest.mark.parametrize('name', ONE_X_ATTRIBUTES + TWO_X_ADDITIONS)
+@pytest.mark.parametrize('name', INHERITED_ATTRIBUTES + TWO_X_ADDITIONS)
 def test_the_attribute_is_still_there(name):
     assert hasattr(TelegramBot, name), f'{name} disappeared from the public surface'
 
 
-@pytest.mark.parametrize('name', ONE_X_METHODS + ONE_X_DECORATORS)
+@pytest.mark.parametrize('name', INHERITED_METHODS + OBSERVER_DECORATORS)
 def test_the_method_is_still_callable(name):
     member = getattr(TelegramBot, name, None)
     assert callable(member), f'{name} is no longer a callable member'
@@ -78,7 +78,7 @@ def test_the_package_still_exports_it(name):
     assert getattr(django_redis_aiogram, name, None) is not None
 
 
-@pytest.mark.parametrize('name', ONE_X_DECORATORS)
+@pytest.mark.parametrize('name', OBSERVER_DECORATORS)
 @override_settings(TELEGRAM_BOT=SETTINGS)
 def test_every_decorator_registers_on_the_router(name):
     """A decorator that silently stops registering is worse than a missing one."""
@@ -94,7 +94,7 @@ def test_every_decorator_registers_on_the_router(name):
 
 
 @override_settings(TELEGRAM_BOT=SETTINGS)
-def test_the_1_x_shape_still_works_end_to_end():
+def test_the_pre_2_0_shape_still_works_end_to_end():
     """What 1.x code does: build it, reach inside, drive the loop yourself."""
     instance = TelegramBot()
 

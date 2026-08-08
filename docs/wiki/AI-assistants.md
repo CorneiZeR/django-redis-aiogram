@@ -64,11 +64,11 @@ depending on redis, sharing the same image and `.env` as `back`. Leave
 `DJANGO_REDIS_AIOGRAM_ENABLED` unset on the other services — they queue
 messages."*
 
-**Migrate a 1.x project.** *"This project uses `telegram_bot` 1.x. Move it to
-`django_redis_aiogram` 2.x following the wiki's migration page: replace the
-import, move `parse_mode` into `DEFAULT_BOT_PROPERTIES`, drop the placeholder
-token from settings, use `bot.router` instead of `bot._router`, and set
-`ALLOW_PICKLE` only until the queue has drained."*
+**Migrate an older project.** *"This project imports `telegram_bot`, which 3.0
+removed. Move it to `django_redis_aiogram` following the wiki's Upgrading page:
+rename it in `INSTALLED_APPS`, replace the imports, move `parse_mode` into
+`DEFAULT_BOT_PROPERTIES`, drop the placeholder token from settings, and use
+`bot.router` instead of `bot._router`."*
 
 **Debug delivery.** *"Messages are queued but never arrive. Check in this order:
 is the `start_tgbot` container running and is `ENABLED` true there, does

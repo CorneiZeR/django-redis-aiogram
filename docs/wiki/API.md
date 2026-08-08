@@ -167,8 +167,3 @@ to name keep the bases they had before the family existed —
 still `SerializationError` — so existing `except` clauses keep working.
 Configuration problems remain Django's `ImproperlyConfigured`, since that is
 what `manage.py check` and Django's own machinery expect.
-
-## Deprecated
-
-`telegram_bot` still imports and still works in `INSTALLED_APPS`, with a
-`DeprecationWarning`. It is removed in 3.0 — see **[[Migrating-from-1.x|Migrating from 1.x]]**.

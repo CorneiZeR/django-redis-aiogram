@@ -111,7 +111,7 @@ jobs:
 
   smoke:
     # the unit suite imports from src/, so only an install can catch a packaging
-    # mistake: a missing py.typed, a shim left out of the wheel
+    # mistake: a missing py.typed, a module left out of the wheel
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -145,10 +145,9 @@ jobs:
           names = zipfile.ZipFile(wheel).namelist()
           expected_names = (
               'django_redis_aiogram/py.typed',
-              'telegram_bot/py.typed',
-              'telegram_bot/__init__.py',
+              'django_redis_aiogram/api.py',
           )
           for expected in expected_names:
               assert expected in names, f'{expected} missing from {wheel}: {names}'
-          print(f'{wheel} ships py.typed and the shim')
+          print(f'{wheel} ships py.typed')
           EOF

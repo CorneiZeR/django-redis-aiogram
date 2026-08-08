@@ -3,8 +3,8 @@
 # project boots with no credentials at all.
 #
 # The unit suite imports from the source tree, so it cannot catch a packaging
-# mistake: a missing py.typed, a shim left out of the wheel, a module that only
-# resolves because `src/` is on the path. This does.
+# mistake: a missing py.typed, a module that only resolves because `src/` is on
+# the path. This does.
 set -euo pipefail
 
 # a PYTHONPATH pointing at src/ would let imports resolve from the source tree,
@@ -29,11 +29,9 @@ for expected in (
     'django_redis_aiogram/py.typed',
     'django_redis_aiogram/api.py',
     'django_redis_aiogram/management/commands/start_tgbot.py',
-    'telegram_bot/py.typed',
-    'telegram_bot/__init__.py',
 ):
     assert expected in names, f'{expected} missing from the wheel'
-print('py.typed, the shim and the management command are all in')
+print('py.typed and the management command are both in')
 PY
 
 echo "--- installing into a fresh environment"
@@ -60,20 +58,7 @@ cd "$work/project"
 echo "check:"
 "$work/venv/bin/python" manage.py check 2>&1 | sed 's/^/    /'
 
-echo "--- the 1.x package name still works in INSTALLED_APPS"
-sed -i.bak "s/'django_redis_aiogram'/'telegram_bot'/" settings.py
-"$work/venv/bin/python" -W 'error::DeprecationWarning' -c "
-import os, django, warnings
-os.environ['DJANGO_SETTINGS_MODULE'] = 'settings'
-with warnings.catch_warnings(record=True) as caught:
-    warnings.simplefilter('always')
-    django.setup()
-    assert any('deprecated' in str(w.message) for w in caught), 'the shim warned about nothing'
-print('    the shim boots and warns')
-"
-
 echo "--- disabled, the command exits cleanly"
-mv settings.py.bak settings.py
 disabled_output="$(DJANGO_REDIS_AIOGRAM_ENABLED=0 "$work/venv/bin/python" manage.py start_tgbot 2>&1)"
 echo "$disabled_output" | sed 's/^/    /'
 case "$disabled_output" in

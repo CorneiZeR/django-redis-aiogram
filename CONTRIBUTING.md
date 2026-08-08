@@ -64,8 +64,6 @@ If you touch these areas, keep them covered:
 - **Thread boundaries.** The delivery consumer runs in its own thread while the
   event loop belongs to the polling thread. Never call `create_task` across
   that boundary.
-- **The `telegram_bot` shim keeps working.** It must stay importable and usable
-  in `INSTALLED_APPS` until 3.0.
 
 ## Style
 
