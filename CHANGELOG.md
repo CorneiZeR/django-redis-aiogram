@@ -43,7 +43,9 @@
   cannot describe, and not the 1.x upgrade window it was introduced as. Nothing
   about its behaviour changed — it is still off by default, the reader still
   refuses pickled payloads without it, and a refused payload is still left in
-  flight rather than destroyed. What changed is that the documentation no longer
+  flight rather than destroyed — on Redis 6.2 and newer. Without `LMOVE` there
+  is no in-flight list, so a refused pickle is lost rather than held; the
+  documentation now says so where it tells you the flag is safe to toggle. What changed is that the documentation no longer
   tells you to remove a setting you may need, and now says why the read path has
   a refusal branch at all.
 

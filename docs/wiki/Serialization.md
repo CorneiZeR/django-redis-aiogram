@@ -114,16 +114,21 @@ TELEGRAM_BOT = {
 }
 ```
 
-Two behaviours make the mixed case work, and they are why this is safe to turn
-on and off on a running deployment:
+Two behaviours make the mixed case work:
 
 - **Reads sniff the format per message.** A queue holding both formats drains
   without being stopped, so switching `SERIALIZER` needs no downtime.
-- **A refused pickle stays in flight**, rather than being acknowledged. Turning
-  `ALLOW_PICKLE` off while a producer is still writing pickled payloads leaves
-  them in the worker's processing list with a log line saying so; set it back,
-  restart the worker, and they are delivered. On a server without `LMOVE` there
-  is no in-flight list, so there they are lost.
+- **A refused pickle stays in flight**, rather than being acknowledged — *on
+  Redis 6.2 and newer*. Turning `ALLOW_PICKLE` off while a producer is still
+  writing pickled payloads leaves them in the worker's processing list with a
+  log line saying so; set it back, restart the worker, and they are delivered.
+
+> **Turning `ALLOW_PICKLE` off is only recoverable where `LMOVE` exists.**
+> Without it there is no in-flight list — the consumer has already popped the
+> message when it refuses it, so a refused pickle is **gone**. The consumer says
+> which mode it is in at startup, as `tg_crash_safe` on the `delivery started`
+> line. On such a server, stop or upgrade every pickle producer *before* turning
+> the flag off. See **[[Delivery]]**.
 
 Only worth it if you must queue objects JSON cannot represent, and only with a
 Redis nothing untrusted can write to.
