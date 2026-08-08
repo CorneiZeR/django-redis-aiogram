@@ -9,7 +9,7 @@ import threading
 import pytest
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.db import connection, connections
+from django.db import connections
 
 
 def test_the_database_suite_has_a_database():
@@ -20,15 +20,6 @@ def test_the_database_suite_has_a_database():
 def test_a_query_reaches_the_database():
     """Configured is not connected; this proves migrations ran and it answers."""
     assert get_user_model().objects.count() == 0
-
-
-@pytest.mark.django_db
-def test_the_package_owns_no_tables_yet():
-    """Pins the state this suite starts from, so the first migration is visible
-    as a change rather than arriving unnoticed."""
-    owned = [name for name in connection.introspection.table_names() if name.startswith('django_redis_aiogram')]
-
-    assert owned == [], owned
 
 
 @pytest.mark.django_db

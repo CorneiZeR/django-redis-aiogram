@@ -88,6 +88,7 @@ the same pull request as the code they describe and published from `master`.
 | [Rate limits](https://github.com/CorneiZeR/django-redis-aiogram/wiki/Rate-limits) | staying inside Telegram's published limits |
 | [Deployment](https://github.com/CorneiZeR/django-redis-aiogram/wiki/Deployment) | compose recipes, healthchecks, per-process opt-out |
 | [Logging](https://github.com/CorneiZeR/django-redis-aiogram/wiki/Logging) | the logger and its structured fields |
+| [Event log](https://github.com/CorneiZeR/django-redis-aiogram/wiki/Event-log) | recording what the bot did to a table |
 | [Serialization](https://github.com/CorneiZeR/django-redis-aiogram/wiki/Serialization) | what can be queued |
 | [Troubleshooting](https://github.com/CorneiZeR/django-redis-aiogram/wiki/Troubleshooting) | symptoms and their usual causes |
 | [Upgrading](https://github.com/CorneiZeR/django-redis-aiogram/wiki/Upgrading) | what each major release changed, and what you must do |

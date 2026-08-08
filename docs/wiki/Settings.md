@@ -103,11 +103,36 @@ TELEGRAM_BOT = {
 
 See **[[Rate limits]]**.
 
+## Event log
+
+Off by default. Turning it on records what the bot did into one append-only
+table, which needs `manage.py migrate` and a retention job — see
+**[[Event-log|Event log]]** before you enable it.
+
+| Setting | Default | Description |
+| ------- | ------- | ----------- |
+| `EVENT_LOG` | `False` | Record events at all. Gates both the writing and the admin |
+| `EVENT_LOG_KINDS` | `()` | Which kinds to keep; empty means every kind this version knows. Naming any also opts out of the kinds a later release adds |
+| `EVENT_LOG_PAYLOAD` | `'summary'` | `'none'`, `'summary'` (argument names and sizes) or `'full'` (message bodies) |
+| `EVENT_LOG_MAX_PAYLOAD_BYTES` | `8192` | Cap on the JSON column; `0` stores no payload at all |
+| `EVENT_LOG_REDACT_KEYS` | see `defaults.py` | Payload keys whose values are blanked before a row is written |
+| `EVENT_LOG_BUFFER_SIZE` | `1000` | Events held in memory while the writer is behind; a full buffer drops the event rather than making a send wait |
+| `EVENT_LOG_BATCH_SIZE` | `200` | Rows per `bulk_create` |
+| `EVENT_LOG_FLUSH_INTERVAL` | `1` | Seconds before a partial batch is written anyway |
+| `EVENT_LOG_RETENTION_DAYS` | `0` | Days a row is kept; `0` keeps them for ever. Read by `manage.py tgbot_prune_events`, never on the write path |
+| `EVENT_LOG_DATABASE` | `''` | A `DATABASES` alias for the log; empty means the default one |
+| `EVENT_LOG_SYNC` | `False` | Write on the calling thread instead of the writer's. Tests only |
+
+`EVENT_LOG_KINDS` and `EVENT_LOG_REDACT_KEYS` are settings-only, like
+`WEBHOOK_ALLOWED_UPDATES`: a tuple has no textual form the environment could
+carry, and a string from it would be read one character per item.
+
 ## Check ids
 
 Errors are `django_redis_aiogram.EXXX`, warnings `django_redis_aiogram.WXXX`.
 They moved from `telegram_bot.EXXX` in 2.0 — update `SILENCED_SYSTEM_CHECKS`
-if you silenced any.
+if you silenced any. An id is never reused once its setting is gone, so an
+entry naming a retired one is dead but harmless.
 
 | Id | Meaning |
 | -- | ------- |
@@ -130,3 +155,15 @@ if you silenced any.
 | `E028` | `MODE` is not `polling` or `webhook` |
 | `E029` | `WEBHOOK_ALLOWED_UPDATES` is not a list, or names an update type Telegram does not have |
 | `E030` | `REDIS_TIMEOUT` is wrong or below 1 |
+| `E031`, `E042` | `EVENT_LOG` / `EVENT_LOG_SYNC` is not a boolean |
+| `E032`, `E035` | `EVENT_LOG_KINDS` / `EVENT_LOG_REDACT_KEYS` is not a list or tuple of strings |
+| `E033` | `EVENT_LOG_PAYLOAD` is not `none`, `summary` or `full` |
+| `E034`, `E039` | `EVENT_LOG_MAX_PAYLOAD_BYTES` / `EVENT_LOG_RETENTION_DAYS` is wrong or negative |
+| `E036`–`E038` | `EVENT_LOG_BUFFER_SIZE` / `EVENT_LOG_BATCH_SIZE` / `EVENT_LOG_FLUSH_INTERVAL` is wrong or below 1 |
+| `E040` | `EVENT_LOG_DATABASE` is not a string |
+| `E041` | `EVENT_LOG_DATABASE` names an alias that is not in `DATABASES` |
+| `W005` | the log is on while its database has no engine, so every event is dropped |
+| `W006` | the log is on with `EVENT_LOG_RETENTION_DAYS` at 0, so nothing ever deletes a row |
+| `W007` | `EVENT_LOG_BATCH_SIZE` is above `EVENT_LOG_BUFFER_SIZE`, so the batch can never fill |
+| `W008` | `EVENT_LOG_KINDS` names a kind nothing records |
+| `W009` | `EVENT_LOG_SYNC` is on, so a send waits for the database |

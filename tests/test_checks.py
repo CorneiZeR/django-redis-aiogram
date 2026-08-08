@@ -96,12 +96,13 @@ SETTINGS_PAGE = pathlib.Path(__file__).resolve().parent.parent / 'docs' / 'wiki'
 # the table separates a range with an en dash
 DOCUMENTED = re.compile('`([EW]\\d{3})`(?:\\s*[\u2013-]\\s*`([EW]\\d{3})`)?')
 
-# Every id the checks can emit. Two settings dicts are needed: a wrong type
-# stops a check before it can reach its value-level complaint.
+# Every id the checks can emit. Three settings dicts are needed: a wrong type
+# stops a check before it can reach its value-level complaint, and an alias that
+# is not in DATABASES stops the one asking whether that alias has an engine.
 # E008 and E013 guarded the keyspace settings 3.0 removed. Their ids are gone
 # rather than reused: a project silencing one must not start silencing a new rule
 RETIRED_IDS = {'E008', 'E013'}
-EXPECTED_IDS = ({f'E{code:03d}' for code in range(1, 31)} - RETIRED_IDS) | {'W001', 'W002', 'W003', 'W004'}
+EXPECTED_IDS = ({f'E{code:03d}' for code in range(1, 43)} - RETIRED_IDS) | {f'W{code:03d}' for code in range(1, 10)}
 
 WRONG_TYPES = {
     'ENABLED': 'yes',
@@ -127,6 +128,17 @@ WRONG_TYPES = {
     'DEFAULT_KWARGS': 42,
     'DEFAULT_BOT_PROPERTIES': 42,
     'RATE_LIMIT': 42,
+    'EVENT_LOG': 'maybe',
+    'EVENT_LOG_KINDS': 'outbound.sent',
+    'EVENT_LOG_PAYLOAD': 42,
+    'EVENT_LOG_MAX_PAYLOAD_BYTES': 'lots',
+    'EVENT_LOG_REDACT_KEYS': 'token',
+    'EVENT_LOG_BUFFER_SIZE': 'many',
+    'EVENT_LOG_BATCH_SIZE': 'some',
+    'EVENT_LOG_FLUSH_INTERVAL': 'often',
+    'EVENT_LOG_RETENTION_DAYS': 'thirty',
+    'EVENT_LOG_DATABASE': 42,
+    'EVENT_LOG_SYNC': 'maybe',
     'NOT_A_SETTING': 1,
 }
 
@@ -147,7 +159,18 @@ WRONG_VALUES = {
     'BLPOP_TIMEOUT': 30,
     'REDIS_TIMEOUT': 5,
     'WEBHOOK_ALLOWED_UPDATES': 'message',
+    # the log on with nowhere to write it, nothing to prune it, a batch the
+    # buffer can never fill, an alias that is not in DATABASES, and a typo
+    'EVENT_LOG': True,
+    'EVENT_LOG_RETENTION_DAYS': 0,
+    'EVENT_LOG_BATCH_SIZE': 5000,
+    'EVENT_LOG_DATABASE': 'nope',
+    'EVENT_LOG_KINDS': ('outbound.snet',),
 }
+
+# the log on and pointed at a real alias, which under tests.settings is the
+# dummy backend Django fills an empty DATABASES in with
+LOG_WITHOUT_A_DATABASE = {'EVENT_LOG': True, 'EVENT_LOG_SYNC': True}
 
 
 def documented_ids():
@@ -168,7 +191,7 @@ def emitted_ids():
     scan, and the documentation check below stayed green without it.
     """
     found = set()
-    for settings in (WRONG_TYPES, WRONG_VALUES):
+    for settings in (WRONG_TYPES, WRONG_VALUES, LOG_WITHOUT_A_DATABASE):
         with override_settings(TELEGRAM_BOT=settings):
             found |= {str(message.id).removeprefix('django_redis_aiogram.') for message in check_settings()}
     return found

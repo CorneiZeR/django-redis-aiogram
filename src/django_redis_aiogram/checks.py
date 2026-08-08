@@ -20,13 +20,22 @@ from django.core.exceptions import ImproperlyConfigured
 from django.utils.module_loading import import_string
 
 from django_redis_aiogram.defaults import DEFAULTS
-from django_redis_aiogram.enums import DeliveryKind, SerializerKind, StorageKind, UpdateMode, choices
+from django_redis_aiogram.enums import (
+    DeliveryKind,
+    PayloadDetail,
+    SerializerKind,
+    StorageKind,
+    UpdateMode,
+    choices,
+)
+from django_redis_aiogram.events import known_kinds
 from django_redis_aiogram.settings import SETTINGS_NAME, coerce_bool, conf
 from django_redis_aiogram.throttling import KNOWN_RATE_LIMIT_KEYS
 
 DELIVERY_CHOICES = choices(DeliveryKind)
 MODE_CHOICES = choices(UpdateMode)
 SERIALIZER_CHOICES = choices(SerializerKind)
+PAYLOAD_CHOICES = choices(PayloadDetail)
 
 _STORAGE_CHOICES = choices(StorageKind)
 _ID_PREFIX = 'django_redis_aiogram'
@@ -282,6 +291,162 @@ def _a_pop_inside_the_deadline(key: str) -> list[Problem]:
     ]
 
 
+def _a_collection_of_strings(key: str) -> list[Problem]:
+    """Require a real collection: a string would be read one character per item."""
+    value = conf.get(key)
+    if not value:
+        return []
+    if isinstance(value, (str, bytes)) or not isinstance(value, Collection):
+        return [Problem(f'must be a list or tuple, got {type(value).__name__}.')]
+    # anything unhashable would raise out of a membership test later, so the
+    # element type is settled here and reported through repr's eyes
+    invalid = sorted(repr(name) for name in value if not isinstance(name, str))
+    if invalid:
+        return [Problem(f'contains names that are not strings: {", ".join(invalid)}.')]
+    return []
+
+
+def _kinds_this_version_records(key: str) -> list[Problem]:
+    """Warn about a kind nothing writes: a typo here silently records nothing."""
+    value = conf.get(key)
+    if not value or isinstance(value, (str, bytes)) or not isinstance(value, Collection):
+        return []  # E032 owns the shape complaint
+    known = known_kinds()
+    unknown = sorted(repr(name) for name in value if isinstance(name, str) and name not in known)
+    if not unknown:
+        return []
+    return [
+        Problem(
+            f'names kinds nothing records: {", ".join(unknown)}.',
+            hint=f'Known kinds are: {", ".join(sorted(known))}.',
+        )
+    ]
+
+
+def _the_log_is_on() -> bool:
+    """Whether events are recorded, coerced the way the recorder coerces it."""
+    try:
+        return coerce_bool(conf['EVENT_LOG'], f"{SETTINGS_NAME}['EVENT_LOG']")
+    except ImproperlyConfigured:
+        # unreadable is E031's finding; assume off, so the rest stays quiet
+        return False
+
+
+def _a_configured_log_database(key: str) -> list[Problem]:
+    """Resolve the alias here: the writer runs on a thread nobody is watching.
+
+    An alias missing from DATABASES raises ConnectionDoesNotExist inside the
+    writer thread, where the only trace is a log line in a container nobody
+    reads and a queue that quietly fills and drops.
+    """
+    value = conf.get(key)
+    if not isinstance(value, str):
+        return []  # E040 owns the type complaint
+    alias = value.strip()
+    if not alias:
+        return []
+    # deferred like the aiogram imports: a boot that records nothing must not
+    # pay for the connection handler
+    from django.db import connections  # noqa: PLC0415 - as above
+
+    if alias in connections:
+        return []
+    return [
+        Problem(
+            f'names {alias!r}, which is not in DATABASES.',
+            hint=f'Configured aliases are: {", ".join(sorted(connections))}.',
+        )
+    ]
+
+
+def _somewhere_to_write_the_log(key: str) -> list[Problem]:
+    """Warn, never error, when the log is on with no database behind it.
+
+    A project may legitimately boot without one — this package's own suite does
+    — so this must not be able to fail ``manage.py check``.
+
+    The engine is what gets asked, not whether DATABASES is empty: Django fills
+    an empty setting in with the dummy backend the first time anything touches
+    connections, so by the time checks run the dict is never empty.
+    """
+    if not _the_log_is_on():
+        return []
+    # deferred for the same reason as the alias check above
+    from django.db import DEFAULT_DB_ALIAS, connections  # noqa: PLC0415 - as above
+
+    alias = str(conf.get('EVENT_LOG_DATABASE') or '').strip() or DEFAULT_DB_ALIAS
+    if alias not in connections:
+        return []  # E041 owns the missing alias
+    engine = str(connections[alias].settings_dict.get('ENGINE') or '')
+    if engine and engine != 'django.db.backends.dummy':
+        return []
+    return [
+        Problem(
+            f'is on while {alias!r} has no database engine, so every event is dropped.',
+            hint=f'Configure a database, or leave {key} off in processes that have none.',
+        )
+    ]
+
+
+def _a_log_that_is_pruned(key: str) -> list[Problem]:
+    """Warn when nothing will ever delete a row, so the table only grows."""
+    if not _the_log_is_on():
+        return []
+    try:
+        days = int(conf[key])
+    except (TypeError, ValueError):
+        return []  # E039 owns the type complaint
+    if days > 0:
+        return []
+    return [
+        Problem(
+            'is 0 while the log is on, so nothing ever deletes a row.',
+            hint='Set it and schedule `manage.py tgbot_prune_events`, or accept unbounded growth.',
+        )
+    ]
+
+
+def _a_batch_the_buffer_can_hold(key: str) -> list[Problem]:
+    """Warn when the batch can never fill, so the interval paces every write.
+
+    The writer stops collecting at the buffer's size, which makes a larger batch
+    not a bigger write but a partial one every flush interval.
+    """
+    try:
+        batch = int(conf[key])
+        buffer = int(conf['EVENT_LOG_BUFFER_SIZE'])
+    except (TypeError, ValueError):
+        return []  # E036 and E037 own the type complaints
+    if batch <= buffer:
+        return []
+    return [
+        Problem(
+            f'is {batch}, which the buffer caps at {buffer}.',
+            hint=f"Raise {SETTINGS_NAME}['EVENT_LOG_BUFFER_SIZE'] above it, or lower this.",
+        )
+    ]
+
+
+def _a_writer_that_does_not_block(key: str) -> list[Problem]:
+    """Warn that synchronous recording puts a database round trip in the send.
+
+    The whole design rests on recording never making a caller wait. This
+    setting deliberately breaks that for tests, so the trade is stated rather
+    than left to be discovered under load.
+    """
+    try:
+        if not coerce_bool(conf[key], f"{SETTINGS_NAME}['{key}']"):
+            return []
+    except ImproperlyConfigured:
+        return []  # E042 owns the type complaint
+    return [
+        Problem(
+            'is on, so every recorded event is written on the calling thread and a send waits for the database.',
+            hint='Leave it off outside tests.',
+        )
+    ]
+
+
 def _bot_is_enabled() -> bool:
     """Whether the bot is on, coerced the way startup and sending coerce it."""
     try:
@@ -332,6 +497,23 @@ CHECKS: tuple[Check, ...] = (
     Check('E020', 'RATE_LIMIT', _sane_rate_limits),
     Check('E022', 'SERIALIZER', _readable_serializer),
     Check('E019', 'FSM_STORAGE', _importable_storage),
+    Check('E031', 'EVENT_LOG', _a_boolean),
+    Check('E032', 'EVENT_LOG_KINDS', _a_collection_of_strings),
+    Check('E033', 'EVENT_LOG_PAYLOAD', partial(_a_string, allowed=PAYLOAD_CHOICES)),
+    Check('E034', 'EVENT_LOG_MAX_PAYLOAD_BYTES', partial(_an_integer, minimum=0)),
+    Check('E035', 'EVENT_LOG_REDACT_KEYS', _a_collection_of_strings),
+    Check('E036', 'EVENT_LOG_BUFFER_SIZE', partial(_an_integer, minimum=1)),
+    Check('E037', 'EVENT_LOG_BATCH_SIZE', partial(_an_integer, minimum=1)),
+    Check('E038', 'EVENT_LOG_FLUSH_INTERVAL', partial(_an_integer, minimum=1)),
+    Check('E039', 'EVENT_LOG_RETENTION_DAYS', partial(_an_integer, minimum=0)),
+    Check('E040', 'EVENT_LOG_DATABASE', _a_string),
+    Check('E041', 'EVENT_LOG_DATABASE', _a_configured_log_database),
+    Check('E042', 'EVENT_LOG_SYNC', _a_boolean),
+    Check('W005', 'EVENT_LOG', _somewhere_to_write_the_log),
+    Check('W006', 'EVENT_LOG_RETENTION_DAYS', _a_log_that_is_pruned),
+    Check('W007', 'EVENT_LOG_BATCH_SIZE', _a_batch_the_buffer_can_hold),
+    Check('W008', 'EVENT_LOG_KINDS', _kinds_this_version_records),
+    Check('W009', 'EVENT_LOG_SYNC', _a_writer_that_does_not_block),
     Check('W003', '', _known_keys),
     Check(
         'W001',

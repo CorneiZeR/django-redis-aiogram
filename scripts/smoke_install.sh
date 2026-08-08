@@ -29,6 +29,8 @@ for expected in (
     'django_redis_aiogram/py.typed',
     'django_redis_aiogram/api.py',
     'django_redis_aiogram/management/commands/start_tgbot.py',
+    'django_redis_aiogram/migrations/__init__.py',
+    'django_redis_aiogram/migrations/0001_initial.py',
 ):
     assert expected in names, f'{expected} missing from the wheel'
 # 3.0 removed the 1.x package name; packaging it again would silently recreate
@@ -48,7 +50,7 @@ mkdir -p "$work/project"
 cat > "$work/project/settings.py" <<'PY'
 SECRET_KEY = 'smoke'
 INSTALLED_APPS = ['django.contrib.contenttypes', 'django.contrib.auth', 'django_redis_aiogram']
-DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': ':memory:'}}
+DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': 'smoke.sqlite3'}}
 USE_TZ = True
 PY
 cat > "$work/project/manage.py" <<'PY'
@@ -61,6 +63,10 @@ PY
 cd "$work/project"
 echo "check:"
 "$work/venv/bin/python" manage.py check 2>&1 | sed 's/^/    /'
+
+echo "--- the shipped migration applies"
+"$work/venv/bin/python" manage.py migrate --noinput 2>&1 | sed 's/^/    /'
+"$work/venv/bin/python" manage.py makemigrations --check --dry-run 2>&1 | sed 's/^/    /'
 
 echo "--- the 1.x package name is gone from the installed environment"
 "$work/venv/bin/python" - <<'PY'
