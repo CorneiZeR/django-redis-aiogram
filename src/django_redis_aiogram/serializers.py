@@ -44,16 +44,7 @@ from django_redis_aiogram.settings import SETTINGS_NAME, coerce_bool, conf
 
 #: the module's public surface; listing SerializationError keeps its 2.0 import path alive
 __all__ = [
-    'JSON_SERIALIZER',
-    'PICKLE_SERIALIZER',
     'SERIALIZERS',
-    'TAG_BYTES',
-    'TAG_DATE',
-    'TAG_DATETIME',
-    'TAG_DECIMAL',
-    'TAG_DEFAULT',
-    'TAG_INPUT_FILE',
-    'TAG_MODEL',
     'BytesCodec',
     'DateCodec',
     'DatetimeCodec',
@@ -79,18 +70,6 @@ __all__ = [
     'loads',
     'looks_like_json',
 ]
-
-# The 2.0 module constants, now aliases of the enum members that carry the same strings
-TAG_MODEL = SerializationTag.MODEL.value
-TAG_DEFAULT = SerializationTag.DEFAULT.value
-TAG_DATETIME = SerializationTag.DATETIME.value
-TAG_DATE = SerializationTag.DATE.value
-TAG_DECIMAL = SerializationTag.DECIMAL.value
-TAG_BYTES = SerializationTag.BYTES.value
-TAG_INPUT_FILE = SerializationTag.INPUT_FILE.value
-
-JSON_SERIALIZER = SerializerKind.JSON.value
-PICKLE_SERIALIZER = SerializerKind.PICKLE.value
 
 # Frozen like the tags: these name the input file kind inside a queued payload
 FS_INPUT_FILE = 'FSInputFile'
@@ -410,7 +389,7 @@ class JsonSerializer:
     """The default format: tagged JSON, readable and not executable."""
 
     # .value, not the member: this name gets logged and compared, and a member formats as its class
-    name: str = JSON_SERIALIZER
+    name: str = SerializerKind.JSON.value
 
     def dumps(self, payload: dict[str, Any]) -> bytes:
         """Encode a queued call as JSON bytes."""
@@ -439,7 +418,7 @@ class JsonSerializer:
 class PickleSerializer:
     """The 1.x format, kept for objects JSON cannot describe."""
 
-    name: str = PICKLE_SERIALIZER
+    name: str = SerializerKind.PICKLE.value
 
     def dumps(self, payload: dict[str, Any]) -> bytes:
         """Encode a queued call as pickle bytes."""
@@ -462,15 +441,15 @@ class PickleSerializer:
 
 
 SERIALIZERS: dict[str, type[Serializer]] = {
-    JSON_SERIALIZER: JsonSerializer,
-    PICKLE_SERIALIZER: PickleSerializer,
+    SerializerKind.JSON.value: JsonSerializer,
+    SerializerKind.PICKLE.value: PickleSerializer,
 }
 
 
 def get_serializer() -> Serializer:
     """Build the serializer that the ``SERIALIZER`` setting names."""
     name = conf['SERIALIZER']
-    if name == PICKLE_SERIALIZER and not coerce_bool(conf['ALLOW_PICKLE'], f"{SETTINGS_NAME}['ALLOW_PICKLE']"):
+    if name == SerializerKind.PICKLE and not coerce_bool(conf['ALLOW_PICKLE'], f"{SETTINGS_NAME}['ALLOW_PICKLE']"):
         # check E022 reports this, but a WSGI process never runs the checks
         raise PickleWriteRefusedError(SETTINGS_NAME)
     try:

@@ -26,6 +26,16 @@
 - `DeliveryKind` has one member, `BLPOP`. `DELIVERY` stays as a setting so a
   stale `'keyspace'` produces an error naming the legal value, rather than an
   unknown-key warning and a silently different delivery mode.
+- **The 2.0-spelling string constants are gone.** `BLPOP_DELIVERY`,
+  `KEYSPACE_DELIVERY`, `MEMORY_STORAGE`, `REDIS_STORAGE`, `JSON_SERIALIZER`,
+  `PICKLE_SERIALIZER`, the `TAG_*` names, `OVERALL_PER_SECOND`,
+  `PER_CHAT_PER_SECOND`, `GROUP_PER_MINUTE`, `POLLING` and `WEBHOOK` were
+  aliases of the enum members carrying the same strings, kept because 2.0 had
+  shipped them under those names. Import the member instead —
+  `SerializerKind.JSON`, `SerializationTag.MODEL`, `UpdateMode.WEBHOOK` — and
+  interpolate `.value`, never the member: a `(str, Enum)` member formats as its
+  own qualified name on newer Pythons. The values are unchanged, so nothing in
+  Redis or in your settings has to move.
 
 ### Documentation
 

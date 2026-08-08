@@ -35,12 +35,6 @@ logger = logging.getLogger('django_redis_aiogram')
 
 Handler = Callable[..., Any]
 
-# the names the DELIVERY setting takes, kept importable from here because that
-# is where callers have always found them
-# aliases carry the plain strings 2.0 shipped: a (str, Enum) member would
-# interpolate as its qualified name on newer Pythons, and these are public
-BLPOP_DELIVERY = DeliveryKind.BLPOP.value
-
 
 def worker_identity() -> str:
     """Name this worker's processing list.
@@ -252,7 +246,7 @@ class BlpopDelivery(Delivery):
         logger.info(
             'delivery started',
             extra={
-                'tg_delivery': BLPOP_DELIVERY,
+                'tg_delivery': DeliveryKind.BLPOP.value,
                 'tg_key': self.queue_key,
                 'tg_timeout': timeout,
                 'tg_crash_safe': self._reliable,

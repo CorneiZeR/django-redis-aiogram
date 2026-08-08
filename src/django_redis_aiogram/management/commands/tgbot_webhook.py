@@ -11,7 +11,8 @@ from typing import Any
 from django.core.management import BaseCommand, CommandError
 
 from django_redis_aiogram import bot
-from django_redis_aiogram.webhook import WEBHOOK, current_mode, webhook_settings
+from django_redis_aiogram.enums import UpdateMode
+from django_redis_aiogram.webhook import current_mode, webhook_settings
 
 
 class Command(BaseCommand):
@@ -44,7 +45,7 @@ class Command(BaseCommand):
             bot.close()
 
     def _set(self, options: dict[str, Any]) -> None:
-        if current_mode() != WEBHOOK:
+        if current_mode() != UpdateMode.WEBHOOK:
             self.stdout.write(
                 self.style.WARNING(
                     f"TELEGRAM_BOT['MODE'] is '{current_mode()}': registering this webhook "

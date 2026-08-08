@@ -19,18 +19,9 @@ from aiogram.types.input_file import BufferedInputFile, FSInputFile, URLInputFil
 from django.core.exceptions import ImproperlyConfigured
 from django.test import override_settings
 
-from django_redis_aiogram.enums import SerializationTag
+from django_redis_aiogram.enums import SerializationTag, SerializerKind
 from django_redis_aiogram.serializers import (
     _CODECS,
-    JSON_SERIALIZER,
-    PICKLE_SERIALIZER,
-    TAG_BYTES,
-    TAG_DATE,
-    TAG_DATETIME,
-    TAG_DECIMAL,
-    TAG_DEFAULT,
-    TAG_INPUT_FILE,
-    TAG_MODEL,
     JsonSerializer,
     PickleSerializer,
     SerializationError,
@@ -169,9 +160,10 @@ def test_full_call_payload():
     assert restored['reply_markup'] == payload['reply_markup']
 
 
-def test_the_module_constants_are_the_frozen_strings():
-    """They are enum members now; queued payloads and settings still read them as text."""
-    assert (TAG_MODEL, TAG_DEFAULT, TAG_DATETIME, TAG_DATE, TAG_DECIMAL, TAG_BYTES, TAG_INPUT_FILE) == (
+def test_the_enum_values_are_frozen():
+    """Queued payloads carry these tags and settings carry these names, so a
+    member may be renamed but never revalued."""
+    assert tuple(tag.value for tag in SerializationTag) == (
         '__model__',
         '__default__',
         '__datetime__',
@@ -180,7 +172,7 @@ def test_the_module_constants_are_the_frozen_strings():
         '__bytes__',
         '__input_file__',
     )
-    assert (JSON_SERIALIZER, PICKLE_SERIALIZER) == ('json', 'pickle')
+    assert tuple(kind.value for kind in SerializerKind) == ('json', 'pickle')
 
 
 def test_a_tag_lands_in_the_payload_as_a_plain_key():
