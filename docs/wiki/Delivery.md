@@ -60,7 +60,10 @@ and logged, not redelivered forever.
 `Delivery.dispatch()` is what decides that, and its return value is the whole
 contract: `True` means the consumer acknowledges the message — removing it from
 the in-flight list — and `False` means it does not, leaving the message there
-for a later run to reclaim. Exactly one case returns `False` today: a pickled
+for a later run to reclaim. Withholding the acknowledgement only saves the
+message where there *is* an in-flight list: without `LMOVE` the message was
+already popped before it was refused, so `False` and `True` come to the same
+thing and it is gone. Exactly one case returns `False` today: a pickled
 payload refused because `ALLOW_PICKLE` is off, which is the one failure a
 change of configuration can undo. Everything else — undecodable bytes, a method
 that is not Telegram API, a handler that raised — returns `True`, because
