@@ -18,8 +18,9 @@ from django.core.management import BaseCommand
 
 from django_redis_aiogram import bot
 from django_redis_aiogram.delivery import get_delivery
+from django_redis_aiogram.enums import UpdateMode
 from django_redis_aiogram.settings import conf
-from django_redis_aiogram.webhook import MODES, WEBHOOK, current_mode
+from django_redis_aiogram.webhook import MODES, current_mode
 
 logger = logging.getLogger('django_redis_aiogram')
 
@@ -85,7 +86,7 @@ class Command(BaseCommand):
                     'changes this process only: '
                     + (
                         'the webhook view still refuses updates while the setting says polling'
-                        if mode == WEBHOOK
+                        if mode == UpdateMode.WEBHOOK
                         else 'getUpdates fails while a webhook is registered'
                     )
                 )
@@ -94,7 +95,7 @@ class Command(BaseCommand):
         delivery = get_delivery(handler=bot.send_raw)
         threads: list[threading.Thread] = []
 
-        if mode == WEBHOOK:
+        if mode == UpdateMode.WEBHOOK:
             # nothing will run the loop here, so the callback below would never
             # fire. The consumer drives the loop itself for each send instead,
             # under the same lock a web thread uses.
@@ -109,7 +110,7 @@ class Command(BaseCommand):
 
         try:
             with contextlib.suppress(KeyboardInterrupt, SystemExit):
-                if mode == WEBHOOK:
+                if mode == UpdateMode.WEBHOOK:
                     self.stdout.write('Consuming the queue; updates are expected over HTTP.')
                     (self.idle_event or threading.Event()).wait()
                 else:

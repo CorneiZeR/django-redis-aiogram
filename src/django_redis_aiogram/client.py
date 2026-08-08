@@ -33,12 +33,6 @@ from django_redis_aiogram.throttling import RateLimiter, get_rate_limiter
 
 logger = logging.getLogger('django_redis_aiogram')
 
-#: the pre-2.2 spellings, kept importable; StorageKind is the name to use now
-# aliases carry the plain strings 2.0 shipped: a (str, Enum) member would
-# interpolate as its qualified name on newer Pythons, and these are public
-MEMORY_STORAGE = StorageKind.MEMORY.value
-REDIS_STORAGE = StorageKind.REDIS.value
-
 # run_until_complete is not reentrant, and the loop — not the bot — is what
 # cannot be entered twice. Two bots handed the same loop must share one lock.
 _loop_locks: 'weakref.WeakKeyDictionary[AbstractEventLoop, threading.Lock]' = weakref.WeakKeyDictionary()

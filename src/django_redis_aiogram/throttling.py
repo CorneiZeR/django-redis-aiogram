@@ -31,14 +31,6 @@ from django_redis_aiogram.settings import SETTINGS_NAME, conf
 Clock = Callable[[], float]
 Sleeper = Callable[[float], Awaitable[None]]
 
-# the budget names, kept as module constants because that is how 2.0 exposed
-# them; never interpolate one, an (str, Enum) member formats as its own repr
-# aliases carry the plain strings 2.0 shipped: a (str, Enum) member would
-# interpolate as its qualified name on newer Pythons, and these are public
-OVERALL_PER_SECOND = RateLimitKey.OVERALL_PER_SECOND.value
-PER_CHAT_PER_SECOND = RateLimitKey.PER_CHAT_PER_SECOND.value
-GROUP_PER_MINUTE = RateLimitKey.GROUP_PER_MINUTE.value
-
 KNOWN_RATE_LIMIT_KEYS = choices(RateLimitKey)
 
 # the shipped limits live in defaults.py; duplicating them here would drift
@@ -113,9 +105,9 @@ class RateLimiter:
 
     def __init__(
         self,
-        overall_per_second: float = RATE_LIMIT_DEFAULTS[OVERALL_PER_SECOND],
-        per_chat_per_second: float = RATE_LIMIT_DEFAULTS[PER_CHAT_PER_SECOND],
-        group_per_minute: float = RATE_LIMIT_DEFAULTS[GROUP_PER_MINUTE],
+        overall_per_second: float = RATE_LIMIT_DEFAULTS[RateLimitKey.OVERALL_PER_SECOND.value],
+        per_chat_per_second: float = RATE_LIMIT_DEFAULTS[RateLimitKey.PER_CHAT_PER_SECOND.value],
+        group_per_minute: float = RATE_LIMIT_DEFAULTS[RateLimitKey.GROUP_PER_MINUTE.value],
         *,
         clock: Clock = time.monotonic,
         sleep: Sleeper = asyncio.sleep,

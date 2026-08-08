@@ -29,10 +29,6 @@ logger = logging.getLogger('django_redis_aiogram')
 
 #: what Telegram sends the configured secret back in
 SECRET_HEADER = 'HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN'  # noqa: S105 - a header name, not the secret it carries
-# aliases: the modes were named here before the enums module existed, and both
-# this package and its consumers import them from this path
-POLLING = UpdateMode.POLLING.value
-WEBHOOK = UpdateMode.WEBHOOK.value
 #: plain strings, so argparse choices and messages read as the settings do
 MODES = choices(UpdateMode)
 
@@ -73,7 +69,7 @@ def telegram_webhook(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911 - a
         logger.warning('webhook received an update while the bot is disabled')
         return HttpResponse(status=503)
 
-    if current_mode() != WEBHOOK:
+    if current_mode() != UpdateMode.WEBHOOK:
         # serving updates here while a worker polls for them would mean two
         # sources of updates and no way to tell which handled what
         logger.warning(
