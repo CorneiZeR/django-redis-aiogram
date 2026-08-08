@@ -52,13 +52,10 @@ class TelegramEvent(models.Model):
         ordering = ('-id',)
         verbose_name = 'telegram event'
         verbose_name_plural = 'telegram events'
-        # the feed is append-only, so add/change/delete would be permissions
-        # nothing can ever act on
-        default_permissions = ('view',)
-        permissions = (
-            ('view_telegramevent_payload', 'Can see event payloads and error text'),
-            ('prune_telegramevent', 'Can prune the event log'),
-        )
+        # Django's four stock permissions, plus the one it has no equivalent for:
+        # there are no field-level permissions, and seeing that a message went
+        # out is a different question from reading what it said
+        permissions = (('view_telegramevent_payload', 'Can see event payloads and error text'),)
         # named explicitly and kept short: Oracle rejects an identifier over 30
         indexes = (
             models.Index(fields=('correlation_id',), name='drai_event_correlation'),

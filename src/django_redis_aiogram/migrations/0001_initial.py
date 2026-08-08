@@ -38,11 +38,7 @@ class Migration(migrations.Migration):
                 'verbose_name_plural': 'telegram events',
                 'db_table': 'django_redis_aiogram_event',
                 'ordering': ('-id',),
-                'permissions': (
-                    ('view_telegramevent_payload', 'Can see event payloads and error text'),
-                    ('prune_telegramevent', 'Can prune the event log'),
-                ),
-                'default_permissions': ('view',),
+                'permissions': (('view_telegramevent_payload', 'Can see event payloads and error text'),),
                 'indexes': [
                     models.Index(fields=['correlation_id'], name='drai_event_correlation'),
                     models.Index(fields=['-created_at'], name='drai_event_recent'),

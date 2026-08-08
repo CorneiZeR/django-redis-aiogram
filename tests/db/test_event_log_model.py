@@ -55,17 +55,20 @@ def test_the_index_names_fit_oracle():
 
 
 @pytest.mark.django_db
-def test_only_view_and_the_two_custom_permissions_exist():
-    """The feed is append-only, so add/change/delete would be permissions
-    nothing can ever act on — and they only make a group's picker harder to read."""
+def test_the_permissions_are_the_stock_four_plus_one():
+    """Only one custom permission, and only because Django has no equivalent:
+    there are no field-level permissions, so 'saw that it went out' and 'read
+    what it said' cannot otherwise be granted separately."""
     codenames = set(
         Permission.objects.filter(content_type__app_label='django_redis_aiogram').values_list('codename', flat=True)
     )
 
     assert codenames == {
+        'add_telegramevent',
+        'change_telegramevent',
+        'delete_telegramevent',
         'view_telegramevent',
         'view_telegramevent_payload',
-        'prune_telegramevent',
     }, codenames
 
 

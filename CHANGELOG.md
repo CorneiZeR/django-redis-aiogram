@@ -63,11 +63,11 @@
   runs on a thread nobody is watching.
 - **This package now ships a migration.** Run `manage.py migrate` after
   upgrading whether or not you turn the log on: the table is created either way,
-  and creating it later on a live database is the more expensive order. Only
-  `view` is created as a model permission — the feed is append-only, so add,
-  change and delete would be permissions nothing can act on — alongside
-  `view_telegramevent_payload` and `prune_telegramevent`, so reading the feed
-  and reading message bodies can be delegated separately.
+  and creating it later on a live database is the more expensive order. It
+  creates Django's four stock model permissions plus one,
+  `view_telegramevent_payload`: there are no field-level permissions, so
+  without it "saw that the message went out" and "read what it said" cannot be
+  granted separately.
 
 ### Changed
 
