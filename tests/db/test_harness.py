@@ -31,11 +31,18 @@ def test_the_package_owns_no_tables_yet():
     assert owned == [], owned
 
 
-def test_the_admin_is_installed():
-    """The admin tests need the full stack: contenttypes, auth, sessions,
-    messages, templates and a URLconf."""
-    assert 'django.contrib.admin' in settings.INSTALLED_APPS
-    assert settings.ROOT_URLCONF == 'tests.db_urls'
+@pytest.mark.django_db
+def test_the_admin_is_reachable(client):
+    """Driven rather than described.
+
+    Comparing INSTALLED_APPS and ROOT_URLCONF would still pass with the admin
+    route deleted from tests/db_urls.py, which is the regression this exists to
+    catch. Rendering the login page also proves the templates, the context
+    processors and the session and message middleware are all wired up.
+    """
+    response = client.get('/admin/login/')
+
+    assert response.status_code == 200
 
 
 @pytest.mark.django_db(transaction=True)
