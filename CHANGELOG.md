@@ -37,6 +37,38 @@
   own qualified name on newer Pythons. The values are unchanged, so nothing in
   Redis or in your settings has to move.
 
+### Added
+
+- **An event log.** `TELEGRAM_BOT['EVENT_LOG'] = True` records what the package
+  did — a message queued, delivered, failed or retried, an update received, an
+  FSM transition, a payload refused — as rows in one append-only table. Rows for
+  the same message share a `correlation_id`, so the row a web process wrote when
+  it queued the send lines up with the row the bot container wrote when it
+  delivered it, across two processes, with no coordination and no foreign key
+  either way. See **Event log** in the wiki.
+- Writes go through one background thread that batches with `bulk_create`, so no
+  send ever waits on the database. A database that is slow or down costs dropped
+  rows, never dropped messages; the drop is logged and, once the writer catches
+  up, recorded as a `log.dropped` row so the gap is visible in the data too.
+- `EVENT_LOG_KINDS` selects which kinds to keep, and `events.register_kind` adds
+  your own. `kind` is an unconstrained column and the registry lives in Python,
+  so adding a kind is not a migration.
+- `EVENT_LOG_DATABASE` puts the log on another `DATABASES` alias, with
+  `django_redis_aiogram.dbrouter.TelegramEventLogRouter` to move `migrate` with
+  it. The writer names the alias explicitly, so the feature is correct with no
+  router installed at all.
+- Checks `E031`–`E042` and `W005`–`W008`, including the two that would otherwise
+  only show up in production: an alias that is not in `DATABASES`, and a log
+  switched on where the database has no engine. Both matter because the writer
+  runs on a thread nobody is watching.
+- **This package now ships a migration.** Run `manage.py migrate` after
+  upgrading whether or not you turn the log on: the table is created either way,
+  and creating it later on a live database is the more expensive order. Only
+  `view` is created as a model permission — the feed is append-only, so add,
+  change and delete would be permissions nothing can act on — alongside
+  `view_telegramevent_payload` and `prune_telegramevent`, so reading the feed
+  and reading message bodies can be delegated separately.
+
 ### Changed
 
 - `ALLOW_PICKLE` is documented as what it is: the escape hatch for payloads JSON

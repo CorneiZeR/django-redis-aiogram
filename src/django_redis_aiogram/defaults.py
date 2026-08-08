@@ -60,4 +60,29 @@ DEFAULTS: dict[str, Any] = {
     'WEBHOOK_SECRET': '',
     # which update types to receive; empty means Telegram's own default set
     'WEBHOOK_ALLOWED_UPDATES': (),
+    # record what the bot did to a table, one row per event, insert only. Off by
+    # default: it is a table whose size is set by traffic, so turning it on is a
+    # decision, and it needs a retention job to go with it
+    'EVENT_LOG': False,
+    # which kinds to keep; empty means every kind this version knows. Naming any
+    # also opts out of the kinds a later release adds
+    'EVENT_LOG_KINDS': (),
+    # 'none', 'summary' (argument names and sizes) or 'full' (message bodies).
+    # The default keeps personal data out of the table until you ask for it
+    'EVENT_LOG_PAYLOAD': 'summary',
+    'EVENT_LOG_MAX_PAYLOAD_BYTES': 8192,
+    # values under these keys are blanked before a row is written
+    'EVENT_LOG_REDACT_KEYS': ('token', 'secret', 'password', 'authorization', 'api_key', 'session'),
+    # events held in memory while the writer is behind; a full buffer drops the
+    # event rather than making a send wait on the database
+    'EVENT_LOG_BUFFER_SIZE': 1000,
+    'EVENT_LOG_BATCH_SIZE': 200,
+    'EVENT_LOG_FLUSH_INTERVAL': 1,
+    # days a row is kept; 0 keeps them for ever. Nothing on the write path
+    # deletes anything — `manage.py tgbot_prune_events` is what reads this
+    'EVENT_LOG_RETENTION_DAYS': 0,
+    # a DATABASES alias for the log; empty means the default one
+    'EVENT_LOG_DATABASE': '',
+    # write on the calling thread instead of the writer's: tests only
+    'EVENT_LOG_SYNC': False,
 }

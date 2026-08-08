@@ -13,6 +13,7 @@
 * [[Rate-limits|Rate limits]]
 * [[Deployment]]
 * [[Logging]]
+* [[Event-log|Event log]]
 
 **Reference**
 * [[API]]

@@ -19,10 +19,15 @@ src/django_redis_aiogram/
     delivery.py     BlpopDelivery, the one consumer
     serializers.py  tagged JSON, and pickle behind ALLOW_PICKLE
     throttling.py   token buckets, one budget per token
-    checks.py       system checks E001-E030, W001-W004
+    checks.py       system checks E001-E042, W001-W008
     settings.py     lazy settings with an environment fallback
     redis.py        lazy connection
     routers.py      autodiscover
+    models.py       TelegramEvent, the append-only feed; migrations/ beside it
+    events.py       the event-kind registry and the correlation id
+    recorder.py     the bounded queue and the writer thread; no django.db here
+    eventlog.py     the only module that touches the ORM
+    dbrouter.py     optional routing of the log to its own database
 docs/wiki/          the wiki, published from master
 tests/              pytest, fakeredis, no network
 ```
@@ -90,6 +95,27 @@ Packaging-only work does not need the Redis suite, and vice versa.
   `TelegramBot` that predates 2.0 — attributes, methods and the observer
   decorators. Adding to that surface is fine; moving or removing anything on it
   is a breaking change and needs the changelog entry to say so.
+- **`models.py` imports no aiogram.** Django imports it on every
+  `django.setup()`, before `ready()` and regardless of `ENABLED`, so a migration
+  container pays for whatever it pulls. `django.db.models` and
+  `django_redis_aiogram.enums`/`events` only — never `client`, `serializers` or
+  `api`. `tests/test_event_log_off.py` boots a subprocess to prove it.
+- **`recorder.py` imports no `django.db`.** Only `eventlog.py` does, and the
+  writer thread imports it on its first flush. That is what makes a disabled log
+  cost nothing and what makes `record()` legal from a coroutine — `put_nowait`
+  touches no I/O, so there is no `SynchronousOnlyOperation` to avoid.
+- **The feed is append-only.** No updates, no foreign keys, no
+  `Meta.constraints`, no index on the JSON column. Fast pruning, shardability
+  and two processes writing one message's history without coordination all rest
+  on it; a foreign key alone breaks Django's fast-delete path.
+- **`record()` may neither raise nor wait.** A log that can break delivery is
+  worse than no log, so everything — the settings read included — is wrapped.
+- **The fact table stores identifiers, never descriptors.** A chat title belongs
+  in `detail` as a snapshot of the event, not in a column.
+- **The token must not reach a row.** It is in the API URL, aiogram puts the URL
+  in its exception messages, and those messages are what an `error` column holds.
+- **Interpolate `.value`, never a `(str, Enum)` member.** On newer Pythons a
+  member formats as its own qualified name.
 
 ## Style
 

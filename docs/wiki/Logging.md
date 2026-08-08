@@ -50,6 +50,13 @@ All prefixed with `tg_`, to avoid colliding with `LogRecord` attributes.
 | `delivery started` | INFO | the consumer is up |
 | `message sent` | INFO | one call succeeded |
 
+## The database event log
+
+This page is about the structured log: a stream, shipped somewhere, rotated.
+**[[Event-log|Event log]]** is the other tool — an optional table you can query
+and join against your own models, off by default. Use the log for volume and
+alerting, and the table for the questions that outlive a retention window.
+
 ## With structlog
 
 `ProcessorFormatter` drops stdlib `extra` unless `ExtraAdder` is in its
