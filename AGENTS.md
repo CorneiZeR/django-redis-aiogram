@@ -32,9 +32,15 @@ tests/              pytest, fakeredis, no network
 ```shell
 pip install -e '.[dev]'
 ruff check . && ruff format --check . && mypy && python -m pytest -q
+python -m pytest -q --ds=tests.db_settings tests/db
 ```
 
-Those four gate every pull request. `pytest` needs no Redis and no token.
+Those gate every pull request. `pytest` needs no Redis and no token.
+
+The second invocation is the database-backed half. `tests/settings.py` has
+`DATABASES = {}` on purpose — proving the package boots without one is part of
+what the suite tests — so anything needing a database lives in `tests/db` under
+`tests/db_settings.py`, and the default run ignores that directory.
 
 CI also runs the two below — integration against a real Redis service, and the
 smoke install — so a change that only passes the loop above can still fail the
