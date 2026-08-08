@@ -23,6 +23,7 @@ from aiogram.dispatcher.event.bases import CancelHandler
 from aiogram.fsm.state import State
 from aiogram.fsm.storage.base import BaseStorage, StateType, StorageKey
 from aiogram.types import TelegramObject, Update
+from aiogram.types.update import UpdateTypeLookupError
 
 from django_redis_aiogram.context import correlation_scope, current_correlation_id
 from django_redis_aiogram.enums import EventKind
@@ -42,13 +43,27 @@ def state_name(state: StateType) -> str | None:
     return str(state)
 
 
+def event_type(update: Update) -> str:
+    """Name the update's type, or nothing when this aiogram does not know it.
+
+    `Update.event_type` raises rather than returning None, and a Bot API newer
+    than the installed aiogram is exactly when it does. aiogram itself treats
+    that as an update to skip, so the log must not be what turns it into an
+    error.
+    """
+    try:
+        return update.event_type
+    except UpdateTypeLookupError:
+        return ''
+
+
 def describe_update(update: Update) -> dict[str, Any]:
     """Summarise an update, under the same payload policy a send obeys."""
     message = update.message or update.edited_message
     query = update.callback_query
     return describe(
         {
-            'type': getattr(update, 'event_type', None),
+            'type': event_type(update) or None,
             'text': getattr(message, 'text', None),
             'data': getattr(query, 'data', None),
         }
@@ -94,7 +109,7 @@ class RecordingMiddleware(BaseMiddleware):
                 kind=EventKind.INBOUND_RECEIVED.value,
                 correlation_id=identifier,
                 update_id=inbound.update_id,
-                function=str(getattr(event, 'event_type', '') or ''),
+                function=event_type(event),
                 chat_id=inbound.chat_id,
                 user_id=inbound.user_id,
                 detail=describe_update(event),
@@ -120,10 +135,14 @@ class RecordingMiddleware(BaseMiddleware):
             return result
 
     @staticmethod
-    def _record(kind: EventKind, inbound: 'Inbound', **rest: Any) -> None:
+    def _record(
+        kind: EventKind,
+        inbound: 'Inbound',
+        *,
+        error: BaseException | None = None,
+        raw_state: object = None,
+    ) -> None:
         """Record the outcome of one update, with how long the handlers took."""
-        error = rest.pop('error', None)
-        raw_state = rest.pop('raw_state', None)
         recorder.record(
             Event(
                 kind=kind.value,
@@ -174,6 +193,10 @@ class RecordingStorage(BaseStorage):
     async def get_data(self, key: StorageKey) -> dict[str, Any]:
         """Forward unchanged."""
         return await self.inner.get_data(key)
+
+    async def update_data(self, key: StorageKey, data: Mapping[str, Any]) -> dict[str, Any]:
+        """Forward rather than inherit: a storage may make this one round trip."""
+        return await self.inner.update_data(key, data)
 
     async def close(self) -> None:
         """Forward: TelegramBot.close releases the storage through this."""

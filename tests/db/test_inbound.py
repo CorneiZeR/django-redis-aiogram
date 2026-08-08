@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import pytest
 from aiogram import Bot, Dispatcher, Router
 from aiogram.client.default import DefaultBotProperties
+from aiogram.dispatcher.event.bases import UNHANDLED
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.base import StorageKey
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -49,6 +50,10 @@ class SpyStorage(MemoryStorage):
     async def get_data(self, key):
         self.calls.append('get_data')
         return await super().get_data(key)
+
+    async def update_data(self, key, data):
+        self.calls.append('update_data')
+        return await super().update_data(key, data)
 
     async def close(self):
         self.calls.append('close')
@@ -204,15 +209,44 @@ def test_the_wrapper_forwards_everything_else():
         await storage.set_data(key, {'answer': 42})
         state = await storage.get_state(key)
         data = await storage.get_data(key)
+        merged = await storage.update_data(key, {'more': 1})
         await storage.close()
-        return state, data
+        return state, data, merged
 
-    state, data = asyncio.run(exercise())
+    state, data, merged = asyncio.run(exercise())
 
     assert state == 'Form:name'
     assert data == {'answer': 42}
+    assert merged == {'answer': 42, 'more': 1}
+    # update_data has a default that would route through get_data/set_data and
+    # so pass this suite while silently costing a storage its one round trip
     # TelegramBot.close releases the storage through this, so it has to arrive
-    assert inner.calls == ['set_state', 'set_data', 'get_state', 'get_data', 'close'], inner.calls
+    assert inner.calls[:4] == ['set_state', 'set_data', 'get_state', 'get_data'], inner.calls
+    assert 'update_data' in inner.calls, 'update_data was reimplemented instead of forwarded'
+    assert inner.calls[-1] == 'close', inner.calls
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT=ON)
+def test_an_update_this_aiogram_cannot_name_is_recorded_rather_than_raised():
+    """`Update.event_type` raises for a Bot API newer than the installed
+    aiogram, and aiogram answers that with a warning and an unhandled update.
+
+    Reading it unguarded made the log the thing that broke delivery, which is
+    the one thing recording is never allowed to do.
+    """
+
+    async def handler(message):
+        return None
+
+    with pytest.warns(RuntimeWarning, match='unknown update type'):
+        result = feed(a_dispatcher(handler), Update(update_id=9))
+    recorder.flush(timeout=5)
+
+    assert result is UNHANDLED
+    row = TelegramEvent.objects.get(kind=EventKind.INBOUND_RECEIVED.value)
+    assert row.update_id == 9
+    assert row.function == ''
 
 
 def test_nothing_is_installed_while_the_log_is_off():
