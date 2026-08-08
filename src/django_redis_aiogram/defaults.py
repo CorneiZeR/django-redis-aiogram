@@ -16,7 +16,7 @@ DEFAULTS: dict[str, Any] = {
     # import <app>.<MODULE_NAME> for every installed app on startup
     'AUTODISCOVER': True,
     'MODULE_NAME': 'tg_router',
-    # blpop (recommended) or keyspace (legacy, expiry-event based)
+    # blpop; the keyspace consumer 1.x used was removed in 3.0
     'DELIVERY': 'blpop',
     # either json or pickle, json recommended
     'SERIALIZER': 'json',
@@ -60,7 +60,4 @@ DEFAULTS: dict[str, Any] = {
     'WEBHOOK_SECRET': '',
     # which update types to receive; empty means Telegram's own default set
     'WEBHOOK_ALLOWED_UPDATES': (),
-    # keyspace delivery only
-    'REDIS_EXP_KEY': 'TELEGRAM_BOT_EXP',
-    'REDIS_EXP_TIME': 5,
 }

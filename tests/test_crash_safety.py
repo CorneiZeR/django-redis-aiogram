@@ -15,7 +15,7 @@ from redis.exceptions import ResponseError
 
 from django_redis_aiogram import TelegramBot
 from django_redis_aiogram.api import API_METHODS, check_function
-from django_redis_aiogram.delivery import BlpopDelivery, KeyspaceDelivery
+from django_redis_aiogram.delivery import BlpopDelivery
 from django_redis_aiogram.serializers import JsonSerializer, PickleSerializer
 
 LOGGER = 'django_redis_aiogram'
@@ -154,48 +154,27 @@ def test_falls_back_to_plain_pops_on_an_old_server(old_redis_server):
     assert delivery._reliable is False
 
 
-@override_settings(TELEGRAM_BOT={**SETTINGS, 'DELIVERY': 'keyspace'})
-def test_keyspace_acknowledges_too(redis_server):
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_draining_acknowledges_too(redis_server):
+    """consume_pending is the no-thread drain the Testing page documents; it
+    has to clear the processing list the same way the blocking loop does."""
     handled = []
-    delivery = KeyspaceDelivery(handler=lambda **kwargs: handled.append(kwargs))
+    delivery = BlpopDelivery(handler=lambda **kwargs: handled.append(kwargs))
     redis_server.rpush(QUEUE, payload(3))
 
-    delivery._on_expired({'data': b'TELEGRAM_BOT_EXP'})
+    delivery.consume_pending()
 
     assert [item['chat_id'] for item in handled] == [3]
     assert redis_server.llen(PROCESSING) == 0
 
 
-@override_settings(TELEGRAM_BOT={**SETTINGS, 'DELIVERY': 'keyspace'})
-def test_keyspace_accepts_str_event_data(redis_server):
-    """pubsub hands back str when the URL enables decode_responses; 1.x-style
-    unconditional .decode() crashed the consumer thread on it."""
-    handled = []
-    delivery = KeyspaceDelivery(handler=lambda **kwargs: handled.append(kwargs))
-    redis_server.rpush(QUEUE, payload(9))
-
-    delivery._on_expired({'data': 'TELEGRAM_BOT_EXP'})
-
-    assert [item['chat_id'] for item in handled] == [9]
-
-
-@override_settings(TELEGRAM_BOT={**SETTINGS, 'DELIVERY': 'keyspace'})
-def test_keyspace_drains_a_backlog_left_while_the_worker_was_down(redis_server):
-    """Expiry events are not replayed, so a backlog would otherwise sit in the
-    list until some later message happened to trigger one."""
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_draining_clears_a_backlog_left_while_the_worker_was_down(redis_server):
     for chat_id in (1, 2):
         redis_server.rpush(QUEUE, payload(chat_id))
 
     handled = []
-    delivery = KeyspaceDelivery(handler=lambda **kwargs: handled.append(kwargs['chat_id']))
-    thread = delivery.start_thread()
-    waiter = threading.Event()
-    for _ in range(500):
-        if len(handled) >= 2:
-            break
-        waiter.wait(0.01)
-    delivery.stop()
-    thread.join(timeout=5)
+    BlpopDelivery(handler=lambda **kwargs: handled.append(kwargs['chat_id'])).consume_pending()
 
     assert sorted(handled) == [1, 2], handled
     assert redis_server.llen(QUEUE) == 0
@@ -304,42 +283,6 @@ def test_reclaim_is_retried_when_redis_was_down_at_startup(redis_server):
     assert redis_server.llen(PROCESSING) == 0
 
 
-@override_settings(TELEGRAM_BOT={**SETTINGS, 'DELIVERY': 'keyspace'})
-def test_the_keyspace_consumer_also_retries_a_failed_reclaim(redis_server):
-    """Both loops call reclaim once at startup, so both need the retry."""
-    redis_server.rpush(PROCESSING, payload(7))
-    failures = []
-
-    class DownForTwoAttempts:
-        def lmove(self, *args, **kwargs):
-            if len(failures) < 2:
-                failures.append(True)
-                msg = 'Connection refused'
-                raise ConnectionError(msg)
-            return redis_server.lmove(*args, **kwargs)
-
-        def __getattr__(self, name):
-            return getattr(redis_server, name)
-
-    handled = []
-    delivery = KeyspaceDelivery(handler=lambda **kwargs: handled.append(kwargs['chat_id']))
-    with pytest.MonkeyPatch.context() as patch:
-        patch.setattr('django_redis_aiogram.delivery.get_redis', DownForTwoAttempts)
-        thread = delivery.start_thread()
-        waiter = threading.Event()
-        for _ in range(500):
-            if handled:
-                break
-            waiter.wait(0.01)
-        alive_through_the_outage = thread.is_alive()
-        delivery.stop()
-        thread.join(timeout=5)
-
-    assert alive_through_the_outage, 'the consumer thread died during the outage'
-    assert len(failures) == 2, 'the outage did not last, so the retry loop was not tested'
-    assert handled == [7], handled
-
-
 @override_settings(TELEGRAM_BOT=SETTINGS)
 def test_a_response_error_that_is_not_a_missing_lmove_keeps_crash_safety(redis_server, caplog):
     """WRONGTYPE says nothing about LMOVE support; downgrading on it would give
@@ -360,111 +303,6 @@ def test_a_response_error_that_is_not_a_missing_lmove_keeps_crash_safety(redis_s
 
     assert delivery._reliable is True, 'crash-safe mode was given up on the wrong error'
     assert 'could not reclaim previous messages' in caplog.text
-
-
-@override_settings(TELEGRAM_BOT={**SETTINGS, 'DELIVERY': 'keyspace'})
-def test_a_redis_that_fails_to_subscribe_does_not_kill_the_worker(redis_server, caplog):
-    """subscribe() is a network call; 1.x-style setup outside the loop died on it."""
-    attempts = []
-
-    class RefusesSubscribe:
-        def pubsub(self, *args, **kwargs):
-            attempts.append(True)
-            msg = 'Connection refused'
-            raise ConnectionError(msg)
-
-        def __getattr__(self, name):
-            return getattr(redis_server, name)
-
-    delivery = KeyspaceDelivery(handler=lambda **kwargs: None)
-    with pytest.MonkeyPatch.context() as patch, caplog.at_level('ERROR', logger=LOGGER):
-        patch.setattr('django_redis_aiogram.delivery.get_redis', RefusesSubscribe)
-        thread = delivery.start_thread()
-        waiter = threading.Event()
-        for _ in range(300):
-            if len(attempts) >= 2:  # it came back for a second go
-                break
-            waiter.wait(0.01)
-        still_running = thread.is_alive()
-        delivery.stop()
-        thread.join(timeout=5)
-
-    assert len(attempts) >= 2, f'the consumer did not retry the subscription: {len(attempts)}'
-    assert still_running, 'a failed subscribe ended the consumer'
-    assert 'keyspace consumer error, retrying' in caplog.text
-
-
-@override_settings(TELEGRAM_BOT={**SETTINGS, 'DELIVERY': 'keyspace'})
-def test_a_redis_that_refuses_config_set_only_warns(redis_server, caplog):
-    """Managed providers (ElastiCache, Upstash) refuse CONFIG SET.
-
-    1.x died on that; the worker has to say so and carry on, because the list is
-    still readable — which is what the startup drain below proves.
-    """
-    redis_server.rpush(QUEUE, payload(3))
-
-    class RefusesConfigSet:
-        def config_get(self, *args, **kwargs):
-            msg = "unknown command 'CONFIG'"
-            raise ResponseError(msg)
-
-        def config_set(self, *args, **kwargs):
-            msg = "unknown command 'CONFIG'"
-            raise ResponseError(msg)
-
-        def __getattr__(self, name):
-            return getattr(redis_server, name)
-
-    handled = []
-    delivery = KeyspaceDelivery(handler=lambda **kwargs: handled.append(kwargs['chat_id']))
-    with pytest.MonkeyPatch.context() as patch, caplog.at_level('WARNING', logger=LOGGER):
-        patch.setattr('django_redis_aiogram.delivery.get_redis', RefusesConfigSet)
-        thread = delivery.start_thread()
-        waiter = threading.Event()
-        for _ in range(500):
-            if handled:
-                break
-            waiter.wait(0.01)
-        still_running = thread.is_alive()
-        delivery.stop()
-        thread.join(timeout=5)
-
-    assert 'cannot enable keyspace notifications' in caplog.text
-    assert still_running, 'the refusal killed the consumer thread'
-    assert handled == [3], handled
-
-
-@override_settings(TELEGRAM_BOT={**SETTINGS, 'DELIVERY': 'keyspace'})
-def test_a_redis_that_is_down_at_the_notification_probe_does_not_kill_the_worker(redis_server, caplog):
-    """config_get runs first in the thread target, before anything catches."""
-    attempts = []
-
-    class DownAtFirst:
-        def config_get(self, *args, **kwargs):
-            attempts.append(True)
-            msg = 'Connection refused'
-            raise ConnectionError(msg)
-
-        def __getattr__(self, name):
-            return getattr(redis_server, name)
-
-    delivery = KeyspaceDelivery(handler=lambda **kwargs: None)
-    with pytest.MonkeyPatch.context() as patch, caplog.at_level('ERROR', logger=LOGGER):
-        patch.setattr('django_redis_aiogram.delivery.get_redis', DownAtFirst)
-        thread = delivery.start_thread()
-        waiter = threading.Event()
-        for _ in range(200):
-            if attempts:
-                break
-            waiter.wait(0.01)
-        waiter.wait(0.1)
-        still_running = thread.is_alive()
-        delivery.stop()
-        thread.join(timeout=5)
-
-    assert attempts, 'the probe never ran'
-    assert still_running, 'a connection error at the probe ended the consumer'
-    assert 'could not probe keyspace notifications' in caplog.text
 
 
 @override_settings(

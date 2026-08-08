@@ -150,7 +150,8 @@ Ids moved from `telegram_bot.EXXX` to `django_redis_aiogram.EXXX`.
 | Logging | root logger | `django_redis_aiogram`, structured fields |
 | Retries exhausted | silent drop | logged, and raised if configured |
 
-Set `'DELIVERY': 'keyspace'` to keep the old delivery mechanism; its prerequisites are listed under **[[Delivery]]**.
+2.x let you keep the old mechanism with `'DELIVERY': 'keyspace'`. 3.0 removed
+it — see the section above.
 
 ## Verifying the upgrade
 

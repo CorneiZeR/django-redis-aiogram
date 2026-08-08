@@ -10,8 +10,8 @@ from django.test import override_settings
 from redis import Redis
 
 from django_redis_aiogram import TelegramBot
-from django_redis_aiogram.delivery import BlpopDelivery, KeyspaceDelivery
-from django_redis_aiogram.redis import as_bytes, get_db_index, get_redis, read_timeout, reset_redis
+from django_redis_aiogram.delivery import BlpopDelivery
+from django_redis_aiogram.redis import as_bytes, get_redis, read_timeout, reset_redis
 from django_redis_aiogram.serializers import JsonSerializer, loads
 from django_redis_aiogram.settings import conf
 
@@ -59,20 +59,20 @@ def test_blpop_handles_str_payloads(decoded_server):
     assert handled == [{'function': 'send_message', 'chat_id': 4}]
 
 
-@override_settings(TELEGRAM_BOT={'DELIVERY': 'keyspace'})
-def test_keyspace_handles_str_payloads(decoded_server):
+@override_settings(TELEGRAM_BOT={'WORKER_NAME': 'tests'})
+def test_draining_handles_str_payloads(decoded_server):
     decoded_server.rpush(
         'TELEGRAM_BOT_MESSAGE',
         JsonSerializer().dumps({'function': 'send_message', 'chat_id': 6}),
     )
     handled = []
-    KeyspaceDelivery(handler=lambda **kwargs: handled.append(kwargs))._on_expired({'data': b'TELEGRAM_BOT_EXP'})
+    BlpopDelivery(handler=lambda **kwargs: handled.append(kwargs)).consume_pending()
     assert handled == [{'function': 'send_message', 'chat_id': 6}]
 
 
-@override_settings(TELEGRAM_BOT={'DELIVERY': 'keyspace', 'WORKER_NAME': 'tests'})
-def test_keyspace_pops_atomically(redis_server):
-    """Two workers reacting to the same expiry must share the messages, not
+@override_settings(TELEGRAM_BOT={'WORKER_NAME': 'tests'})
+def test_draining_pops_atomically(redis_server):
+    """Two workers draining the same list must share the messages, not
     duplicate them: every id arrives exactly once across both.
 
     This does not reproduce the 1.x race — there the trim landed before any
@@ -98,9 +98,9 @@ def test_keyspace_pops_atomically(redis_server):
         if not competitor_ran:
             # a second worker drains while this dispatch is still in flight
             competitor_ran.append(True)
-            KeyspaceDelivery(handler=rival)._on_expired({'data': b'TELEGRAM_BOT_EXP'})
+            BlpopDelivery(handler=rival).consume_pending()
 
-    KeyspaceDelivery(handler=handler)._on_expired({'data': b'TELEGRAM_BOT_EXP'})
+    BlpopDelivery(handler=handler).consume_pending()
 
     assert competitor_ran, 'the competing drain never ran, so nothing was tested'
     # the split is deterministic under an atomic pop: this worker holds 0 while
@@ -109,13 +109,6 @@ def test_keyspace_pops_atomically(redis_server):
     assert first == [0], first
     assert second == [1, 2], second
     assert redis_server.llen('TELEGRAM_BOT_MESSAGE') == 0
-
-
-@override_settings(TELEGRAM_BOT={'REDIS_URL': 'redis://localhost:6379/7'})
-def test_db_index_comes_from_the_url(monkeypatch):
-    server = fakeredis.FakeRedis(db=7)
-    monkeypatch.setattr('django_redis_aiogram.redis.get_redis', lambda: server)
-    assert get_db_index() == 7
 
 
 @override_settings(TELEGRAM_BOT={'DELIVERY': 'blpop'})

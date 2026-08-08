@@ -75,7 +75,7 @@ which carries outbound messages in both modes — see **[[Webhook]]**.
 
 | Setting | Default | Description |
 | ------- | ------- | ----------- |
-| `DELIVERY` | `'blpop'` | `'blpop'` or `'keyspace'` — see **[[Delivery]]** |
+| `DELIVERY` | `'blpop'` | The only consumer; `'keyspace'` was removed in 3.0 — see **[[Delivery]]** |
 | `REDIS_MESSAGES_KEY` | `'TELEGRAM_BOT_MESSAGE'` | List holding queued calls |
 | `WORKER_NAME` | hostname | Names this worker's in-flight list — see **[[Delivery]]** |
 | `BLPOP_TIMEOUT` | `5` | How often the consumer checks for shutdown; capped just below `REDIS_TIMEOUT` |
@@ -84,8 +84,6 @@ which carries outbound messages in both modes — see **[[Webhook]]**.
 | `HEALTHCHECK_MAX_QUEUE` | `0` | Longest queue still considered healthy; the check fails only above it, and `0` disables it |
 | `SERIALIZER` | `'json'` | `'json'` or `'pickle'` — see **[[Serialization]]** |
 | `ALLOW_PICKLE` | `False` | Migration-only opt-in: `loads()` unpickles without restriction, so enable it for the upgrade window and only on a queue nothing untrusted can write |
-| `REDIS_EXP_KEY` | `'TELEGRAM_BOT_EXP'` | `keyspace` delivery only |
-| `REDIS_EXP_TIME` | `5` | `keyspace` delivery only |
 
 ## Rate limits
 
@@ -117,8 +115,8 @@ if you silenced any.
 | `W003` | `TELEGRAM_BOT` contains unknown keys |
 | `W004` | `BLPOP_TIMEOUT` is at or above `REDIS_TIMEOUT`, so the consumer caps it |
 | `E001`–`E003`, `E017` | a boolean setting is not a boolean |
-| `E004`–`E011` | a string setting is wrong, or not one of the allowed values |
-| `E012`–`E014` | an integer setting is wrong or below its minimum |
+| `E004`–`E007`, `E009`–`E011` | a string setting is wrong, or not one of the allowed values |
+| `E012`, `E014` | an integer setting is wrong or below its minimum |
 | `E015` / `E016` | `DEFAULT_KWARGS` not callable / `DEFAULT_BOT_PROPERTIES` not a mapping |
 | `E018` | unknown key in `DEFAULT_BOT_PROPERTIES` |
 | `E019` | `FSM_STORAGE` is not `redis`, `memory` or a dotted path |
