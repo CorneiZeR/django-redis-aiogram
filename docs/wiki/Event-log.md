@@ -106,7 +106,9 @@ exception messages, and those messages are what an `error` column holds.
 ## Growth, and the job that bounds it
 
 Budget roughly **0.3 kB per event** including indexes. A million events a day is
-about 0.8 GB a day, so thirty days of retention is around 25 GB.
+about 0.3 GB a day, so thirty days of retention is around 9 GB. Storing message
+bodies pushes the per-event figure up, so measure rather than trust it once
+`EVENT_LOG_PAYLOAD` is `'full'`.
 
 Nothing on the write path deletes anything. Set `EVENT_LOG_RETENTION_DAYS` and
 schedule the command; `W006` warns while it is unset, because the feature is not
@@ -153,18 +155,32 @@ in or out, no constraints, no unique index other than the primary key, and only
 inserts, selects and range deletes.
 
 That is exactly the set of properties an operator needs to take the table over
-out of band. On PostgreSQL:
+out of band. The sketch below is for an **empty** table — do it right after
+`migrate`, before the log is switched on:
 
 ```sql
 ALTER TABLE django_redis_aiogram_event RENAME TO django_redis_aiogram_event_old;
+
 CREATE TABLE django_redis_aiogram_event (LIKE django_redis_aiogram_event_old INCLUDING DEFAULTS)
-    PARTITION BY RANGE (created_at);
+    PARTITION BY RANGE (created_at);          -- no primary key on the parent
+
 CREATE TABLE django_redis_aiogram_event_2026_08
     PARTITION OF django_redis_aiogram_event FOR VALUES FROM ('2026-08-01') TO ('2026-09-01');
+CREATE INDEX ON django_redis_aiogram_event_2026_08 (id);   -- per partition, per index
+
+DROP TABLE django_redis_aiogram_event_old;
 ```
 
-Retention then becomes `DROP TABLE` — instant, no dead tuples. This is
-**unsupported**: `migrate` must not touch this app on that database afterwards.
-Django's migrations have no representation for `PARTITION BY`, and both
-PostgreSQL and MySQL require every unique key to contain the partition column,
-which an auto-incrementing primary key cannot express.
+Three things that sketch does **not** do, and that a table with rows in it
+needs: `LIKE ... INCLUDING DEFAULTS` copies neither the indexes nor the primary
+key, so each partition needs its own; a partition has to exist for every date
+that will be written, past and future, or the insert fails outright; and the
+existing rows have to be moved with an `INSERT ... SELECT` from the old table
+before it is dropped. Work all three out for your data before running anything.
+
+Retention then becomes `DROP TABLE` on a whole partition — instant, no dead
+tuples. All of this is **unsupported**: `migrate` must not touch this app on
+that database afterwards. Django's migrations have no representation for
+`PARTITION BY`, and both PostgreSQL and MySQL require every unique key to
+contain the partition column, which an auto-incrementing primary key cannot
+express.

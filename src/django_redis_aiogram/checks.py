@@ -427,6 +427,26 @@ def _a_batch_the_buffer_can_hold(key: str) -> list[Problem]:
     ]
 
 
+def _a_writer_that_does_not_block(key: str) -> list[Problem]:
+    """Warn that synchronous recording puts a database round trip in the send.
+
+    The whole design rests on recording never making a caller wait. This
+    setting deliberately breaks that for tests, so the trade is stated rather
+    than left to be discovered under load.
+    """
+    try:
+        if not coerce_bool(conf[key], f"{SETTINGS_NAME}['{key}']"):
+            return []
+    except ImproperlyConfigured:
+        return []  # E042 owns the type complaint
+    return [
+        Problem(
+            'is on, so every recorded event is written on the calling thread and a send waits for the database.',
+            hint='Leave it off outside tests.',
+        )
+    ]
+
+
 def _bot_is_enabled() -> bool:
     """Whether the bot is on, coerced the way startup and sending coerce it."""
     try:
@@ -493,6 +513,7 @@ CHECKS: tuple[Check, ...] = (
     Check('W006', 'EVENT_LOG_RETENTION_DAYS', _a_log_that_is_pruned),
     Check('W007', 'EVENT_LOG_BATCH_SIZE', _a_batch_the_buffer_can_hold),
     Check('W008', 'EVENT_LOG_KINDS', _kinds_this_version_records),
+    Check('W009', 'EVENT_LOG_SYNC', _a_writer_that_does_not_block),
     Check('W003', '', _known_keys),
     Check(
         'W001',

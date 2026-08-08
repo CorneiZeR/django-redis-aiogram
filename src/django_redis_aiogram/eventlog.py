@@ -24,6 +24,7 @@ from django.utils import timezone
 
 from django_redis_aiogram.dbrouter import event_log_database
 from django_redis_aiogram.models import TelegramEvent
+from django_redis_aiogram.payloads import redact_keys, redact_text, redact_values
 from django_redis_aiogram.recorder import Event
 
 logger = logging.getLogger('django_redis_aiogram')
@@ -51,7 +52,15 @@ def _text(value: object, length: int) -> str:
 
 
 def to_row(event: Event) -> TelegramEvent:
-    """Build the unsaved row for one event, sanitised so it cannot poison a batch."""
+    """Build the unsaved row for one event, sanitised so it cannot poison a batch.
+
+    Redaction happens here as well as at the producer. This is the boundary rows
+    cross, and the rule is that the token must not reach one: a caller that
+    builds an Event by hand, or a new seam that forgets, would otherwise put an
+    aiogram error message — which carries the API URL, which carries the token —
+    straight into a column.
+    """
+    keys = redact_keys()
     return TelegramEvent(
         created_at=_moment(event.created_at),
         correlation_id=event.correlation_id,
@@ -65,8 +74,8 @@ def to_row(event: Event) -> TelegramEvent:
         attempt=max(0, event.attempt),
         duration_ms=event.duration_ms,
         error_code=_text(event.error_code, 64),
-        error=_text(event.error, 20000),
-        detail=event.detail or {},
+        error=_text(redact_text(str(event.error or '')), 20000),
+        detail=redact_values(event.detail or {}, keys),
     )
 
 
