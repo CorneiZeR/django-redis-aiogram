@@ -95,10 +95,9 @@
   wants to count: no full result count, no date drilldown, exact-match search on
   the two indexed columns, and a filter built from the kind registry rather than
   from a `SELECT DISTINCT` over the table.
-- Access splits three ways: `view_telegramevent` for the list and the detail
-  page, `view_telegramevent_payload` for message bodies and exception text, and
-  `prune_telegramevent`. Support can see that a message went out without reading
-  what it said.
+- Access splits in two: `view_telegramevent` for the list and the detail page,
+  and `view_telegramevent_payload` for message bodies and exception text, so
+  support can see that a message went out without reading what it said.
 - **This package now ships a migration.** Run `manage.py migrate` after
   upgrading whether or not you turn the log on: the table is created either way,
   and creating it later on a live database is the more expensive order. It

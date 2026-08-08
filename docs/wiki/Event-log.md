@@ -111,18 +111,20 @@ leave through `tgbot_prune_events`, not one at a time.
 
 Three permissions, and each gates something real:
 
+Django's four stock permissions are created as usual. One is added, because
+Django has no equivalent for it:
+
 | Permission | Grants |
 | ---------- | ------ |
 | `view_telegramevent` | the list and the detail page: when, which kind, which chat, which method, the error code |
 | `view_telegramevent_payload` | the `detail` and `error` columns — message bodies under `EVENT_LOG_PAYLOAD: 'full'`, and exception text |
-| `prune_telegramevent` | pruning the log |
 
-Add, change and delete are **not** created at all. The feed is append-only, so
-they would be permissions nothing can act on, and they only make a group's
-permission picker harder to read.
+That split is the point: support needs to see that a message went out and when,
+without reading what it said. There are no field-level permissions in Django, so
+there is no way to express it with the stock four.
 
-The split between the first two is the point: support needs to see that a
-message went out and when, without reading what it said.
+`add`, `change` and `delete` exist but the admin refuses all three, since the
+feed is append-only and rows leave through `tgbot_prune_events`.
 
 ```python
 from django.contrib.auth.models import Group, Permission
@@ -134,11 +136,7 @@ operators = Group.objects.create(name='Telegram operators')
 operators.permissions.set(
     Permission.objects.filter(
         content_type__app_label='django_redis_aiogram',
-        codename__in=[
-            'view_telegramevent',
-            'view_telegramevent_payload',
-            'prune_telegramevent',
-        ],
+        codename__in=['view_telegramevent', 'view_telegramevent_payload'],
     )
 )
 ```
