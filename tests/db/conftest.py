@@ -10,7 +10,21 @@ import threading
 import pytest
 from django.conf import settings
 
-from django_redis_aiogram.recorder import WRITER_THREAD
+from django_redis_aiogram.recorder import WRITER_THREAD, recorder
+
+
+@pytest.fixture(autouse=True)
+def _no_writer_outlives_its_test():
+    """End the process-wide writer between tests.
+
+    `recorder` is a singleton and its thread is deliberately not tied to any
+    one test: it lives until the process ends. Left running, it drains the next
+    test's queue before that test can look at it, and it is still enumerable
+    when a test asserts no writer exists — two failures that depend on file
+    ordering and reproduce nowhere else.
+    """
+    yield
+    recorder.stop(timeout=5)
 
 
 @pytest.fixture
