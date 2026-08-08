@@ -2,10 +2,15 @@
 
 ## 3.0.0 - 2026-08-09
 
-Two kinds of change at once: everything 2.0 kept for compatibility is gone, and
-the package can now record what it did to a table. The removals are mechanical
-and `manage.py check` names each one. The event log is opt-in and off by
-default.
+Two kinds of change at once: the compatibility 2.0 shipped for 1.x is gone —
+the `telegram_bot` package name, `keyspace` delivery, and the string constants
+that aliased enum members — and the package can now record what it did to a
+table. The removals are mechanical and `manage.py check` names each one. The
+event log is opt-in and off by default.
+
+One piece of compatibility is **added** rather than removed: the consumer reads
+both the new envelope and the flat payload 2.x wrote, so a backlog drains
+across the upgrade.
 
 **Upgrade the bot container before the web tier.** Queued payloads now carry an
 envelope, and a 2.x consumer handed one loses the message.
