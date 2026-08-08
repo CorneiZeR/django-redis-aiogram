@@ -316,9 +316,10 @@ def test_a_send_waiting_on_the_lock_finds_the_loop_closed(caplog):
     sender = threading.Thread(target=lambda: instance.send_raw(chat_id=1, text='x'), daemon=True)
     with caplog.at_level('ERROR', logger='django_redis_aiogram'):
         sender.start()
-        # the send is now blocked on the lock; close the loop underneath it
+        # close the loop underneath the send, and leave _closing alone: it is
+        # read before the lock, so setting it races the sender's start-up and
+        # decides which of the two refusals wins
         loop.close()
-        instance._closing = True
         released.set()
         sender.join(timeout=5)
 
