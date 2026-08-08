@@ -224,3 +224,39 @@ def test_the_declared_redis_floor_is_not_below_what_aiogram_asks_for():
     assert parts(declared.group(1)) >= max(parts(version) for version in asked), (
         f'declared redis>={declared.group(1)}, aiogram asks for >={max(asked)}'
     )
+
+
+#: the module-level strings 2.0 shipped and 3.0 removed, by the module that held
+#: them. Restoring one would quietly undo a documented breaking change and give
+#: the package two spellings of every constant again
+REMOVED_ALIASES = {
+    'django_redis_aiogram.delivery': ('BLPOP_DELIVERY', 'KEYSPACE_DELIVERY'),
+    'django_redis_aiogram.client': ('MEMORY_STORAGE', 'REDIS_STORAGE'),
+    'django_redis_aiogram.throttling': ('OVERALL_PER_SECOND', 'PER_CHAT_PER_SECOND', 'GROUP_PER_MINUTE'),
+    'django_redis_aiogram.webhook': ('POLLING', 'WEBHOOK'),
+    'django_redis_aiogram.serializers': (
+        'JSON_SERIALIZER',
+        'PICKLE_SERIALIZER',
+        'TAG_MODEL',
+        'TAG_DEFAULT',
+        'TAG_DATETIME',
+        'TAG_DATE',
+        'TAG_DECIMAL',
+        'TAG_BYTES',
+        'TAG_INPUT_FILE',
+    ),
+}
+
+
+@pytest.mark.parametrize(
+    ('module_name', 'alias'),
+    [(module_name, alias) for module_name, aliases in REMOVED_ALIASES.items() for alias in aliases],
+)
+def test_the_2_0_string_alias_stays_gone(module_name, alias):
+    """Import the enum member instead; the values are unchanged."""
+    import importlib
+
+    module = importlib.import_module(module_name)
+
+    assert not hasattr(module, alias), f'{module_name}.{alias} is back'
+    assert alias not in getattr(module, '__all__', ()), f'{alias} is back in {module_name}.__all__'
