@@ -16,6 +16,9 @@ from django.test import override_settings
 from django_redis_aiogram import TelegramBot, bot, conf, redis_conn
 from django_redis_aiogram.settings import Settings, parse_bool
 
+#: seconds a nested interpreter gets before the test fails instead of hanging
+SUBPROCESS_TIMEOUT = 120
+
 
 def test_the_suite_still_boots_without_a_database():
     """The invariant tests/settings.py exists to hold.
@@ -164,6 +167,7 @@ def test_importing_the_package_does_not_import_aiogram():
         capture_output=True,
         text=True,
         check=False,
+        timeout=SUBPROCESS_TIMEOUT,
         env={**os.environ, 'DJANGO_SETTINGS_MODULE': 'tests.settings'},
     )
     assert result.returncode == 0, result.stderr
@@ -187,6 +191,7 @@ def test_a_disabled_django_boot_never_pays_for_aiogram():
         capture_output=True,
         text=True,
         check=False,
+        timeout=SUBPROCESS_TIMEOUT,
         env={
             **os.environ,
             'DJANGO_SETTINGS_MODULE': 'tests.settings',
