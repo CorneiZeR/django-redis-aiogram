@@ -16,6 +16,7 @@ flat shape, but a 2.x reader handed a new payload calls the Telegram method with
 the message is lost silently. Deploy the bot container before the web tier.
 """
 
+import math
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -96,12 +97,15 @@ def _as_time(value: object) -> float:
     """Read a timestamp, or settle for none.
 
     A figure this cannot read costs the queue latency, not the message, which
-    may otherwise be perfectly deliverable.
+    may otherwise be perfectly deliverable. `nan` and the infinities are in that
+    class too: `float()` accepts them, arithmetic on them produces more of them,
+    and `nan` is not even valid JSON to a strict reader.
     """
     try:
-        return float(value or 0.0)  # type: ignore[arg-type]
+        seconds = float(value or 0.0)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return 0.0
+    return seconds if math.isfinite(seconds) else 0.0
 
 
 def unpack(payload: object) -> Envelope:
@@ -121,16 +125,17 @@ def unpack(payload: object) -> Envelope:
             function=str(payload.get('function', '')),
             kwargs={key: value for key, value in payload.items() if key != 'function'},
         )
-    try:
-        declared = int(version)
-    except (TypeError, ValueError):
-        unreadable = f'envelope version {version!r}'
-        raise MalformedEnvelopeError(unreadable) from None
-    if declared > ENVELOPE_VERSION:
-        raise UnknownEnvelopeVersionError(declared)
-    if declared < ENVELOPE_VERSION:
+    # exactly an int: `int()` reads True, 1.0 and 1.5 as version 1, and this
+    # package writes an integer. The message names the type and never the
+    # value, which came off an untrusted queue and ends up in a log line
+    if type(version) is not int:
+        unreadable = f'an envelope version of type {type(version).__name__}'
+        raise MalformedEnvelopeError(unreadable)
+    if version > ENVELOPE_VERSION:
+        raise UnknownEnvelopeVersionError(version)
+    if version < ENVELOPE_VERSION:
         # not a future shape somebody can deliver later, so it is not kept
-        older = f'envelope version {declared}'
+        older = f'envelope version {version}'
         raise MalformedEnvelopeError(older)
     arguments = payload.get('kwargs')
     return Envelope(

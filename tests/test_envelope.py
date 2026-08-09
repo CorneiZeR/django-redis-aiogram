@@ -83,21 +83,29 @@ def test_a_payload_that_is_not_a_mapping_is_refused_rather_than_raised_through(p
         unpack(payload)
 
 
-@pytest.mark.parametrize('version', [0, -1, 'one', [], {}])
+@pytest.mark.parametrize('version', [0, -1, 'one', [], {}, True, 1.0, 1.5])
 def test_a_version_no_release_ever_wrote_is_refused_as_malformed(version):
     """Distinct from a newer version on purpose: a future shape is kept in
     flight for an upgraded consumer, and this one never becomes deliverable, so
     keeping it would mean reclaiming it for ever."""
     payload = {ENVELOPE_KEY: version, 'function': 'send_message', 'kwargs': {}}
 
-    with pytest.raises(MalformedEnvelopeError):
+    with pytest.raises(MalformedEnvelopeError) as refusal:
         unpack(payload)
 
+    # the value came off an untrusted queue and this message reaches a log line
+    assert repr(version) not in str(refusal.value) or isinstance(version, int)
 
-@pytest.mark.parametrize('broken', ['not-a-number', [], {}, object()])
+
+@pytest.mark.parametrize(
+    'broken',
+    ['not-a-number', [], {}, object(), float('nan'), float('inf'), float('-inf')],
+)
 def test_an_unreadable_timestamp_costs_the_latency_not_the_message(broken):
-    """`float()` on it raises, and the call itself may be perfectly deliverable
-    — losing a real message over a metric would be the wrong trade."""
+    """`float()` either raises on it or, for nan and the infinities, accepts it
+    and poisons every figure computed from it — nan is not even valid JSON to a
+    strict reader. The call itself may be perfectly deliverable, so losing a
+    real message over a metric would be the wrong trade."""
     payload = {
         ENVELOPE_KEY: ENVELOPE_VERSION,
         'function': 'send_message',
