@@ -105,6 +105,43 @@ package is `django_redis_aiogram`: use it in `INSTALLED_APPS`, import from it,
 and note that `TelegramBot` lives in `django_redis_aiogram.client` while the
 settings module is `django_redis_aiogram.settings`. See **[[Upgrading]]**.
 
+## The event log writes nothing
+
+In order of how often it is the answer:
+
+1. `TELEGRAM_BOT['EVENT_LOG']` is off. It is off by default, and `record()`
+   returns before it reads anything else.
+2. `migrate` has not run. The writer logs `no such table` once per batch and
+   drops what it held; after three failures in a row it suspends for a minute
+   rather than hammering the database.
+3. The process you are looking at is not the one that records. `outbound.queued`
+   is written by whichever process called `send_redis`; `outbound.sent` by the
+   bot container. Enabling the log in one and not the other gives you half a
+   story, and that is not a bug.
+4. `EVENT_LOG_KINDS` is set and excludes what you are looking for. The list is
+   **inclusive**: naming anything drops everything unnamed, including kinds a
+   later release adds. `W008` warns when it names a kind this version does not
+   know.
+5. Nothing has been flushed yet. The writer batches on a timer, so a test that
+   asserts immediately needs `recorder.flush()`. See **[[Testing]]**.
+
+`manage.py check` catches the configuration half of this: `W005` if the log is
+on with no database configured, `E041` if `EVENT_LOG_DATABASE` names an alias
+that does not exist.
+
+## The admin page is missing
+
+The changelist is registered in `ready()` only when **both** are true:
+`EVENT_LOG` is on, and `django.contrib.admin` is in `INSTALLED_APPS`. It is
+above the `ENABLED` gate on purpose — reading the feed is not talking to
+Telegram, so a web tier with `ENABLED=0` still shows it.
+
+The flag is read per request as well, so turning it off hides the page without
+a restart. If the app shows but every row 403s, the user is missing
+`view_telegramevent`; if the rows show but `detail` and `error` are absent,
+that is `view_telegramevent_payload` doing its job. See
+**[[Event-log|Event log]]**.
+
 ## Getting more detail
 
 Merge this logger into your existing `LOGGING`, keeping your own `version` and

@@ -35,8 +35,18 @@ All prefixed with `tg_`, to avoid colliding with `LogRecord` attributes.
 | `tg_max_retries` | the limit that was reached |
 | `tg_delivery` | the consumer that started, always `blpop` |
 | `tg_key` | Redis list being consumed |
-| `tg_timeout` | blocking-pop timeout |
+| `tg_timeout` | blocking-pop timeout, or how long a shutdown waited |
 | `tg_error` | text of a non-fatal error |
+| `tg_crash_safe` | whether the consumer holds messages in flight; false on a Redis without `LMOVE` |
+| `tg_mode` | `polling` or `webhook` |
+| `tg_update` | the update id being handled |
+| `tg_router` | a router module autodiscovery imported |
+| `tg_pending` | in-flight sends at shutdown |
+| `tg_drain_timeout` | how long shutdown gave them |
+| `tg_kind` | the event log kind of a row |
+| `tg_count` | events in the batch being written |
+| `tg_dropped` | events lost because the buffer was full, or sends dropped at shutdown |
+| `tg_failures` | consecutive failures of the event writer |
 
 ## Events worth alerting on
 
@@ -49,6 +59,10 @@ All prefixed with `tg_`, to avoid colliding with `LogRecord` attributes.
 | `rate limited by telegram` | WARNING | refused and backing off |
 | `delivery started` | INFO | the consumer is up |
 | `message sent` | INFO | one call succeeded |
+| `the event log is falling behind; events are being dropped` | ERROR | the writer cannot keep up; rows are being lost, messages are not |
+| `the event log is suspended after repeated failures` | ERROR | three failed batches in a row, usually a missing `migrate` |
+| `leaving a refused pickle message in flight` | ERROR | `ALLOW_PICKLE` is off and a pickled payload is waiting for it |
+| `leaving a message from a newer version in flight` | ERROR | the web tier was deployed ahead of the bot container |
 
 ## The database event log
 

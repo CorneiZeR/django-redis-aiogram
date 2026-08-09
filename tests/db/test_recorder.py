@@ -6,6 +6,7 @@ for the rate limiter.
 """
 
 import asyncio
+import os
 import threading
 import time
 
@@ -16,7 +17,7 @@ from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
 
 from django_redis_aiogram.enums import EventKind
-from django_redis_aiogram.eventlog import write_batch
+from django_redis_aiogram.eventlog import ROW_BY_ROW, write_batch
 from django_redis_aiogram.models import TelegramEvent
 from django_redis_aiogram.recorder import FAILURE_LIMIT, Event, EventRecorder
 
@@ -386,3 +387,54 @@ def test_sync_mode_falls_back_to_the_writer_inside_a_loop():
         assert TelegramEvent.objects.filter(chat_id=55).count() == 1
     finally:
         recorder.stop(timeout=5)
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT=ON)
+def test_a_fork_leaves_the_child_a_queue_of_its_own(paused_writer):
+    """Under `gunicorn --preload` the master builds the queue and every worker
+    inherits the object — but not the thread that drains it.
+
+    Without the pid check each worker would fill a queue nobody reads, and the
+    events would sit there until the process ended. The fork itself is not
+    performed here: forking a process with live threads inside a test runner is
+    its own hazard, and the pid is what the production path actually branches on.
+    """
+    recorder = EventRecorder()
+    recorder.record(an_event(chat_id=1))
+    inherited = recorder._queue
+
+    recorder._owner_pid = os.getpid() + 1  # what a child sees
+    recorder.record(an_event(chat_id=2))
+
+    assert recorder._queue is not inherited, 'the child kept a queue its thread cannot drain'
+    assert recorder._owner_pid == os.getpid()
+    assert recorder._thread is not None, 'the child never started its own writer'
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT=ON)
+def test_a_batch_too_big_to_save_one_by_one_is_bisected(paused_writer):
+    """A refused batch of two hundred must not become two hundred statements.
+
+    Bisection is what keeps the recovery proportional: halve until the half is
+    small enough to be worth saving row by row, so one poison row in a large
+    batch costs a handful of extra inserts rather than the whole batch again.
+    """
+    original = QuerySet.bulk_create
+    sizes = []
+
+    def refuse_anything_large(self, rows, *args, **kwargs):
+        sizes.append(len(rows))
+        if len(rows) > ROW_BY_ROW:
+            msg = 'no'
+            raise DatabaseError(msg)
+        return original(self, rows, *args, **kwargs)
+
+    rows = [an_event(chat_id=index) for index in range(ROW_BY_ROW * 2)]
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(QuerySet, 'bulk_create', refuse_anything_large)
+        write_batch(rows)
+
+    assert sizes == [ROW_BY_ROW * 2, ROW_BY_ROW, ROW_BY_ROW], sizes
+    assert TelegramEvent.objects.count() == ROW_BY_ROW * 2, 'bisection lost rows'

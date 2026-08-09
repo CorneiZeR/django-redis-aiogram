@@ -29,6 +29,19 @@ services:
     restart: always
 ```
 
+## Upgrading to 3.0: order matters, once
+
+**Run `manage.py migrate` first.** The package ships one table from 3.0, and it
+is created whether or not you turn the event log on.
+
+**Then deploy the bot container before the web tier.** 3.0 nests a queued call
+inside an envelope. The new consumer reads the old flat shape, so a backlog
+drains across the upgrade — the reverse does not hold: a 2.x consumer handed a
+new payload calls the Telegram method with `__envelope__` as a keyword, raises,
+logs it and swallows it, and the message is gone with nothing to redeliver.
+
+Both are one-time concerns. After 3.0 the order is whatever you like.
+
 Note the absence of `ports:` on `redis`. Nothing outside the compose network
 reaches it, which is why no password appears here. Publish that port and Redis
 needs `requirepass` and a `REDIS_URL` carrying the credentials — the queue is a
@@ -126,6 +139,24 @@ python manage.py tgbot_healthcheck --max-queue 1000 --max-age 60
 
 A disabled process is not unhealthy: with `ENABLED=0` the command says so and
 exits 0, since nothing is meant to be running there.
+
+## The event log and your database
+
+With `EVENT_LOG` on, each process that records owns **one more database
+connection** — the writer thread's, which nothing but the writer closes. Size
+the pool for it: a web container with four gunicorn workers now opens five
+connections rather than four, and a `CONN_MAX_AGE` of 0 no longer costs the
+writer a reconnect per batch, because it holds its own.
+
+Point it somewhere else if the traffic warrants: `EVENT_LOG_DATABASE` names any
+alias in `DATABASES`, and the writer and the admin both use it explicitly, so
+the feature works with or without the router installed. See
+**[[Event-log|Event log]]**.
+
+The bot container needs `DATABASES` reachable too. It is the same Django
+project, but a different place on the network — a database that only the web
+tier can reach records `outbound.queued` and never the `outbound.sent` that
+says the message actually arrived.
 
 ## Scaling
 

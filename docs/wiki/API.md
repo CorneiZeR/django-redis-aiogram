@@ -52,6 +52,19 @@ feeding the dispatcher, reusing the connection — and that keeps working;
 `function` must name a Telegram API method aiogram exposes; anything else raises
 `ValueError` before it reaches the queue. See **[[Sending-messages|Sending messages]]**.
 
+All three return a **correlation id** — a `uuid.UUID` that ties every row about
+that message together, whichever process wrote it. Store it beside your own
+model if you want to join your records to the feed later. All three also accept
+one as a keyword argument, and a handler replying to an update inherits that
+update's id without passing anything:
+
+```python
+identifier = bot.send(chat_id=chat_id, text='hello')
+Receipt.objects.create(order=order, telegram_correlation_id=identifier)
+```
+
+Before 3.0 they returned `None`, so every existing call site still compiles.
+
 ## Handlers
 
 One decorator per aiogram observer, all registering on `bot.router`:
@@ -141,6 +154,7 @@ TELEGRAM_BOT = {
 | `UpdateMode` | `POLLING`, `WEBHOOK` |
 | `RateLimitKey` | the three `RATE_LIMIT` keys |
 | `SerializationTag` | the `__model__`-style markers a queued payload carries |
+| `EventKind` | what an event log row can be: `outbound.*`, `inbound.*`, `fsm.transition`, `queue.*`, `log.dropped` |
 
 They are `(str, Enum)`, so a member compares equal to its string and works
 anywhere the string does. `choices(DeliveryKind)` gives the plain-string set,
@@ -148,6 +162,30 @@ which is what the system checks validate against.
 
 The values are **frozen**: queued payloads and stored settings carry them, so a
 member may be renamed but never revalued.
+
+## The event log
+
+```python
+from django_redis_aiogram.events import failure_kinds, kind_choices, register_kind
+from django_redis_aiogram.models import TelegramEvent
+```
+
+`TelegramEvent` is the append-only feed: one row per thing that happened, insert
+only, and `kind` is an unconstrained `CharField` whose legal values live in a
+Python registry rather than in the schema. `register_kind(code, label,
+failure=False)` adds your own; `kind_choices()` and `failure_kinds()` are what
+the admin filters read.
+
+Querying it is ordinary ORM work, and the indexes are built for two questions —
+one message's history, and what a chat has seen:
+
+```python
+TelegramEvent.objects.filter(correlation_id=identifier).order_by('id')
+TelegramEvent.objects.filter(chat_id=chat_id).order_by('-id')[:50]
+```
+
+Nothing here is imported unless you import it: `models.py` pulls no aiogram, so
+a migration container pays nothing for it. See **[[Event-log|Event log]]**.
 
 ## Errors
 

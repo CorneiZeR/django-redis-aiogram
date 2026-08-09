@@ -340,3 +340,33 @@ def test_an_envelope_the_reader_cannot_make_sense_of_is_dropped_not_raised(redis
     row = TelegramEvent.objects.get(kind=EventKind.QUEUE_UNDECODABLE.value)
     assert set(row.detail) == {'bytes', 'sha256'}
     assert redis_server.llen(QUEUE) == 0, 'the message was left to come back for ever'
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'REDIS_URL': 'redis://localhost:6379/0'})
+def test_a_queue_that_refuses_the_message_records_the_drop_and_raises(redis_server, monkeypatch):
+    """A Redis that refuses the push means the message was never queued, and a
+    `queued` row would say the opposite — the one row that must not be written
+    optimistically, because nothing downstream will ever contradict it.
+
+    The exception still reaches the caller: queueing is the caller's operation,
+    and swallowing it would leave them believing the message is on its way.
+    """
+
+    def refuse(*_args, **_kwargs):
+        msg = 'redis is gone'
+        raise ConnectionError(msg)
+
+    monkeypatch.setattr(type(redis_server), 'rpush', refuse)
+    instance = TelegramBot()
+
+    with pytest.raises(ConnectionError):
+        instance.send_redis(chat_id=7, text='hi')
+    recorder.flush(timeout=5)
+
+    assert not TelegramEvent.objects.filter(kind=EventKind.OUTBOUND_QUEUED.value).exists()
+    row = TelegramEvent.objects.get(kind=EventKind.OUTBOUND_DROPPED.value)
+    assert row.error_code == 'ConnectionError'
+    assert row.function == 'send_message'
+    assert row.chat_id == 7
+    assert row.detail['stage'] == 'queueing'

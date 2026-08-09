@@ -32,6 +32,16 @@ That is the whole minimum, and both values may be empty at startup. The
 package needs them only when something actually reaches Telegram or Redis, so
 tests, migrations and a build all run without them.
 
+The package ships one table, so run migrations after adding it:
+
+```shell
+python manage.py migrate
+```
+
+The table is created whether or not you turn the event log on — `EVENT_LOG` is
+off by default, and nothing is written until you set it. See
+**[[Event-log|Event log]]**.
+
 ## Configure from the environment
 
 Scalar settings can come from `DJANGO_REDIS_AIOGRAM_<NAME>`:
