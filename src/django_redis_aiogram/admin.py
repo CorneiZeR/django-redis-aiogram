@@ -11,7 +11,7 @@ import json
 import uuid
 from typing import TYPE_CHECKING, Any, cast
 
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.core.exceptions import ImproperlyConfigured
 from django.core.paginator import Paginator
 from django.db.models import QuerySet
@@ -111,19 +111,26 @@ class BoundedPaginator(Paginator):  # type: ignore[type-arg]
     another page.
     """
 
+    #: whether the count stopped at the cap, so the page can say it did
+    truncated = False
+
     @cached_property
     def count(self) -> int:
         """Count what fits inside the cap, in one query the index can serve."""
         # the changelist always paginates a queryset; the base class is typed
         # for anything sliceable, which has no count()
         rows = cast('QuerySet[TelegramEvent]', self.object_list)
-        return int(rows[:COUNT_LIMIT].count())
+        # one row past the cap, so the difference between "exactly ten thousand"
+        # and "more than we will count" is knowable rather than assumed
+        found = int(rows[: COUNT_LIMIT + 1].count())
+        self.truncated = found > COUNT_LIMIT
+        return min(found, COUNT_LIMIT)
 
 
 class TelegramEventAdmin(ModelAdminBase):
     """Read-only, and deliberately narrow about what it will ask the database."""
 
-    list_display = ('created_at', 'kind', 'function', 'chat_id', 'thread', 'worker')
+    list_display = ('created_at', 'kind', 'function', 'chat_id', 'thread', 'worker', 'error_code')
     list_filter = (KindFilter, OutcomeFilter)
     # what makes the box appear; the lookup itself is get_search_results below
     search_fields = ('correlation_id', 'chat_id')
@@ -141,6 +148,25 @@ class TelegramEventAdmin(ModelAdminBase):
     def get_queryset(self, request: HttpRequest) -> QuerySet[TelegramEvent]:
         """Read from the alias the writer writes to, router installed or not."""
         return super().get_queryset(request).using(log_alias())
+
+    def changelist_view(self, request: HttpRequest, extra_context: dict[str, Any] | None = None) -> Any:  # noqa: ANN401 - Django types this as a bare response
+        """Render the list, saying so when the count stopped at the cap.
+
+        A page that reports exactly ten thousand results reads as the whole
+        answer. Silently, it would be the same defect the paginator exists to
+        avoid, moved one step along.
+        """
+        response = super().changelist_view(request, extra_context)
+        changelist = getattr(response, 'context_data', {}).get('cl')
+        paginator = getattr(changelist, 'paginator', None)
+        if paginator is not None and paginator.count and getattr(paginator, 'truncated', False):
+            self.message_user(
+                request,
+                f'More than {COUNT_LIMIT:,} events match. Narrow the filter or search for an '
+                f'exact id; counting further would scan the table.',
+                messages.WARNING,
+            )
+        return response
 
     def get_fields(self, request: HttpRequest, _obj: TelegramEvent | None = None) -> list[Any]:
         """Hide the two columns that can hold a message body or a stack trace."""
@@ -166,12 +192,6 @@ class TelegramEventAdmin(ModelAdminBase):
     def get_readonly_fields(self, request: HttpRequest, obj: TelegramEvent | None = None) -> list[Any]:
         """Everything: the feed records what happened, and that is not editable."""
         return self.get_fields(request, obj)
-
-    def get_list_display(self, request: HttpRequest) -> tuple[str, ...]:
-        """Add the error code only for readers allowed to see failures in detail."""
-        if may_see_payloads(request):
-            return (*self.list_display, 'error_code')
-        return self.list_display
 
     def get_search_results(
         self,

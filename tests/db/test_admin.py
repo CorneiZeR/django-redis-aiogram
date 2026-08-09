@@ -11,6 +11,7 @@ from django.db import connection
 from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
 
+from django_redis_aiogram import admin as admin_module
 from django_redis_aiogram.admin import (
     COUNT_LIMIT,
     MAX_STAGES,
@@ -66,8 +67,9 @@ def test_the_changelist_never_counts_past_the_cap(client):
     sized by traffic that is a sequential scan on every page load, which is
     what show_full_result_count and the paginator are for.
 
-    Every count it does run has to carry the cap, or the page is back to
-    scanning the table to tell someone a number they did not ask for.
+    Every count it does run has to carry the cap — one row past it, so the
+    page can tell "exactly ten thousand" from "more than we will count" — or it
+    is back to scanning the table to tell someone a number they did not ask for.
     """
     an_event()
     client.force_login(a_reader('counter', 'view_telegramevent'))
@@ -77,7 +79,41 @@ def test_the_changelist_never_counts_past_the_cap(client):
 
     counts = [query['sql'] for query in queries if 'COUNT(' in query['sql'].upper()]
     assert counts, 'the paginator stopped counting entirely, so the numbers are made up'
-    assert all(f'LIMIT {COUNT_LIMIT}' in sql for sql in counts), counts
+    assert all(f'LIMIT {COUNT_LIMIT + 1}' in sql for sql in counts), counts
+
+
+@pytest.mark.django_db
+@override_settings(TELEGRAM_BOT=ON)
+def test_a_count_that_stopped_at_the_cap_says_so(client, monkeypatch):
+    """A page reporting exactly the cap reads as the whole answer.
+
+    Silently, that is the defect the paginator exists to avoid, moved one step
+    along: the number would be wrong and nothing would show it.
+
+    The cap is lowered rather than ten thousand rows inserted — the behaviour
+    under test is the comparison, not the number.
+    """
+    monkeypatch.setattr(admin_module, 'COUNT_LIMIT', 2)
+    for _ in range(3):
+        an_event()
+    client.force_login(a_reader('capped', 'view_telegramevent'))
+
+    body = client.get(CHANGELIST).content.decode()
+
+    assert 'Narrow the filter' in body
+
+
+@pytest.mark.django_db
+@override_settings(TELEGRAM_BOT=ON)
+def test_a_count_inside_the_cap_says_nothing(client, monkeypatch):
+    """The other half: a warning on every page is a warning nobody reads."""
+    monkeypatch.setattr(admin_module, 'COUNT_LIMIT', 5)
+    an_event()
+    client.force_login(a_reader('uncapped', 'view_telegramevent'))
+
+    body = client.get(CHANGELIST).content.decode()
+
+    assert 'Narrow the filter' not in body
 
 
 @pytest.mark.django_db
@@ -92,6 +128,11 @@ def test_a_reader_without_the_payload_permission_sees_no_bodies(client):
 
     assert 'a secret plan' not in body
     assert 'a stack trace' not in body
+
+    # the error *code* is a class name, not payload, and the documented support
+    # role is built on seeing it: it belongs in the list for this reader too
+    listing = client.get(CHANGELIST).content.decode()
+    assert 'error code' in listing.lower()
 
 
 @pytest.mark.django_db
@@ -279,6 +320,13 @@ def test_the_admin_module_pulls_no_aiogram():
 
         assert 'django_redis_aiogram.admin' in sys.modules, 'the admin never loaded, so nothing was checked'
         assert 'aiogram' not in sys.modules, 'the admin pulled aiogram into a process that has no bot'
+
+        from django_redis_aiogram.models import TelegramEvent
+
+        # ready() is what registers it, and it runs during setup() — before the
+        # autodiscover above. Without this the suite's own fixture registers the
+        # model, and dropping the call from ready() would change nothing
+        assert admin.site.is_registered(TelegramEvent), 'ready() did not register the admin'
         print('the admin stays cheap')
     """)
     result = subprocess.run(  # noqa: S603 - our own interpreter, and a script written right above

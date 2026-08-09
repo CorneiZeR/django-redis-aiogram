@@ -109,7 +109,7 @@ With the flag on and `django.contrib.admin` installed, the feed appears in the
 admin as a read-only list. Add, change and delete are refused outright — rows
 leave through `tgbot_prune_events`, not one at a time.
 
-Three permissions, and each gates something real:
+Two permissions decide what a reader sees, and each gates something real:
 
 Django's four stock permissions are created as usual. One is added, because
 Django has no equivalent for it:
