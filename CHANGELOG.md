@@ -57,10 +57,11 @@
 
 ### Infrastructure
 
-- The suite is two pytest invocations. `tests/settings.py` still configures no
-  database — proving the package boots without one is part of what it tests —
-  so database-backed tests live in `tests/db` under their own settings module
-  and the default run ignores that directory. A new CI job runs it.
+- The suite that needs no services is now two pytest invocations, alongside the
+  Redis-backed one. `tests/settings.py` still configures no database — proving
+  the package boots without one is part of what it tests — so database-backed
+  tests live in `tests/db` under their own settings module and the default run
+  ignores that directory. A new CI job runs it.
 
 ## 2.2.0 - 2026-08-04
 
