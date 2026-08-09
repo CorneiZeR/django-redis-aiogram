@@ -40,15 +40,21 @@ logger = logging.getLogger('django_redis_aiogram')
 WRITER_THREAD = 'tgbot-event-writer'
 
 
+#: what a signed BIGINT holds, which is the width of every id column here
+ID_RANGE = range(-(2**63), 2**63)
+
+
 def as_identifier(value: object) -> int | None:
     """Keep what a BIGINT column can hold, and nothing else.
 
     A Telegram chat_id may be a `@username`, which is a valid destination and
-    not a number; `True` is an int to Python and not an id to anyone.
+    not a number; `True` is an int to Python and not an id to anyone; and a
+    Python integer has no width, so one off an untrusted queue can be wider
+    than the column and cost the row it was meant to describe.
     """
     if isinstance(value, bool) or not isinstance(value, int):
         return None
-    return value
+    return value if value in ID_RANGE else None
 
 
 #: how long stop() waits for the writer before giving up on what it holds

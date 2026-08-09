@@ -14,13 +14,13 @@ from aiogram.methods import SendMessage
 from django.test import override_settings
 
 from django_redis_aiogram import TelegramBot
-from django_redis_aiogram.client import as_identifier, resolve_correlation_id, task_correlation_id
+from django_redis_aiogram.client import resolve_correlation_id, task_correlation_id
 from django_redis_aiogram.context import correlation_scope
 from django_redis_aiogram.delivery import BlpopDelivery
 from django_redis_aiogram.enums import EventKind
 from django_redis_aiogram.events import new_correlation_id
 from django_redis_aiogram.models import TelegramEvent
-from django_redis_aiogram.recorder import recorder
+from django_redis_aiogram.recorder import as_identifier, recorder
 from django_redis_aiogram.serializers import JsonSerializer
 
 QUEUE = 'TELEGRAM_BOT_MESSAGE'
@@ -273,7 +273,20 @@ def test_a_string_id_is_accepted_and_nonsense_is_refused():
 
 @pytest.mark.parametrize(
     ('value', 'expected'),
-    [(42, 42), ('@channel', None), (None, None), (True, None), (1.5, None)],
+    [
+        (42, 42),
+        ('@channel', None),
+        (None, None),
+        (True, None),
+        (1.5, None),
+        (2**63 - 1, 2**63 - 1),
+        (-(2**63), -(2**63)),
+        # a Python integer has no width; the column does, and an insert that
+        # overflows costs the row rather than reporting the value
+        (2**63, None),
+        (-(2**63) - 1, None),
+        (10**40, None),
+    ],
 )
 def test_only_a_real_integer_chat_id_is_stored(value, expected):
     """A @username is a valid chat_id for Telegram and not one for a BIGINT."""
