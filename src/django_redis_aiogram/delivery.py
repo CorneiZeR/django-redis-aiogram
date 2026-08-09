@@ -159,17 +159,12 @@ class Delivery(ABC):
                 extra={'tg_key': self.processing_key},
             )
 
-    def dispatch(self, raw: bytes) -> bool:
-        """Decode one message and hand it to the handler.
+    def _read(self, raw: bytes) -> tuple['Envelope | None', bool]:
+        """Turn one message off the queue into an envelope, or into a verdict.
 
-        A bad payload is one message's problem, so everything short of a kill is
-        logged and dropped: the consumer has to survive it to deliver the rest.
-
-        Returns whether the message should be acknowledged. Only a pickle read
-        the configuration refuses says no: that payload is valid and the refusal
-        is the operator's to fix, so it stays in flight for a reclaim to retry
-        once ALLOW_PICKLE is set — acknowledging would silently destroy a 1.x
-        queue over a missing setting.
+        Everything here is untrusted input, so no failure may escape: what comes
+        back is either the envelope or `None` plus whether to acknowledge the
+        message that never became one.
         """
         try:
             payload = loads(raw)
@@ -178,22 +173,47 @@ class Delivery(ABC):
                 'leaving a refused pickle message in flight; set ALLOW_PICKLE to deliver it',
                 extra={'tg_key': self.processing_key},
             )
-            return False
+            return None, False
         except SerializationError:
             self._record_undecodable(raw, 'serialization')
             logger.exception('dropping undecodable queued message')
-            return True
+            return None, True
         except Exception:
             self._record_undecodable(raw, 'unknown')
             logger.exception('dropping queued message that failed to decode')
-            return True
+            return None, True
         try:
-            envelope = unpack(payload)
+            return unpack(payload), True
         except UnknownEnvelopeVersionError:
             # written by a newer producer than this consumer understands, so
             # leaving it in flight is what lets an upgrade deliver it
             logger.exception('leaving a message from a newer version in flight')
-            return False
+            return None, False
+        except Exception:
+            # MalformedEnvelopeError and whatever else a hostile payload can
+            # provoke: nothing will ever make sense of it, so it is
+            # acknowledged rather than left to come back for ever — and this
+            # reader is on the far side of a trust boundary, where an escaping
+            # exception would end the consumer for the life of the container
+            self._record_undecodable(raw, 'envelope')
+            logger.exception('dropping a queued message whose envelope cannot be read')
+            return None, True
+
+    def dispatch(self, raw: bytes) -> bool:
+        """Decode one message and hand it to the handler.
+
+        A bad payload is one message's problem, so everything short of a kill is
+        logged and dropped: the consumer has to survive it to deliver the rest.
+
+        Returns whether the message should be acknowledged. Two cases say no: a
+        pickle the configuration refuses, and an envelope from a newer version.
+        Both are valid payloads somebody else can deliver, so they stay in
+        flight — acknowledging would destroy them over a setting or a deploy
+        order.
+        """
+        envelope, acknowledge = self._read(raw)
+        if envelope is None:
+            return acknowledge
         try:
             check_function(envelope.function)
         except ValueError:

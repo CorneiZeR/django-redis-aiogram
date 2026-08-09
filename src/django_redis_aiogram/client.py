@@ -165,7 +165,8 @@ class TelegramBot:
         self._dispatcher: Dispatcher | None = None
         self._router = Router()
         #: sends this bot scheduled, so shutdown drains its own work only
-        self._sends: set[asyncio.Task[None]] = set()
+        # the call behind each task, so shutdown can say what it cancelled
+        self._sends: dict[asyncio.Task[None], Outbound] = {}
         self._polling = False
         self._closing = False
         # reentrant: _attach_router holds it while reading self.dispatcher
@@ -447,7 +448,7 @@ class TelegramBot:
 
         call_kwargs = {**conf['DEFAULT_KWARGS'](function), **kwargs}
         outbound = Outbound(identifier, function, call_kwargs)
-        self._schedule(send(), identifier)
+        self._schedule(send(), outbound)
         return identifier
 
     @staticmethod
@@ -477,15 +478,15 @@ class TelegramBot:
             )
         )
 
-    def _register(self, task: 'asyncio.Task[None]') -> None:
+    def _register(self, task: 'asyncio.Task[None]', outbound: 'Outbound') -> None:
         """Track a send so :meth:`close` can wait for it.
 
         Registration happens when the task is created, not when it starts
         running: a task that has been scheduled but not yet stepped is exactly
         the one shutdown must not lose.
         """
-        self._sends.add(task)
-        task.add_done_callback(self._sends.discard)
+        self._sends[task] = outbound
+        task.add_done_callback(self._sends.pop)
         task.add_done_callback(self._log_task_failure)
 
     @staticmethod
@@ -497,7 +498,7 @@ class TelegramBot:
         if error is not None:
             logger.error('scheduled send failed', exc_info=error)
 
-    def _schedule(self, coroutine: Coroutine[Any, Any, None], correlation_id: uuid.UUID) -> None:
+    def _schedule(self, coroutine: Coroutine[Any, Any, None], outbound: 'Outbound') -> None:
         """Run a coroutine on the bot loop from whichever thread we are on.
 
         The delivery consumer runs in its own thread while the loop belongs to
@@ -507,7 +508,7 @@ class TelegramBot:
         if self._closing:
             # the loop is being torn down, so nothing would ever run this
             coroutine.close()
-            self._record_drop(correlation_id, 'the bot is shutting down')
+            self._record_drop(outbound, 'the bot is shutting down')
             logger.error('send refused: the bot is shutting down')
             return
 
@@ -518,7 +519,7 @@ class TelegramBot:
 
         loop = self.loop
         if running is loop:
-            self._register(self._start(coroutine, loop, correlation_id))
+            self._register(self._start(coroutine, loop, outbound), outbound)
             return
 
         # several web threads may send at once, and run_until_complete is not
@@ -530,14 +531,14 @@ class TelegramBot:
             # teardown while this thread waited for it
             if self._closing or loop.is_closed():
                 coroutine.close()
-                self._record_drop(correlation_id, 'the event loop was closed')
+                self._record_drop(outbound, 'the event loop was closed')
                 logger.error('send refused: the event loop was closed')
                 return
             if loop.is_running():
                 # decided under the lock: seen from outside it, a loop another
                 # thread drives for one run_until_complete looks running right
                 # up to the moment it stops, and the handoff would be lost
-                self._hand_off(coroutine, loop, correlation_id)
+                self._hand_off(coroutine, loop, outbound)
                 return
             try:
                 loop.run_until_complete(coroutine)
@@ -545,13 +546,13 @@ class TelegramBot:
                 # polling started between the check above and this call
                 if not loop.is_running():
                     raise
-                self._hand_off(coroutine, loop, correlation_id)
+                self._hand_off(coroutine, loop, outbound)
 
     def _hand_off(
         self,
         coroutine: Coroutine[Any, Any, None],
         loop: AbstractEventLoop,
-        correlation_id: uuid.UUID,
+        outbound: 'Outbound',
     ) -> None:
         """Create the task on the loop thread, so it is registered before it runs."""
 
@@ -559,34 +560,40 @@ class TelegramBot:
             if self._closing:
                 # close() began after this was queued; the loop will not run it
                 coroutine.close()
-                self._record_drop(correlation_id, 'the bot started shutting down')
+                self._record_drop(outbound, 'the bot started shutting down')
                 logger.error('send dropped: the bot started shutting down')
                 return
-            self._register(self._start(coroutine, loop, correlation_id))
+            self._register(self._start(coroutine, loop, outbound), outbound)
 
         try:
             loop.call_soon_threadsafe(start)
         except RuntimeError:
             coroutine.close()
-            self._record_drop(correlation_id, 'the event loop is closed')
+            self._record_drop(outbound, 'the event loop is closed')
             logger.exception('send dropped: the event loop is closed')
 
     @staticmethod
     def _start(
         coroutine: Coroutine[Any, Any, None],
         loop: AbstractEventLoop,
-        correlation_id: uuid.UUID,
+        outbound: 'Outbound',
     ) -> 'asyncio.Task[None]':
         """Create the task, named so shutdown can say which message it cancelled."""
-        return loop.create_task(coroutine, name=f'{TASK_PREFIX}{correlation_id.hex}')
+        return loop.create_task(coroutine, name=f'{TASK_PREFIX}{outbound.correlation_id.hex}')
 
     @staticmethod
-    def _record_drop(correlation_id: uuid.UUID, reason: str) -> None:
-        """Record a send that never reached Telegram, and used to leave only a log line."""
+    def _record_drop(outbound: 'Outbound', reason: str) -> None:
+        """Record a send that never reached Telegram, and used to leave only a log line.
+
+        Carries the call, not just its id: a direct `send_raw` was never queued,
+        so this row is the only one that will ever exist for that message.
+        """
         recorder.record(
             Event(
                 kind=EventKind.OUTBOUND_DROPPED.value,
-                correlation_id=correlation_id,
+                correlation_id=outbound.correlation_id,
+                function=outbound.function,
+                chat_id=as_identifier(outbound.call_kwargs.get('chat_id')),
                 error_code='NotScheduled',
                 error=reason,
             )
@@ -615,7 +622,7 @@ class TelegramBot:
         if not dropped:
             return
         for task in dropped:
-            self._record_drop(task_correlation_id(task), 'cancelled at shutdown')
+            self._record_drop(self._sends[task], 'cancelled at shutdown')
             task.cancel()
         loop.run_until_complete(asyncio.gather(*dropped, return_exceptions=True))
         logger.warning(

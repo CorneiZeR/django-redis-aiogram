@@ -8,9 +8,15 @@ from aiogram.methods import SendMessage
 from django.test import override_settings
 
 from django_redis_aiogram import TelegramBot
+from django_redis_aiogram.client import Outbound
 from django_redis_aiogram.delivery import BlpopDelivery, get_delivery
 from django_redis_aiogram.events import new_correlation_id
 from django_redis_aiogram.serializers import JsonSerializer, PickleSerializer
+
+
+def an_outbound(function='send_message', **kwargs):
+    """The call identity every scheduling path now carries."""
+    return Outbound(new_correlation_id(), function, kwargs or {'chat_id': 1, 'text': 'x'})
 
 
 @override_settings(TELEGRAM_BOT={'DELIVERY': 'blpop'})
@@ -143,7 +149,7 @@ def test_schedule_hops_to_the_loop_thread():
         ran_on.append(threading.get_ident())
         done.set()
 
-    instance._schedule(coroutine(), new_correlation_id())
+    instance._schedule(coroutine(), an_outbound())
     assert done.wait(5), 'coroutine never ran on the loop thread'
     assert ran_on == [thread.ident]
 
@@ -160,7 +166,7 @@ def test_schedule_runs_inline_when_no_loop_is_running():
     async def coroutine():
         ran.append(True)
 
-    instance._schedule(coroutine(), new_correlation_id())
+    instance._schedule(coroutine(), an_outbound())
     assert ran == [True]
     instance.close()
 

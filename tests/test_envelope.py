@@ -13,6 +13,7 @@ from django_redis_aiogram.context import correlation_scope, current_correlation_
 from django_redis_aiogram.envelope import (
     ENVELOPE_KEY,
     ENVELOPE_VERSION,
+    MalformedEnvelopeError,
     UnknownEnvelopeVersionError,
     pack,
     unpack,
@@ -64,6 +65,50 @@ def test_a_newer_envelope_is_refused_rather_than_misread():
 
     with pytest.raises(UnknownEnvelopeVersionError, match='Upgrade the bot container first'):
         unpack(payload)
+
+
+@pytest.mark.parametrize(
+    'payload',
+    [
+        pytest.param([{'function': 'send_message'}], id='a list'),
+        pytest.param('send_message', id='a string'),
+        pytest.param(42, id='a number'),
+        pytest.param(None, id='null'),
+    ],
+)
+def test_a_payload_that_is_not_a_mapping_is_refused_rather_than_raised_through(payload):
+    """Redis is a trust boundary, and `.get` on a decoded list is an
+    AttributeError that would leave the consumer thread dead."""
+    with pytest.raises(MalformedEnvelopeError, match='not a mapping'):
+        unpack(payload)
+
+
+@pytest.mark.parametrize('version', [0, -1, 'one', [], {}])
+def test_a_version_no_release_ever_wrote_is_refused_as_malformed(version):
+    """Distinct from a newer version on purpose: a future shape is kept in
+    flight for an upgraded consumer, and this one never becomes deliverable, so
+    keeping it would mean reclaiming it for ever."""
+    payload = {ENVELOPE_KEY: version, 'function': 'send_message', 'kwargs': {}}
+
+    with pytest.raises(MalformedEnvelopeError):
+        unpack(payload)
+
+
+@pytest.mark.parametrize('broken', ['not-a-number', [], {}, object()])
+def test_an_unreadable_timestamp_costs_the_latency_not_the_message(broken):
+    """`float()` on it raises, and the call itself may be perfectly deliverable
+    — losing a real message over a metric would be the wrong trade."""
+    payload = {
+        ENVELOPE_KEY: ENVELOPE_VERSION,
+        'function': 'send_message',
+        'kwargs': {'chat_id': 1},
+        'queued_at': broken,
+    }
+
+    envelope = unpack(payload)
+
+    assert envelope.queued_at == 0.0
+    assert envelope.kwargs == {'chat_id': 1}
 
 
 @pytest.mark.parametrize('broken', ['', 'not-a-uuid', None, 42])

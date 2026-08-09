@@ -141,6 +141,10 @@ def test_a_send_refused_at_shutdown_leaves_a_row():
     row = TelegramEvent.objects.get(kind=EventKind.OUTBOUND_DROPPED.value)
     assert row.correlation_id == identifier
     assert 'shutting down' in row.error
+    # a direct send_raw was never queued, so this row is the only one that will
+    # ever exist for the message: an id alone cannot say what was lost
+    assert row.function == 'send_message'
+    assert row.chat_id == 7
 
 
 @pytest.mark.django_db(transaction=True)
@@ -259,3 +263,25 @@ def test_an_unnamed_task_gets_an_id_rather_than_an_error():
         return recovered
 
     assert asyncio.run(build()) is not None
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'REDIS_URL': 'redis://localhost:6379/0'})
+def test_an_envelope_the_reader_cannot_make_sense_of_is_dropped_not_raised(redis_server):
+    """A payload that decodes but declares a version no release ever wrote.
+
+    Distinct from a newer version, which stays in flight for an upgraded
+    consumer: this one never becomes deliverable, so keeping it would mean
+    reclaiming it for ever. Recorded by fingerprint, because a payload the
+    reader refused is untrusted input.
+    """
+    redis_server.rpush(QUEUE, JsonSerializer().dumps({'__envelope__': 0, 'function': 'send_message'}))
+
+    handled = []
+    BlpopDelivery(handler=lambda **kwargs: handled.append(kwargs)).consume_pending()
+    recorder.flush(timeout=5)
+
+    assert handled == [], 'a payload that is not an envelope reached the handler'
+    row = TelegramEvent.objects.get(kind=EventKind.QUEUE_UNDECODABLE.value)
+    assert set(row.detail) == {'bytes', 'sha256'}
+    assert redis_server.llen(QUEUE) == 0, 'the message was left to come back for ever'

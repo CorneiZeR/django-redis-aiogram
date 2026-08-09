@@ -17,6 +17,7 @@ the message is lost silently. Deploy the bot container before the web tier.
 """
 
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -25,6 +26,20 @@ from django_redis_aiogram.exceptions import DjangoRedisAiogramError
 #: marks a payload as nested, and says which shape to read it as
 ENVELOPE_KEY = '__envelope__'
 ENVELOPE_VERSION = 1
+
+
+class MalformedEnvelopeError(DjangoRedisAiogramError, ValueError):
+    """A payload decoded, but is not a shape any version of this reads.
+
+    Distinct from an unknown *version*, and the difference decides the message's
+    fate: a newer version is left in flight for an upgraded consumer to deliver,
+    while nothing will ever make sense of this one, so it is recorded and
+    acknowledged instead of coming back for ever.
+    """
+
+    def __init__(self, found: object) -> None:
+        """Name what arrived, never its content: this came off an untrusted queue."""
+        super().__init__(f'Queued payload is not a readable envelope: {found}.')
 
 
 class UnknownEnvelopeVersionError(DjangoRedisAiogramError, ValueError):
@@ -77,12 +92,29 @@ def _as_uuid(value: object) -> uuid.UUID | None:
     return None
 
 
-def unpack(payload: dict[str, Any]) -> Envelope:
-    """Read either shape.
+def _as_time(value: object) -> float:
+    """Read a timestamp, or settle for none.
+
+    A figure this cannot read costs the queue latency, not the message, which
+    may otherwise be perfectly deliverable.
+    """
+    try:
+        return float(value or 0.0)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def unpack(payload: object) -> Envelope:
+    """Read either shape, from whatever the queue actually held.
 
     A rolling upgrade leaves 2.x payloads on the list for as long as the backlog
-    lasts, and refusing them would drop real messages.
+    lasts, and refusing them would drop real messages. Everything else this
+    cannot read raises, because the consumer thread is on the far side of a
+    trust boundary and an exception escaping it ends the worker.
     """
+    if not isinstance(payload, Mapping):
+        found = f'a decoded {type(payload).__name__}, not a mapping'
+        raise MalformedEnvelopeError(found)
     version = payload.get(ENVELOPE_KEY)
     if version is None:
         return Envelope(
@@ -90,15 +122,20 @@ def unpack(payload: dict[str, Any]) -> Envelope:
             kwargs={key: value for key, value in payload.items() if key != 'function'},
         )
     try:
-        found = int(version)
+        declared = int(version)
     except (TypeError, ValueError):
-        raise UnknownEnvelopeVersionError(version) from None
-    if found > ENVELOPE_VERSION:
-        raise UnknownEnvelopeVersionError(found)
+        unreadable = f'envelope version {version!r}'
+        raise MalformedEnvelopeError(unreadable) from None
+    if declared > ENVELOPE_VERSION:
+        raise UnknownEnvelopeVersionError(declared)
+    if declared < ENVELOPE_VERSION:
+        # not a future shape somebody can deliver later, so it is not kept
+        older = f'envelope version {declared}'
+        raise MalformedEnvelopeError(older)
     arguments = payload.get('kwargs')
     return Envelope(
         function=str(payload.get('function', '')),
-        kwargs=dict(arguments) if isinstance(arguments, dict) else {},
+        kwargs=dict(arguments) if isinstance(arguments, Mapping) else {},
         correlation_id=_as_uuid(payload.get('correlation_id')),
-        queued_at=float(payload.get('queued_at') or 0.0),
+        queued_at=_as_time(payload.get('queued_at')),
     )

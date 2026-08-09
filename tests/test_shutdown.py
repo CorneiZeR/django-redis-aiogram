@@ -12,9 +12,15 @@ from django.core.management import call_command
 from django.test import override_settings
 
 from django_redis_aiogram import TelegramBot, bot
-from django_redis_aiogram.client import loop_lock
+from django_redis_aiogram.client import Outbound, loop_lock
 from django_redis_aiogram.events import new_correlation_id
 from django_redis_aiogram.management.commands.start_tgbot import Command as StartCommand
+
+
+def an_outbound(function='send_message', **kwargs):
+    """The call identity every scheduling path now carries."""
+    return Outbound(new_correlation_id(), function, kwargs or {'chat_id': 1, 'text': 'x'})
+
 
 SETTINGS = {'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost:6379/0', 'FSM_STORAGE': 'memory'}
 
@@ -270,7 +276,7 @@ def test_a_handoff_queued_before_shutdown_is_dropped_loudly(caplog):
 
     with running_loop(instance) as loop:
         instance._closing = True
-        instance._hand_off(instance.bot.send_message(chat_id=1, text='x'), loop, new_correlation_id())
+        instance._hand_off(instance.bot.send_message(chat_id=1, text='x'), loop, an_outbound())
         with caplog.at_level('ERROR', logger='django_redis_aiogram'):
             done = threading.Event()
             loop.call_soon_threadsafe(done.set)
