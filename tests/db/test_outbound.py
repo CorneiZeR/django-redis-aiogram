@@ -6,6 +6,7 @@ closed, dropped in the hand-off, and cancelled at shutdown.
 """
 
 import asyncio
+import uuid
 
 import pytest
 from aiogram import exceptions
@@ -121,6 +122,7 @@ def test_a_rate_limit_records_the_retry_and_then_the_giving_up():
         instance.close()
 
     recorded = kinds()
+    assert len(attempts) == instance.max_retries + 1, attempts
     assert EventKind.OUTBOUND_RETRIED.value in recorded, recorded
     assert recorded[-1] == EventKind.OUTBOUND_DROPPED.value, recorded
 
@@ -145,6 +147,43 @@ def test_a_send_refused_at_shutdown_leaves_a_row():
     # ever exist for the message: an id alone cannot say what was lost
     assert row.function == 'send_message'
     assert row.chat_id == 7
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_the_pacing_figure_measures_the_attempt_that_sent_it():
+    """`paced_ms` answers "how long did the rate limiter hold this back".
+
+    Measured from the first attempt it would fold in every earlier attempt and
+    the sleeps Telegram itself asked for, which is a different question and a
+    much larger number — and the figure is what someone reads when they ask why
+    a message was slow.
+    """
+    refusals = []
+
+    def refuse_once(_kwargs):
+        if not refusals:
+            refusals.append(True)
+            raise exceptions.TelegramRetryAfter(
+                method=SendMessage(chat_id=1, text='x'),
+                message='Too Many Requests',
+                retry_after=1,
+            )
+        return Sent()
+
+    instance = TelegramBot()
+    instance._bot = a_bot(refuse_once)
+    try:
+        instance.send_raw(chat_id=7, text='hi')
+        recorder.flush(timeout=10)
+    finally:
+        instance._bot = None
+        instance.close()
+
+    row = TelegramEvent.objects.get(kind=EventKind.OUTBOUND_SENT.value)
+    # the retry slept a second; the successful attempt waited on nothing
+    assert row.detail['paced_ms'] < 500, row.detail
+    assert row.duration_ms >= 1000, 'the whole send did take the sleep'
 
 
 @pytest.mark.django_db(transaction=True)
@@ -256,13 +295,16 @@ def test_the_id_survives_a_round_trip_through_a_task_name():
 
 
 def test_an_unnamed_task_gets_an_id_rather_than_an_error():
+    """asyncio names its own tasks 'Task-3' and the like, so the fallback has to
+    produce something a UUID column can hold rather than refuse."""
+
     async def build():
         task = asyncio.create_task(asyncio.sleep(0))
         recovered = task_correlation_id(task)
         await task
         return recovered
 
-    assert asyncio.run(build()) is not None
+    assert isinstance(asyncio.run(build()), uuid.UUID)
 
 
 @pytest.mark.django_db(transaction=True)

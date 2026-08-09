@@ -33,7 +33,7 @@ from django_redis_aiogram.enums import EventKind, StorageKind
 from django_redis_aiogram.envelope import pack
 from django_redis_aiogram.events import new_correlation_id
 from django_redis_aiogram.payloads import describe
-from django_redis_aiogram.recorder import Event, recorder
+from django_redis_aiogram.recorder import Event, as_identifier, recorder
 from django_redis_aiogram.redis import get_redis
 from django_redis_aiogram.serializers import get_serializer
 from django_redis_aiogram.settings import SETTINGS_NAME, coerce_bool, conf
@@ -63,13 +63,6 @@ def resolve_correlation_id(supplied: uuid.UUID | str | None) -> uuid.UUID:
             msg = f'correlation_id must be a UUID, got {supplied!r}.'
             raise ValueError(msg) from None
     return current_correlation_id() or new_correlation_id()
-
-
-def as_identifier(value: object) -> int | None:
-    """Telegram ids are integers; a @username chat_id is not one to store."""
-    if isinstance(value, bool) or not isinstance(value, int):
-        return None
-    return value
 
 
 @dataclass(frozen=True)
@@ -380,6 +373,10 @@ class TelegramBot:
             started = time.monotonic()
             while retries <= self.max_retries:
                 try:
+                    # per attempt, not since the first: measured from `started`
+                    # this would fold in the earlier attempts and the sleeps
+                    # Telegram asked for, and stop being the limiter's wait
+                    attempted = time.monotonic()
                     limiter = self.rate_limiter
                     if limiter is not None:
                         await limiter.acquire(call_kwargs.get('chat_id'))
@@ -424,7 +421,7 @@ class TelegramBot:
                         message_id=getattr(result, 'message_id', None),
                         duration_ms=int((time.monotonic() - started) * 1000),
                         detail={
-                            'paced_ms': int((paced - started) * 1000),
+                            'paced_ms': int((paced - attempted) * 1000),
                             'queue_ms': int((time.time() - queued_at) * 1000) if queued_at else None,
                         },
                     )

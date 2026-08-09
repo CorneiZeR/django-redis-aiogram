@@ -39,6 +39,18 @@ logger = logging.getLogger('django_redis_aiogram')
 #: the writer's thread name, so a log line or a test can name it
 WRITER_THREAD = 'tgbot-event-writer'
 
+
+def as_identifier(value: object) -> int | None:
+    """Keep what a BIGINT column can hold, and nothing else.
+
+    A Telegram chat_id may be a `@username`, which is a valid destination and
+    not a number; `True` is an int to Python and not an id to anyone.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
 #: how long stop() waits for the writer before giving up on what it holds
 STOP_TIMEOUT = 5.0
 #: consecutive failed flushes after which the writer stops trying for a while

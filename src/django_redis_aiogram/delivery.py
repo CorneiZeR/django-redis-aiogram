@@ -28,7 +28,7 @@ from django_redis_aiogram.api import check_function
 from django_redis_aiogram.enums import DeliveryKind, EventKind
 from django_redis_aiogram.envelope import Envelope, UnknownEnvelopeVersionError, unpack
 from django_redis_aiogram.events import new_correlation_id, worker_identity
-from django_redis_aiogram.recorder import Event, recorder
+from django_redis_aiogram.recorder import Event, as_identifier, recorder
 from django_redis_aiogram.redis import as_bytes, get_redis, read_timeout
 from django_redis_aiogram.serializers import PickleReadRefusedError, SerializationError, loads
 from django_redis_aiogram.settings import conf
@@ -252,7 +252,7 @@ class Delivery(ABC):
                 kind=kind.value,
                 correlation_id=envelope.correlation_id or new_correlation_id(),
                 function=envelope.function,
-                chat_id=chat_id if isinstance(chat_id, int) and not isinstance(chat_id, bool) else None,
+                chat_id=as_identifier(chat_id),
                 worker=worker_identity(),
                 error=error,
                 detail=self._queue_latency(envelope),
