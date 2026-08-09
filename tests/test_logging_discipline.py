@@ -252,7 +252,11 @@ def test_every_structured_field_is_documented():
     """
     emitted = set()
     for path in MODULES:
-        emitted |= set(re.findall(r"'(tg_[a-z_]+)'", path.read_text(encoding='utf-8')))
+        # parsed rather than matched: a regex for one quote style lets the other
+        # through, and this test exists to catch what nobody noticed
+        for node in ast.walk(ast.parse(path.read_text(encoding='utf-8'))):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value.startswith('tg_'):
+                emitted.add(node.value)
     page = (SOURCE.parent / 'docs' / 'wiki' / 'Logging.md').read_text(encoding='utf-8')
     documented = set(re.findall(r'`(tg_[a-z_]+)`', page))
 

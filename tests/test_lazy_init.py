@@ -5,14 +5,17 @@ project down — including its test suite — whenever they were absent.
 """
 
 import os
+import re
 import subprocess
 import sys
 import textwrap
+from pathlib import Path
 
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 from django.test import override_settings
 
+import django_redis_aiogram
 from django_redis_aiogram import TelegramBot, bot, conf, redis_conn
 from django_redis_aiogram.settings import Settings, parse_bool
 
@@ -206,3 +209,18 @@ def test_dir_lists_the_lazy_exports():
     import django_redis_aiogram
 
     assert set(django_redis_aiogram.__all__) <= set(dir(django_redis_aiogram))
+
+
+def test_the_version_is_the_one_the_changelog_announces():
+    """`pyproject` reads the version from here, so this string is what a user
+    installs — and nothing pinned it, so a revert of the release bump would
+    have passed every test.
+
+    Asserted against the changelog rather than a literal, so a release edits one
+    place and this keeps checking that the other one followed.
+    """
+    changelog = (Path(__file__).resolve().parent.parent / 'CHANGELOG.md').read_text(encoding='utf-8')
+    announced = re.search(r'^## (\d+\.\d+\.\d+)', changelog, re.MULTILINE)
+
+    assert announced is not None, 'the changelog has no released version at the top'
+    assert django_redis_aiogram.__version__ == announced.group(1)

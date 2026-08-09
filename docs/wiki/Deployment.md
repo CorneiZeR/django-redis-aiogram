@@ -142,11 +142,15 @@ exits 0, since nothing is meant to be running there.
 
 ## The event log and your database
 
-With `EVENT_LOG` on, each process that records owns **one more database
+With `EVENT_LOG` on, every process that records owns **one more database
 connection** — the writer thread's, which nothing but the writer closes. Size
-the pool for it: a web container with four gunicorn workers now opens five
-connections rather than four, and a `CONN_MAX_AGE` of 0 no longer costs the
-writer a reconnect per batch, because it holds its own.
+the pool for it: a gunicorn worker is a process, so four of them open eight
+connections rather than four. A `CONN_MAX_AGE` of 0 costs the writer nothing
+extra, because it holds its own connection rather than borrowing the request's.
+
+`EVENT_LOG_SYNC` writes on the calling thread instead, which keeps the count at
+one per worker — and makes every send wait for the database, which is why
+`W009` warns about it. It is for tests.
 
 Point it somewhere else if the traffic warrants: `EVENT_LOG_DATABASE` names any
 alias in `DATABASES`, and the writer and the admin both use it explicitly, so
