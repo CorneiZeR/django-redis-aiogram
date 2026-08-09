@@ -13,6 +13,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Chat, Message, Update, User
 from django.test import override_settings
 
+from django_redis_aiogram import TelegramBot
 from django_redis_aiogram.enums import EventKind
 from django_redis_aiogram.instrumentation import (
     RecordingStorage,
@@ -264,3 +265,37 @@ def test_nothing_is_installed_while_the_log_is_off():
 @override_settings(TELEGRAM_BOT={'EVENT_LOG': True})
 def test_the_storage_is_wrapped_when_the_log_is_on():
     assert isinstance(instrumented(MemoryStorage()), RecordingStorage)
+
+
+@override_settings(TELEGRAM_BOT={**ON, 'TOKEN': TOKEN, 'FSM_STORAGE': 'memory'})
+def test_the_bot_actually_installs_what_these_tests_exercise():
+    """The seams above are driven directly, so nothing in this file would
+    notice `TelegramBot` quietly ceasing to use them.
+
+    This is the wiring: the dispatcher a real bot builds carries the middleware,
+    and the storage it hands aiogram is the recording one.
+    """
+    instance = TelegramBot()
+    try:
+        dispatcher = instance.dispatcher
+        middlewares = [type(each).__name__ for each in dispatcher.update.outer_middleware]
+
+        assert 'RecordingMiddleware' in middlewares, middlewares
+        assert isinstance(dispatcher.storage, RecordingStorage)
+    finally:
+        instance.close()
+
+
+@override_settings(TELEGRAM_BOT={'TOKEN': TOKEN, 'FSM_STORAGE': 'memory'})
+def test_the_bot_installs_neither_while_the_log_is_off():
+    """The other half of the same wiring: off is the default, and it has to
+    reach the dispatcher too."""
+    instance = TelegramBot()
+    try:
+        dispatcher = instance.dispatcher
+        middlewares = [type(each).__name__ for each in dispatcher.update.outer_middleware]
+
+        assert 'RecordingMiddleware' not in middlewares, middlewares
+        assert not isinstance(dispatcher.storage, RecordingStorage)
+    finally:
+        instance.close()
