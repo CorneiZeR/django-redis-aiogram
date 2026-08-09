@@ -89,7 +89,11 @@ def write_batch(events: Sequence[Event]) -> None:
     rows = [to_row(event) for event in events]
     manager = TelegramEvent.objects.using(alias)
     try:
-        manager.bulk_create(rows)
+        # the savepoint is what keeps a failed log write from taking the
+        # caller's data with it: under EVENT_LOG_SYNC this runs on the caller's
+        # thread, inside whatever atomic() block the caller opened
+        with transaction.atomic(using=alias):
+            manager.bulk_create(rows)
     except (OperationalError, InterfaceError):
         # the connection died between the check above and the insert; one retry
         # on a fresh one is the difference between losing a batch and not
@@ -104,7 +108,8 @@ def write_batch(events: Sequence[Event]) -> None:
 def _write_half(rows: list[TelegramEvent], alias: str) -> None:
     """Insert one half of a bisected batch, splitting it again if it still fails."""
     try:
-        TelegramEvent.objects.using(alias).bulk_create(rows)
+        with transaction.atomic(using=alias):
+            TelegramEvent.objects.using(alias).bulk_create(rows)
     except DatabaseError:
         _write_one_by_one(rows, alias)
 

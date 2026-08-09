@@ -10,6 +10,8 @@ import threading
 import pytest
 from django.conf import settings
 
+from django_redis_aiogram.recorder import WRITER_THREAD
+
 
 @pytest.fixture
 def paused_writer(monkeypatch):
@@ -21,9 +23,22 @@ def paused_writer(monkeypatch):
     queue, bounds, drops — with the test in charge of when it is drained.
 
     join() goes with it, because joining a thread that never started raises.
+
+    Keyed on the writer's name: patching every Thread would silently neuter any
+    other thread a test starts, which is a trap rather than a fixture.
     """
-    monkeypatch.setattr(threading.Thread, 'start', lambda self: None)
-    monkeypatch.setattr(threading.Thread, 'join', lambda self, timeout=None: None)
+    real_start, real_join = threading.Thread.start, threading.Thread.join
+
+    def start(self):
+        if self.name != WRITER_THREAD:
+            real_start(self)
+
+    def join(self, timeout=None):
+        if self.name != WRITER_THREAD:
+            real_join(self, timeout)
+
+    monkeypatch.setattr(threading.Thread, 'start', start)
+    monkeypatch.setattr(threading.Thread, 'join', join)
 
 
 def pytest_configure(config):

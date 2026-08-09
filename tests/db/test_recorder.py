@@ -9,14 +9,15 @@ import threading
 import time
 
 import pytest
-from django.db import DatabaseError, OperationalError
+from django.db import DatabaseError, OperationalError, connection, transaction
 from django.db.models import QuerySet
 from django.test import override_settings
+from django.test.utils import CaptureQueriesContext
 
 from django_redis_aiogram.enums import EventKind
 from django_redis_aiogram.eventlog import write_batch
 from django_redis_aiogram.models import TelegramEvent
-from django_redis_aiogram.recorder import FAILURE_LIMIT, Event, EventRecorder, recorder
+from django_redis_aiogram.recorder import FAILURE_LIMIT, WRITER_THREAD, Event, EventRecorder
 
 ON = {'EVENT_LOG': True}
 
@@ -103,7 +104,7 @@ def test_the_writer_thread_writes_and_stops():
     finally:
         recorder.stop(timeout=5)
 
-    assert not any(thread.name == 'tgbot-event-writer' for thread in threading.enumerate())
+    assert not any(thread.name == WRITER_THREAD for thread in threading.enumerate())
 
 
 @pytest.mark.django_db(transaction=True)
@@ -213,7 +214,12 @@ def test_flush_waits_for_the_write_not_for_the_queue():
 @override_settings(TELEGRAM_BOT={**ON, 'EVENT_LOG_BATCH_SIZE': 2})
 def test_the_batch_size_is_what_one_insert_carries(paused_writer):
     """Otherwise a batch of one is indistinguishable from a batch of hundreds,
-    and the setting is a number nobody has ever exercised."""
+    and the setting is a number nobody has ever exercised.
+
+    Its own recorder, because `_collect` deliberately leaves three events in
+    the queue and the shared one would hand them to whatever runs next.
+    """
+    recorder = EventRecorder()
     for chat_id in range(5):
         recorder.record(an_event(chat_id=chat_id))
 
@@ -251,6 +257,7 @@ def test_a_batch_the_database_refuses_repeatedly_suspends_rather_than_hammers(pa
 def test_a_dropped_connection_is_retried_once_on_a_fresh_one(paused_writer):
     """A management command sees none of the request signals that recycle a
     connection, so the first write after a database restart hits a dead handle."""
+    recorder = EventRecorder()
     recorder.record(an_event(chat_id=8))
 
     attempts = []
@@ -305,6 +312,7 @@ def test_a_poison_row_on_the_retry_still_costs_only_itself(paused_writer):
     a restart is exactly when a half-written batch gets retried — and without
     the net the second failure took the whole batch with it.
     """
+    recorder = EventRecorder()
     for chat_id in (1, 2, 3):
         recorder.record(an_event(chat_id=chat_id))
 
@@ -328,3 +336,26 @@ def test_a_poison_row_on_the_retry_still_costs_only_itself(paused_writer):
     assert attempts == [3, 3], f'the retry did not carry the whole batch: {attempts}'
     # three rows is small enough that the fallback saves them individually
     assert TelegramEvent.objects.count() == 3, 'the whole batch was lost over one refusal on the retry'
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT={**ON, 'EVENT_LOG_SYNC': True})
+def test_the_batch_insert_takes_a_savepoint_inside_the_caller_transaction():
+    """Synchronous recording runs on the caller's thread, inside whatever
+    atomic() block the caller opened. A statement that fails there marks the
+    whole transaction for rollback — PostgreSQL does it in the server — so
+    without a savepoint the log destroys the data of the request it was only
+    supposed to describe.
+
+    Asserted on the savepoint rather than on surviving data: SQLite does not
+    abort a transaction on a failed statement, so a test about the damage would
+    pass here and fail nowhere until production.
+    """
+    recorder = EventRecorder()
+
+    with transaction.atomic(), CaptureQueriesContext(connection) as queries:
+        recorder.record(an_event(chat_id=123))
+
+    statements = [query['sql'] for query in queries]
+    assert any(sql.startswith('SAVEPOINT') for sql in statements), statements
+    assert TelegramEvent.objects.count() == 1

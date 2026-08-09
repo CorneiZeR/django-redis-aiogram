@@ -36,6 +36,9 @@ from django_redis_aiogram.settings import SETTINGS_NAME, coerce_bool, conf
 
 logger = logging.getLogger('django_redis_aiogram')
 
+#: the writer's thread name, so a log line or a test can name it
+WRITER_THREAD = 'tgbot-event-writer'
+
 #: how long stop() waits for the writer before giving up on what it holds
 STOP_TIMEOUT = 5.0
 #: consecutive failed flushes after which the writer stops trying for a while
@@ -189,7 +192,7 @@ class EventRecorder:
                 self._stopping.clear()
                 self._owner_pid = os.getpid()
                 buffer = queue.Queue(maxsize=max(1, int(conf['EVENT_LOG_BUFFER_SIZE'])))
-                thread = threading.Thread(target=self._run, args=(buffer,), name='tgbot-event-writer', daemon=True)
+                thread = threading.Thread(target=self._run, args=(buffer,), name=WRITER_THREAD, daemon=True)
                 self._queue, self._thread = buffer, thread
                 try:
                     thread.start()
@@ -283,17 +286,19 @@ class EventRecorder:
             self._write(batch)
         except Exception:
             failures += 1
+            self._dropped += len(batch)
+            # one line per failure, not two: the suspension is a different
+            # sentence about the same exception, not a second thing that broke
+            if failures >= FAILURE_LIMIT:
+                logger.exception(
+                    'the event log is suspended after repeated failures; run migrate or check the database',
+                    extra={'tg_count': len(batch), 'tg_failures': failures},
+                )
+                return 0, time.monotonic() + FAILURE_BACKOFF
             logger.exception(
                 'could not write an event batch',
                 extra={'tg_count': len(batch), 'tg_failures': failures},
             )
-            self._dropped += len(batch)
-            if failures >= FAILURE_LIMIT:
-                logger.exception(
-                    'the event log is suspended after repeated failures; run migrate or check the database',
-                    extra={'tg_failures': failures},
-                )
-                return 0, time.monotonic() + FAILURE_BACKOFF
             return failures, 0.0
         if dropped_before:
             self._record_gap(dropped_before)

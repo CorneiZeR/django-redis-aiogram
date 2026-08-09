@@ -26,7 +26,7 @@ from django_redis_aiogram.events import (
     register_kind,
 )
 from django_redis_aiogram.models import TelegramEvent
-from django_redis_aiogram.recorder import Event, EventRecorder
+from django_redis_aiogram.recorder import WRITER_THREAD, Event, EventRecorder
 
 
 def test_recording_is_free_while_the_flag_is_off():
@@ -50,7 +50,7 @@ def test_no_writer_thread_exists_when_the_flag_is_off():
     recorder = EventRecorder()
     recorder.record(Event(kind=EventKind.OUTBOUND_SENT.value))
 
-    assert not [thread for thread in threading.enumerate() if thread.name == 'tgbot-event-writer']
+    assert not [thread for thread in threading.enumerate() if thread.name == WRITER_THREAD]
 
 
 @override_settings(TELEGRAM_BOT={'EVENT_LOG': 'maybe'})
