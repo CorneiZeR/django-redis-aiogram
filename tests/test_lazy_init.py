@@ -220,7 +220,12 @@ def test_the_version_is_the_one_the_changelog_announces():
     place and this keeps checking that the other one followed.
     """
     changelog = (Path(__file__).resolve().parent.parent / 'CHANGELOG.md').read_text(encoding='utf-8')
-    announced = re.search(r'^## (\d+\.\d+\.\d+)', changelog, re.MULTILINE)
+    # the first heading of any shape, not the first that looks like a version:
+    # searching for the latter would walk past a broken top entry to an older
+    # one and call the release good
+    heading = re.search(r'^## (.+)$', changelog, re.MULTILINE)
 
-    assert announced is not None, 'the changelog has no released version at the top'
-    assert django_redis_aiogram.__version__ == announced.group(1)
+    assert heading is not None, 'the changelog has no release headings'
+    announced = heading.group(1).split(' - ')[0].strip()
+    assert re.fullmatch(r'\d+\.\d+\.\d+', announced), f'the top changelog heading is not a version: {heading.group(1)}'
+    assert django_redis_aiogram.__version__ == announced
