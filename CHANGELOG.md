@@ -108,9 +108,10 @@ created whether or not you turn the log on.
   runs on a thread nobody is watching.
 - **A read-only admin for the feed**, registered only when the flag is on and
   only when `django.contrib.admin` is installed. It is built for a table nobody
-  wants to count: no full result count, no date drilldown, exact-match search on
-  the two indexed columns, and a filter built from the kind registry rather than
-  from a `SELECT DISTINCT` over the table.
+  wants to count: paging counts at most ten thousand rows inside a `LIMIT` and
+  says when it stopped rather than reporting the cap as the answer, no date
+  drilldown, exact-match search on the two indexed columns, and a filter built
+  from the kind registry rather than from a `SELECT DISTINCT` over the table.
 - Access splits in two: `view_telegramevent` for the list and the detail page,
   and `view_telegramevent_payload` for message bodies and exception text, so
   support can see that a message went out without reading what it said.
