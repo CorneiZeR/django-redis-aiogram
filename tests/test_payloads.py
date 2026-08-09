@@ -6,6 +6,7 @@ to stay dropped.
 """
 
 import datetime
+import json
 from decimal import Decimal
 from enum import Enum
 
@@ -164,6 +165,17 @@ def test_an_oversized_payload_becomes_a_preview_not_half_a_document():
     assert isinstance(capped['preview'], str)
 
 
+@pytest.mark.parametrize('cap', [40, 60, 120, 8192])
+def test_the_overflow_marker_obeys_the_cap_it_reports(cap):
+    """The marker is not free: its own keys, the size and JSON's quoting cost
+    bytes, and a preview counted in characters can cost four each. A cap the
+    overflow ignores is a column the operator sized wrong."""
+    with override_settings(TELEGRAM_BOT={'EVENT_LOG_MAX_PAYLOAD_BYTES': cap}):
+        capped = bounded({'text': 'ю' * 4000})
+
+    assert len(json.dumps(capped, ensure_ascii=False).encode('utf-8')) <= cap
+
+
 @override_settings(TELEGRAM_BOT={'EVENT_LOG_MAX_PAYLOAD_BYTES': 8192})
 def test_a_payload_that_cannot_be_serialised_says_so():
     """The net under everything else.
@@ -212,15 +224,21 @@ def test_an_unreadable_level_falls_back_to_the_safe_one():
     assert described['text'] == {'__omitted__': 'text', 'length': len('a secret plan')}
 
 
-def test_describe_never_raises():
-    """A log that can break a send is worse than no log."""
+def test_describe_never_raises(monkeypatch):
+    """A log that can break a send is worse than no log.
 
-    class Hostile:
-        def __repr__(self):
-            msg = 'even repr explodes'
-            raise RuntimeError(msg)
+    The failure is injected rather than staged: `summarize` reads a class name
+    and never calls `__repr__`, so a hostile object walks straight through and
+    a test built on one passes with the whole try/except deleted.
+    """
 
-    assert describe({'value': Hostile()}) is not None
+    def explode(*_args, **_kwargs):
+        msg = 'the summariser itself broke'
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr('django_redis_aiogram.payloads.summarize', explode)
+
+    assert describe({'value': 'anything'}) == {'__omitted__': 'undescribable'}
 
 
 @pytest.mark.parametrize('level', ['none', 'summary', 'full'])

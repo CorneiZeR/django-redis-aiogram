@@ -294,3 +294,37 @@ def test_a_producer_that_names_itself_keeps_its_name(paused_writer):
     recorder.drain_once()
 
     assert TelegramEvent.objects.get().worker == 'bot-1'
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT=ON)
+def test_a_poison_row_on_the_retry_still_costs_only_itself(paused_writer):
+    """The retry needs the same net as the first attempt.
+
+    A dropped connection and a row the database refuses can arrive together —
+    a restart is exactly when a half-written batch gets retried — and without
+    the net the second failure took the whole batch with it.
+    """
+    for chat_id in (1, 2, 3):
+        recorder.record(an_event(chat_id=chat_id))
+
+    attempts = []
+    original = QuerySet.bulk_create
+
+    def dead_then_poisoned(self, rows, *args, **kwargs):
+        attempts.append(len(rows))
+        if len(attempts) == 1:
+            msg = 'server closed the connection unexpectedly'
+            raise OperationalError(msg)
+        if len(attempts) == 2:
+            msg = 'no'
+            raise DatabaseError(msg)
+        return original(self, rows, *args, **kwargs)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(QuerySet, 'bulk_create', dead_then_poisoned)
+        recorder.drain_once()
+
+    assert attempts == [3, 3], f'the retry did not carry the whole batch: {attempts}'
+    # three rows is small enough that the fallback saves them individually
+    assert TelegramEvent.objects.count() == 3, 'the whole batch was lost over one refusal on the retry'

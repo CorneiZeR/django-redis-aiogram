@@ -139,7 +139,28 @@ def bounded(payload: dict[str, Any]) -> dict[str, Any]:
         return payload
     # a preview string, not a truncated object: half a JSON document is not
     # JSON, and Oracle and SQLite both validate the column
-    return {'__truncated__': True, 'size': len(text), 'preview': text[: cap // 2]}
+    return _overflow(text, cap)
+
+
+#: below this many characters the preview shrinks one at a time, not by halves
+_FINE_TUNE_BELOW = 8
+
+
+def _overflow(text: str, cap: int) -> dict[str, Any]:
+    """Describe what did not fit, in a form that itself fits.
+
+    The marker is not free: its keys, the size and JSON's own quoting all cost
+    bytes, and a preview counted in characters can cost four bytes each. The
+    cap is a promise about the column, so the preview shrinks until the whole
+    object honours it — and the marker is dropped entirely if even that cannot.
+    """
+    kept = cap // 2
+    while kept >= 0:
+        marker: dict[str, Any] = {'__truncated__': True, 'size': len(text), 'preview': text[:kept]}
+        if len(json.dumps(marker, ensure_ascii=False).encode('utf-8')) <= cap:
+            return marker
+        kept = kept // 2 if kept > _FINE_TUNE_BELOW else kept - 1
+    return {}
 
 
 def describe(kwargs: dict[str, Any]) -> dict[str, Any]:

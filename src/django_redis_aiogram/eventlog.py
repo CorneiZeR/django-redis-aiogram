@@ -94,7 +94,9 @@ def write_batch(events: Sequence[Event]) -> None:
         # the connection died between the check above and the insert; one retry
         # on a fresh one is the difference between losing a batch and not
         connections[alias].close()
-        TelegramEvent.objects.using(alias).bulk_create(rows)
+        # the retry needs the same net as the first attempt: a fresh connection
+        # rejecting one poison row must not cost the whole batch
+        _write_half(rows, alias)
     except DatabaseError:
         _write_one_by_one(rows, alias)
 

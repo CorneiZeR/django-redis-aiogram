@@ -266,3 +266,13 @@ def test_the_defaults_report_nothing():
     reported = [f'{message.id}: {message.msg}' for message in check_settings()]
 
     assert reported == [], reported
+
+
+@override_settings(TELEGRAM_BOT={'EVENT_LOG': False, 'EVENT_LOG_SYNC': True})
+def test_the_synchronous_writer_warning_is_silent_while_the_log_is_off():
+    """`record()` returns before it ever reads EVENT_LOG_SYNC, so warning here
+    would describe a cost nobody is paying — and a warning that is wrong is one
+    people learn to scroll past."""
+    emitted = {str(message.id).removeprefix('django_redis_aiogram.') for message in check_settings()}
+
+    assert 'W009' not in emitted, emitted

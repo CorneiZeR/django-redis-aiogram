@@ -433,7 +433,12 @@ def _a_writer_that_does_not_block(key: str) -> list[Problem]:
     The whole design rests on recording never making a caller wait. This
     setting deliberately breaks that for tests, so the trade is stated rather
     than left to be discovered under load.
+
+    Silent while the log is off, because `record()` returns before it ever
+    reads this one: warning there would describe a cost nobody is paying.
     """
+    if not _the_log_is_on():
+        return []
     try:
         if not coerce_bool(conf[key], f"{SETTINGS_NAME}['{key}']"):
             return []

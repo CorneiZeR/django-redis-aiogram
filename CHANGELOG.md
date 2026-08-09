@@ -57,7 +57,7 @@
   `django_redis_aiogram.dbrouter.TelegramEventLogRouter` to move `migrate` with
   it. The writer names the alias explicitly, so the feature is correct with no
   router installed at all.
-- Checks `E031`–`E042` and `W005`–`W008`, including the two that would otherwise
+- Checks `E031`–`E042` and `W005`–`W009`, including the two that would otherwise
   only show up in production: an alias that is not in `DATABASES`, and a log
   switched on where the database has no engine. Both matter because the writer
   runs on a thread nobody is watching.
