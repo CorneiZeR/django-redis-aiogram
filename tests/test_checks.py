@@ -276,3 +276,38 @@ def test_the_synchronous_writer_warning_is_silent_while_the_log_is_off():
     emitted = {str(message.id).removeprefix('django_redis_aiogram.') for message in check_settings()}
 
     assert 'W009' not in emitted, emitted
+
+
+@override_settings(
+    TELEGRAM_BOT={
+        'TOKEN': '42:x',
+        'REDIS_URL': 'redis://localhost:6379/0?decode_responses=true',
+        'ALLOW_PICKLE': True,
+        'SERIALIZER': 'pickle',
+    }
+)
+def test_a_decoding_url_with_pickle_is_refused():
+    """The one pairing nothing can recover from at runtime.
+
+    redis-py decodes inside its own parser, so a pickled payload raises after the
+    server has already moved the message to the in-flight list, and every later
+    reclaim trips over the same message for ever.
+    """
+    assert 'django_redis_aiogram.E043' in ids(check_settings())
+
+
+@override_settings(
+    TELEGRAM_BOT={
+        'TOKEN': '42:x',
+        'REDIS_URL': 'redis://localhost:6379/0?decode_responses=true',
+        'ALLOW_PICKLE': False,
+    }
+)
+def test_a_decoding_url_without_pickle_is_fine():
+    """Decoding is supported: one REDIS_URL is often shared with a cache backend."""
+    assert 'django_redis_aiogram.E043' not in ids(check_settings())
+
+
+@override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost', 'ALLOW_PICKLE': True})
+def test_a_plain_url_with_pickle_is_fine():
+    assert 'django_redis_aiogram.E043' not in ids(check_settings())

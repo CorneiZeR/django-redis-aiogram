@@ -35,7 +35,7 @@ from django_redis_aiogram.events import new_correlation_id
 from django_redis_aiogram.instrumentation import install_instrumentation, instrumented
 from django_redis_aiogram.payloads import describe
 from django_redis_aiogram.recorder import Event, as_identifier, recorder
-from django_redis_aiogram.redis import get_redis
+from django_redis_aiogram.redis import connection_kwargs, get_redis
 from django_redis_aiogram.serializers import get_serializer
 from django_redis_aiogram.settings import SETTINGS_NAME, coerce_bool, conf
 from django_redis_aiogram.throttling import RateLimiter, get_rate_limiter
@@ -125,7 +125,9 @@ def build_storage() -> BaseStorage:
         if not url:
             msg = f"{SETTINGS_NAME}['REDIS_URL'] is required for the redis FSM storage."
             raise ImproperlyConfigured(msg)
-        return instrumented(RedisStorage.from_url(url))
+        # the same deadlines the shared client gets: every update reads FSM state,
+        # so a half-open Redis here wedges the whole bot rather than one send
+        return instrumented(RedisStorage.from_url(url, connection_kwargs=connection_kwargs()))
 
     try:
         storage_class = import_string(name)

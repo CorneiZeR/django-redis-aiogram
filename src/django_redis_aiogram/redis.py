@@ -7,6 +7,7 @@ because Django settings are not readable while the app registry is loading.
 """
 
 import threading
+import urllib.parse
 from typing import Any
 
 from django.core.exceptions import ImproperlyConfigured
@@ -21,20 +22,59 @@ def read_timeout() -> int:
     return max(1, int(conf['REDIS_TIMEOUT']))
 
 
+def connection_kwargs() -> dict[str, Any]:
+    """How every client this package builds is configured.
+
+    Its own, rather than a detail of :func:`build_client`, because the FSM storage
+    builds a second client that this package never touches again — and it went
+    without any deadline at all until it was handed these.
+
+    Note that redis-py resolves a URL *after* keyword arguments and documents that
+    "querystring arguments always win", so anything here is a default a project can
+    still override with a query string on ``REDIS_URL``.
+    """
+    timeout = read_timeout()
+    return {'socket_connect_timeout': timeout, 'socket_timeout': timeout}
+
+
 def build_client() -> Redis:
     """Build a client bounded in time, so no call can hang for ever.
 
-    redis-py only started defaulting to a read deadline in 8.0; on the 5.0 floor
+    redis-py only started defaulting to a read deadline in 8.0; on the 6.2 floor
     a server that accepts the connection and then stops answering blocks the
     caller until the process is killed. Blocking reads stay inside the deadline
     by asking for less than it — see :class:`~django_redis_aiogram.delivery.BlpopDelivery`.
+
+    Commands are deliberately **not** retried. ``Redis.from_url`` builds the pool
+    first, so redis-py's client-level retry default never reaches the connection
+    and every command runs with ``Retry(NoBackoff(), 0)``; that was an accident,
+    and this docstring is what makes it a decision. Neither command on the hot path
+    is idempotent — a connection dropped after the server applied an ``RPUSH`` but
+    before the reply arrived would queue the message twice, and the consumer would
+    send a real person two of them. The connection-drop case is already handled
+    where it can be handled safely: the consumer logs and goes round its loop
+    again, and a failed ``send_redis`` records the drop and raises so the caller
+    knows nothing was queued.
     """
     url = conf['REDIS_URL']
     if not url:
         msg = f"{SETTINGS_NAME}['REDIS_URL'] is required to talk to Redis."
         raise ImproperlyConfigured(msg)
-    timeout = read_timeout()
-    return Redis.from_url(url, socket_connect_timeout=timeout, socket_timeout=timeout)
+    return Redis.from_url(url, **connection_kwargs())
+
+
+def url_decodes_responses(url: str) -> bool:
+    """Whether ``url`` asks redis-py to hand back ``str`` instead of ``bytes``.
+
+    Tolerated everywhere else — :func:`as_bytes` exists for it, because one
+    ``REDIS_URL`` is often shared with a cache backend that wants decoding — but
+    pickled payloads cannot survive it, so check E043 refuses that one pairing.
+    """
+    query = urllib.parse.parse_qsl(urllib.parse.urlsplit(url).query, keep_blank_values=True)
+    values = [value.strip().lower() for key, value in query if key == 'decode_responses']
+    # redis-py reads the querystring with its own boolean parser, which treats an
+    # empty value and the usual negatives as false and everything else as true
+    return any(value not in {'', '0', 'false', 'no', 'off'} for value in values)
 
 
 class _SharedConnection:

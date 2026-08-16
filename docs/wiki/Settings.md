@@ -162,6 +162,7 @@ entry naming a retired one is dead but harmless.
 | `E036`–`E038` | `EVENT_LOG_BUFFER_SIZE` / `EVENT_LOG_BATCH_SIZE` / `EVENT_LOG_FLUSH_INTERVAL` is wrong or below 1 |
 | `E040` | `EVENT_LOG_DATABASE` is not a string |
 | `E041` | `EVENT_LOG_DATABASE` names an alias that is not in `DATABASES` |
+| `E043` | `REDIS_URL` sets `decode_responses` while `ALLOW_PICKLE` is `True` |
 | `W005` | the log is on while its database has no engine, so every event is dropped |
 | `W006` | the log is on with `EVENT_LOG_RETENTION_DAYS` at 0, so nothing ever deletes a row |
 | `W007` | `EVENT_LOG_BATCH_SIZE` is above `EVENT_LOG_BUFFER_SIZE`, so the batch can never fill |

@@ -141,3 +141,29 @@ def test_a_valid_configuration_reports_neither_e018_nor_e019():
     reported = {message.id for message in check_settings()}
     assert 'django_redis_aiogram.E018' not in reported
     assert 'django_redis_aiogram.E019' not in reported
+
+
+@override_settings(TELEGRAM_BOT={'REDIS_URL': 'redis://localhost:6379/2', 'REDIS_TIMEOUT': 7})
+def test_the_fsm_storage_is_bounded_by_the_same_deadline(monkeypatch):
+    """Every update reads FSM state, so an unbounded client here wedges the bot.
+
+    aiogram builds its own client and this package never touches it again, so the
+    deadlines have to arrive at construction or never.
+    """
+    seen = {}
+    # aiogram's storage builds an asyncio pool, which is a different class from the
+    # one the shared client uses; patching the sync one would watch nothing
+    from aiogram.fsm.storage import redis as storage_module
+
+    original = storage_module.ConnectionPool.from_url
+
+    def record(url, **kwargs):
+        seen.update(kwargs)
+        return original(url, **kwargs)
+
+    monkeypatch.setattr(storage_module.ConnectionPool, 'from_url', staticmethod(record))
+    storage = build_storage()
+
+    assert isinstance(storage, RedisStorage)
+    assert seen['socket_timeout'] == 7
+    assert seen['socket_connect_timeout'] == 7

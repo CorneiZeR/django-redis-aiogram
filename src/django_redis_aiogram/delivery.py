@@ -93,19 +93,13 @@ class Delivery(ABC):
             while connection.lmove(self.processing_key, self.queue_key, 'RIGHT', 'LEFT'):
                 count += 1
         except ResponseError as error:
-            if 'unknown command' not in str(error).lower():
+            if not self._downgrade_without_lmove(error):
                 # WRONGTYPE, NOPERM and friends say nothing about LMOVE support
                 logger.exception(
                     'could not reclaim previous messages, will retry',
                     extra={'tg_key': self.processing_key},
                 )
                 return False
-            self._reliable = False
-            logger.warning(
-                'crash-safe delivery unavailable: this Redis predates LMOVE (6.2); '
-                'a worker killed mid-send may lose that one message',
-                extra={'tg_key': self.queue_key},
-            )
             return True
         except Exception:
             # run() is the thread target, so anything escaping here — a Redis
@@ -119,6 +113,23 @@ class Delivery(ABC):
             logger.info(
                 'reclaimed messages from a previous run',
                 extra={'tg_key': self.queue_key, 'tg_count': count},
+            )
+        return True
+
+    def _downgrade_without_lmove(self, error: ResponseError) -> bool:
+        """Fall back to plain pops when the server has no LMOVE, and say whether it did.
+
+        Shared by the two places that reach for LMOVE first, so a caller draining by
+        hand gets the same downgrade the consumer loop gets rather than the raw error.
+        """
+        if 'unknown command' not in str(error).lower():
+            return False
+        if self._reliable:
+            self._reliable = False
+            logger.warning(
+                'crash-safe delivery unavailable: this Redis predates LMOVE (6.2); '
+                'a worker killed mid-send may lose that one message',
+                extra={'tg_key': self.queue_key},
             )
         return True
 
@@ -288,7 +299,15 @@ class Delivery(ABC):
         raw: bytes | str | None
         while not self._stop.is_set():
             if self._reliable:
-                raw = connection.lmove(self.queue_key, self.processing_key, 'LEFT', 'RIGHT')
+                try:
+                    raw = connection.lmove(self.queue_key, self.processing_key, 'LEFT', 'RIGHT')
+                except ResponseError as error:
+                    # run() learns this from reclaim(); nothing probes for a caller
+                    # draining by hand, so without this the first pop against a
+                    # pre-6.2 server raises out of a documented helper
+                    if not self._downgrade_without_lmove(error):
+                        raise
+                    continue
             else:
                 # lpop only widens to a list when given a count
                 raw = connection.lpop(self.queue_key)  # type: ignore[assignment]

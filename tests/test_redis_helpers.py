@@ -12,7 +12,14 @@ from redis import Redis
 from django_redis_aiogram import TelegramBot
 from django_redis_aiogram.delivery import BlpopDelivery
 from django_redis_aiogram.envelope import unpack
-from django_redis_aiogram.redis import as_bytes, get_redis, read_timeout, reset_redis
+from django_redis_aiogram.redis import (
+    as_bytes,
+    connection_kwargs,
+    get_redis,
+    read_timeout,
+    reset_redis,
+    url_decodes_responses,
+)
 from django_redis_aiogram.serializers import JsonSerializer, loads
 from django_redis_aiogram.settings import conf
 
@@ -237,3 +244,46 @@ def test_the_pop_never_outlasts_the_read_deadline(blpop, deadline, expected):
     with override_settings(TELEGRAM_BOT=settings):
         interval = max(1, int(conf['HEARTBEAT_INTERVAL']))
         assert max(1, min(int(conf['BLPOP_TIMEOUT']), interval, read_timeout() - 1)) == expected
+
+
+@override_settings(TELEGRAM_BOT={'REDIS_URL': 'redis://localhost:6379/0', 'REDIS_TIMEOUT': 7})
+def test_the_shared_client_carries_the_read_deadline():
+    """`connection_kwargs` is the one place the deadlines are decided."""
+    assert connection_kwargs() == {'socket_connect_timeout': 7, 'socket_timeout': 7}
+
+
+@override_settings(TELEGRAM_BOT={'REDIS_URL': 'redis://localhost:6379/0'})
+def test_the_shared_client_does_not_retry_commands():
+    """Pinned because it is a decision, not an accident.
+
+    `Redis.from_url` builds the pool before the client, so redis-py's client-level
+    retry default never reaches the connection. Neither `RPUSH` nor `BLMOVE` is
+    idempotent, so a retry after the server applied one would duplicate a message
+    a real person receives.
+    """
+    reset_redis()
+    try:
+        pool = get_redis().connection_pool
+        # built, never connected: the retry is decided by the pool's kwargs, and
+        # this test must not need a server
+        connection = pool.connection_class(**pool.connection_kwargs)
+        assert connection.retry.get_retries() == 0
+    finally:
+        reset_redis()
+
+
+@pytest.mark.parametrize(
+    ('url', 'expected'),
+    [
+        ('redis://localhost:6379/0', False),
+        ('redis://localhost:6379/0?decode_responses=true', True),
+        ('redis://localhost:6379/0?decode_responses=1', True),
+        ('redis://localhost:6379/0?decode_responses=false', False),
+        ('redis://localhost:6379/0?decode_responses=', False),
+        ('redis://localhost:6379/0?db=2&decode_responses=True', True),
+        ('redis://localhost:6379/0?db=2', False),
+        ('', False),
+    ],
+)
+def test_url_decodes_responses(url, expected):
+    assert url_decodes_responses(url) is expected

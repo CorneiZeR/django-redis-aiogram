@@ -406,3 +406,21 @@ def test_the_deny_list_only_removes_methods_that_exist():
     public = {name for name in dir(Bot) if not name.startswith('_')}
 
     assert discovered & public >= DENIED_METHODS, 'the deny list names something aiogram lacks'
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_draining_by_hand_downgrades_on_an_old_server(old_redis_server):
+    """`consume_pending` is documented as the drain that needs no thread.
+
+    `run()` learns the server has no LMOVE from `reclaim()`; nothing probes for a
+    caller draining by hand, so the first pop used to raise `ResponseError` out of
+    a documented helper instead of falling back to the at-most-once path.
+    """
+    old_redis_server.rpush(QUEUE, payload(9))
+
+    handled = []
+    delivery = BlpopDelivery(handler=lambda **kwargs: handled.append(kwargs))
+    delivery.consume_pending()
+
+    assert [item['chat_id'] for item in handled] == [9]
+    assert delivery._reliable is False

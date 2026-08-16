@@ -207,6 +207,41 @@ def _readable_serializer(key: str) -> list[Problem]:
     ]
 
 
+def _a_url_pickle_can_survive(key: str) -> list[Problem]:
+    """Refuse a decoding URL where pickle may be read: the pair cannot work at all.
+
+    Decoding is otherwise supported — one REDIS_URL is often shared with a cache
+    backend that wants it, and :func:`~django_redis_aiogram.redis.as_bytes` is there
+    for it. Pickle is the exception, and it fails in the one place nothing can
+    recover from: redis-py decodes inside its own parser, so a blocking pop raises
+    `UnicodeDecodeError` *after* the server has moved the message to the in-flight
+    list, and every later reclaim trips over the same message for ever.
+    """
+    try:
+        allowed = coerce_bool(conf.get('ALLOW_PICKLE'), f"{SETTINGS_NAME}['ALLOW_PICKLE']")
+    except ImproperlyConfigured:
+        # unreadable is E017's finding; this check cannot say anything about it
+        return []
+    if not allowed:
+        return []
+    # deferred: this module is imported at every enabled boot, and redis-py is not
+    from django_redis_aiogram.redis import url_decodes_responses  # noqa: PLC0415 - as above
+
+    if not url_decodes_responses(str(conf.get(key) or '')):
+        return []
+    return [
+        Problem(
+            'sets decode_responses while ALLOW_PICKLE is True. A pickled payload is not '
+            'valid text, so the consumer raises inside redis-py after the message has '
+            'already left the queue, and no restart can get past it.',
+            hint=(
+                'Drop decode_responses from the URL, or turn ALLOW_PICKLE off and use the '
+                "'json' serializer. Give the cache its own URL if it needs decoding."
+            ),
+        )
+    ]
+
+
 def _serviceable_webhook(key: str) -> list[Problem]:
     """Reject a webhook Telegram cannot reach, or one anybody could post to."""
     url = str(conf.get(key) or '').strip()
@@ -518,6 +553,7 @@ CHECKS: tuple[Check, ...] = (
     Check('E040', 'EVENT_LOG_DATABASE', _a_string),
     Check('E041', 'EVENT_LOG_DATABASE', _a_configured_log_database),
     Check('E042', 'EVENT_LOG_SYNC', _a_boolean),
+    Check('E043', 'REDIS_URL', _a_url_pickle_can_survive),
     Check('W005', 'EVENT_LOG', _somewhere_to_write_the_log),
     Check('W006', 'EVENT_LOG_RETENTION_DAYS', _a_log_that_is_pruned),
     Check('W007', 'EVENT_LOG_BATCH_SIZE', _a_batch_the_buffer_can_hold),
