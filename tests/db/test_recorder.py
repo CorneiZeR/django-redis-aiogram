@@ -11,11 +11,12 @@ import threading
 import time
 
 import pytest
-from django.db import DatabaseError, OperationalError, connection, transaction
+from django.db import DatabaseError, OperationalError, connection, connections, transaction
 from django.db.models import QuerySet
 from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
 
+from django_redis_aiogram.defaults import DEFAULTS
 from django_redis_aiogram.enums import EventKind
 from django_redis_aiogram.eventlog import ROW_BY_ROW, EventLogRefusedError, write_batch
 from django_redis_aiogram.models import TelegramEvent
@@ -521,6 +522,9 @@ def test_a_partly_refused_batch_is_not_reported(monkeypatch):
     write_batch([an_event(chat_id=1), an_event(chat_id=2)])
 
     assert refused == [2]
+    # the point of bisecting: one poison row costs itself and nothing else
+    assert TelegramEvent.objects.filter(chat_id=1).count() == 1
+    assert TelegramEvent.objects.filter(chat_id=2).count() == 0
 
 
 @pytest.mark.django_db(transaction=True)
@@ -574,3 +578,85 @@ def test_events_racing_stop_are_still_written(paused_writer):
     recorder._abandon(buffer)
 
     assert TelegramEvent.objects.filter(chat_id=13).count() == 1
+
+
+@pytest.mark.django_db(transaction=True, databases=['default', 'logs'])
+@override_settings(TELEGRAM_BOT={**ON, 'EVENT_LOG_DATABASE': 'logs'})
+def test_recording_to_another_alias_leaves_the_callers_connection_alone(monkeypatch):
+    """The guard has to be about the connection actually being closed.
+
+    `close_old_connections()` walks *every* initialized connection. Checking that
+    the log's own alias is not in a transaction says nothing about `default`,
+    which is exactly where the caller's transaction is — so with
+    EVENT_LOG_DATABASE pointing somewhere of its own, the log reached past its own
+    connection and doomed one it never writes to.
+    """
+    caller = connections['default']
+    monkeypatch.setattr(caller, 'is_in_memory_db', lambda: False)
+    monkeypatch.setattr(caller, '_close', lambda: None)
+
+    try:
+        with transaction.atomic(using='default'):
+            write_batch([an_event(chat_id=77)])
+            doomed = caller.needs_rollback
+    finally:
+        caller.needs_rollback = False
+        caller.closed_in_transaction = False
+
+    assert doomed is False
+    assert TelegramEvent.objects.using('logs').filter(chat_id=77).count() == 1
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(
+    TELEGRAM_BOT={
+        **ON,
+        'EVENT_LOG_BUFFER_SIZE': 'not a number',
+        'EVENT_LOG_BATCH_SIZE': None,
+        'EVENT_LOG_FLUSH_INTERVAL': 'soon',
+    }
+)
+def test_unreadable_writer_dials_fall_back_to_their_defaults(paused_writer):
+    """These are read on the writer thread, in a loop, outside `_flush`'s net.
+
+    A raise there ends the writer and takes the whole buffer with it, which is a
+    steep price for a typo. Checks E036-E038 still report the value at boot.
+    """
+    recorder = EventRecorder()
+
+    recorder.record(an_event(chat_id=8))
+
+    assert recorder._queue.maxsize == DEFAULTS['EVENT_LOG_BUFFER_SIZE']
+    assert recorder.drain_once() == 1
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT=ON)
+def test_a_gap_reported_keeps_what_was_dropped_while_it_was_reported(paused_writer):
+    """`_record_gap` used to assign zero, so anything dropped during the write it
+    was reporting disappeared with it — and no later flush ever mentioned it."""
+    recorder = EventRecorder()
+    recorder._dropped = 5
+
+    recorder._record_gap(3)
+
+    assert recorder._dropped == 2
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT=ON)
+def test_an_event_put_into_a_detached_queue_is_moved_to_the_live_one(paused_writer):
+    """stop() detaches the queue under the guard; a record() that already read it
+    puts into the detached one, and nothing else will ever look at that queue."""
+    recorder = EventRecorder()
+    recorder.record(an_event(chat_id=21))
+    orphan = recorder._queue
+    recorder.stop(timeout=0.1)
+
+    # what a producer that lost the race leaves behind
+    orphan.put_nowait(an_event(chat_id=22))
+    recorder._rehome(orphan)
+
+    assert orphan.empty()
+    assert recorder.drain_once() == 1
+    assert TelegramEvent.objects.filter(chat_id=22).count() == 1

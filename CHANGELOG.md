@@ -50,8 +50,11 @@
   `needs_rollback`. Under `EVENT_LOG_SYNC`, with `ATOMIC_REQUESTS` or a plain
   `atomic()`, that destroyed the caller's own writes on PostgreSQL and MySQL.
   The suite could not see it: sqlite `:memory:` refuses to close at all. Stale
-  connections are still discarded, just never while a transaction is open — a
-  connection Django is already using is not stale.
+  connections are still discarded, just never while a transaction is open — and
+  only the log's own alias, never every connection in the process. With
+  `EVENT_LOG_DATABASE` pointing somewhere of its own, the sweep reached past the
+  log's connection, which is not in a transaction, to the caller's `default` one,
+  which is.
 - **A database that refuses everything is now reported as a failure.** The
   bisecting write caught `DatabaseError` at every rung and returned normally, so
   the writer counted a total refusal as a written batch: the suspension after

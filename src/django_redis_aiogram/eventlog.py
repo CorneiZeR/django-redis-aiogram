@@ -16,7 +16,6 @@ from django.db import (
     DatabaseError,
     InterfaceError,
     OperationalError,
-    close_old_connections,
     connections,
     transaction,
 )
@@ -128,13 +127,21 @@ def _recycle(alias: str, *, force: bool = False) -> None:
     PostgreSQL and MySQL, closing a connection there marks the whole transaction
     for rollback, so recording an event would destroy the writes the caller made
     alongside it. A connection Django is already using is not stale anyway.
+
+    One alias, not all of them. ``close_old_connections()`` walks every initialized
+    connection, so with ``EVENT_LOG_DATABASE`` pointing somewhere of its own it
+    reaches past the log's connection — which is not in a transaction — and closes
+    the caller's ``default`` one, which is. The guard above would then be reading
+    the wrong connection's state. The log has no business touching one it never
+    writes to.
     """
-    if connections[alias].in_atomic_block:
+    connection = connections[alias]
+    if connection.in_atomic_block:
         return
     if force:
-        connections[alias].close()
+        connection.close()
         return
-    close_old_connections()
+    connection.close_if_unusable_or_obsolete()
 
 
 def _refused(rows: list[TelegramEvent], written: int, error: Exception) -> None:
