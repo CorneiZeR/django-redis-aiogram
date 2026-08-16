@@ -20,7 +20,7 @@ from django_redis_aiogram import bot
 from django_redis_aiogram.delivery import get_delivery
 from django_redis_aiogram.enums import UpdateMode
 from django_redis_aiogram.recorder import recorder
-from django_redis_aiogram.settings import conf
+from django_redis_aiogram.redis import read_timeout
 from django_redis_aiogram.webhook import MODES, current_mode
 
 logger = logging.getLogger('django_redis_aiogram')
@@ -120,7 +120,17 @@ class Command(BaseCommand):
             logger.info('shutting down')
             delivery.stop()
             for thread in threads:
-                thread.join(timeout=float(conf['BLPOP_TIMEOUT']) + 1)
+                # derived from the bound that actually governs the thread: every
+                # call it makes is capped by REDIS_TIMEOUT, and its blocking pop
+                # by one less than that. BLPOP_TIMEOUT + 1 was six seconds against
+                # a worst case of ten, so a consumer that outlived the join went on
+                # to acknowledge a message close() had already refused
+                thread.join(timeout=read_timeout() + 1)
+                if thread.is_alive():
+                    logger.warning(
+                        'the delivery consumer did not stop in time',
+                        extra={'tg_timeout': read_timeout() + 1},
+                    )
             try:
                 bot.close()
             finally:

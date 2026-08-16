@@ -20,7 +20,9 @@ class RecordingDelivery:
 
     def start_thread(self):
         self.events.append('consumer-started')
-        return SimpleNamespace(join=lambda timeout=None: None)
+        # is_alive too: the command warns about a consumer that outlived its join,
+        # and a double that only answers join() hides that call from every test here
+        return SimpleNamespace(join=lambda timeout=None: None, is_alive=lambda: False)
 
     def stop(self):
         self.events.append('stopped')
@@ -224,3 +226,53 @@ def test_no_warning_when_the_flag_agrees_with_the_setting():
 
     assert 'disagrees' not in printed
     assert 'polled' in events
+
+
+@override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost:6379/0', 'REDIS_TIMEOUT': 10})
+def test_the_consumer_join_is_derived_from_the_read_deadline(monkeypatch):
+    """`BLPOP_TIMEOUT + 1` was six seconds against a worst case of ten.
+
+    Every call the consumer makes is bounded by `REDIS_TIMEOUT`, and its blocking
+    pop by one less than that — so the old deadline could expire while the thread
+    was still inside a legitimate call, and the consumer that came back would
+    acknowledge a message `close()` had already refused.
+    """
+    joined = []
+
+    class SlowDelivery(RecordingDelivery):
+        def start_thread(self):
+            self.events.append('consumer-started')
+            return SimpleNamespace(join=lambda timeout=None: joined.append(timeout), is_alive=lambda: False)
+
+    monkeypatch.setattr(
+        'django_redis_aiogram.management.commands.start_tgbot.get_delivery',
+        lambda handler: SlowDelivery([]),
+    )
+    monkeypatch.setattr(bot, 'start_polling', lambda: bot.loop.run_until_complete(asyncio.sleep(0)))
+    monkeypatch.setattr(bot, 'close', lambda: None)
+
+    call_command('start_tgbot')
+
+    assert joined == [11], f'joined with {joined}, expected the read deadline plus one'
+
+
+@override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost:6379/0'})
+def test_a_consumer_that_outlives_its_join_is_reported(monkeypatch, caplog):
+    """Silence there reads as a clean shutdown, and it is the opposite."""
+
+    class StuckDelivery(RecordingDelivery):
+        def start_thread(self):
+            self.events.append('consumer-started')
+            return SimpleNamespace(join=lambda timeout=None: None, is_alive=lambda: True)
+
+    monkeypatch.setattr(
+        'django_redis_aiogram.management.commands.start_tgbot.get_delivery',
+        lambda handler: StuckDelivery([]),
+    )
+    monkeypatch.setattr(bot, 'start_polling', lambda: bot.loop.run_until_complete(asyncio.sleep(0)))
+    monkeypatch.setattr(bot, 'close', lambda: None)
+
+    with caplog.at_level('WARNING', logger='django_redis_aiogram'):
+        call_command('start_tgbot')
+
+    assert 'the delivery consumer did not stop in time' in caplog.text

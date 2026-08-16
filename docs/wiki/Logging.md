@@ -56,6 +56,7 @@ All prefixed with `tg_`, to avoid colliding with `LogRecord` attributes.
 | `handler failed for queued message` | ERROR | the send itself raised |
 | `dropping undecodable queued message` | ERROR | a payload could not be deserialized |
 | `blocking pop failed, retrying` | ERROR | lost the Redis connection; it retries |
+| `the delivery consumer did not stop in time` | WARNING | the consumer outlived its join at shutdown; a message it holds may be redelivered |
 | `rate limited by telegram` | WARNING | refused and backing off |
 | `delivery started` | INFO | the consumer is up |
 | `message sent` | INFO | one call succeeded |

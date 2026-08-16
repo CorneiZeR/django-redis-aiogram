@@ -24,8 +24,28 @@
   loop learns it from `reclaim()` — so the first pop raised `ResponseError`
   straight out of a documented helper instead of falling back to plain pops.
 
+- **A send handed to the loop just before shutdown is no longer destroyed.** A
+  hand-off is a `call_soon_threadsafe` callback until the loop steps, and a
+  callback is not a task — so the drain could not see it, and `close()` had
+  already set the flag its callback refuses on. The message was gone from the
+  queue's in-flight list by then, so nothing would ever redeliver it. `close()`
+  now runs one turn of the loop before draining, which is what turns those
+  callbacks into tasks it can wait for.
+- **The consumer's join deadline is derived from the bound that governs it.** It
+  was `BLPOP_TIMEOUT + 1` — six seconds at the defaults — while every call the
+  consumer makes is bounded by `REDIS_TIMEOUT`, ten. A consumer that outlived the
+  join went on to acknowledge a message `close()` had already refused, destroying
+  one message per shutdown. It is now `REDIS_TIMEOUT + 1`, and a thread still
+  alive after it says so in the log instead of leaving silence that reads as a
+  clean stop.
+
 ### Added
 
+- `DRAIN_TIMEOUT` sets how long `close()` gives in-flight sends before cancelling
+  them. It was hardcoded at five seconds and `start_tgbot` called `close()` bare,
+  so a deployment could raise `stop_grace_period` all it liked and never buy the
+  drain a second more. The Deployment page now has the arithmetic for sizing the
+  grace period against all three waits.
 - Check `E043` refuses a `REDIS_URL` that sets `decode_responses` while
   `ALLOW_PICKLE` is on. Decoding is otherwise supported and stays supported — one
   URL is often shared with a cache backend — but a pickled payload is not valid

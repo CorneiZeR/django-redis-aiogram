@@ -96,6 +96,21 @@ period to finish an in-flight send:
     stop_grace_period: 30s
 ```
 
+The grace period has to cover the three waits shutdown makes, in order:
+
+| wait | bounded by | default |
+| --- | --- | --- |
+| joining the consumer thread | `REDIS_TIMEOUT` + 1 | 11s |
+| draining in-flight sends | `DRAIN_TIMEOUT` | 5s |
+| flushing the event log | `recorder.STOP_TIMEOUT` | 5s |
+
+So 21 seconds at the defaults, and `30s` leaves room. Raise `DRAIN_TIMEOUT` if
+your sends spend long in the rate limiter — before 3.1.0 it was hardcoded at five
+seconds and no grace period could buy more. Watch the other direction too:
+raising `REDIS_TIMEOUT` raises the join, and a grace period shorter than the sum
+means Docker sends `SIGKILL` partway through, which is exactly the crash the
+in-flight list exists to survive.
+
 ## Is it working?
 
 `docker ps` answers the wrong question: the process being up says nothing about

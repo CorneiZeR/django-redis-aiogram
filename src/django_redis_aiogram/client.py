@@ -166,6 +166,9 @@ class TelegramBot:
         self._sends: dict[asyncio.Task[None], Outbound] = {}
         self._polling = False
         self._closing = False
+        # only true while close() is flushing the loop, so the refusal below can tell
+        # a hand-off queued before shutdown from one queued during it
+        self._draining = False
         # reentrant: _attach_router holds it while reading self.dispatcher
         self._build_guard = threading.RLock()
 
@@ -320,13 +323,19 @@ class TelegramBot:
             return self.send_raw(function, correlation_id=identifier, **kwargs)
         return self.send_redis(function, correlation_id=identifier, **kwargs)
 
-    def close(self, drain_timeout: float = 5.0) -> None:
+    def close(self, drain_timeout: float | None = None) -> None:
         """Finish what is in flight, then release everything this bot owns.
 
         A send waiting in the rate limiter is an ordinary state — pacing means
         waiting — so closing the loop without draining silently dropped those
         messages on every `docker stop`.
+
+        ``drain_timeout`` defaults to ``DRAIN_TIMEOUT``. It used to be a hardcoded
+        five seconds that `start_tgbot` never passed, so a deployment could raise
+        `stop_grace_period` all it liked and never buy the drain a second more.
         """
+        if drain_timeout is None:
+            drain_timeout = float(conf['DRAIN_TIMEOUT'])
         self._closing = True
         try:
             if self._loop is not None or self._bot is not None or self._dispatcher is not None:
@@ -561,8 +570,10 @@ class TelegramBot:
         """Create the task on the loop thread, so it is registered before it runs."""
 
         def start() -> None:
-            if self._closing:
-                # close() began after this was queued; the loop will not run it
+            if self._closing and not self._draining:
+                # close() began after this was queued; the loop will not run it.
+                # _draining is the exception: close() runs one turn of the loop on
+                # purpose, precisely so callbacks queued before it become tasks
                 coroutine.close()
                 self._record_drop(outbound, 'the bot started shutting down')
                 logger.error('send dropped: the bot started shutting down')
@@ -612,6 +623,16 @@ class TelegramBot:
             # cannot drive it from here; the caller is expected to stop polling first
             logger.warning('skipping drain: the event loop is still running')
             return
+
+        # a hand-off is a call_soon_threadsafe callback until the loop steps, and
+        # a callback is not in _sends — so without one turn here, a send queued
+        # just before shutdown is invisible to the drain below and dies with the
+        # loop. _register's own docstring says that is the one it must not lose
+        self._draining = True
+        try:
+            loop.run_until_complete(asyncio.sleep(0))
+        finally:
+            self._draining = False
 
         # only this bot's sends: cancelling unrelated tasks on the loop is not
         # ours to do, and aiogram keeps its own there
