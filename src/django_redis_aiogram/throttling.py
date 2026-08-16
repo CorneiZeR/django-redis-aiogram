@@ -113,7 +113,11 @@ class TokenBucket:
             # idle bucket would bank credit without limit
             slot = max(self._next_free, now - self._burst)
             self._next_free = slot + self._interval
-        wait = slot - now
+        # read again, outside the lock: `now` was sampled while claiming, and
+        # anything between then and here — the GIL, another thread, a slow
+        # logger — makes it stale. Sleeping `slot - stale` overshoots the slot by
+        # exactly that gap, which is throttling nobody asked for
+        wait = slot - self._clock()
         if wait > 0:
             await self._sleep(wait)
 

@@ -453,3 +453,28 @@ def test_a_backlog_wakes_once_per_admitted_call():
 
     # forty calls, five of them inside the burst
     assert len(waits) == 35
+
+
+def test_the_wait_is_measured_from_when_it_starts():
+    """The slot is claimed under the lock; the wait is not.
+
+    A clock sampled while claiming is already stale by the time the sleep is
+    computed, and sleeping `slot - stale` overshoots by exactly that gap. The
+    scripted clock puts the gap where it would be in production — between
+    releasing the lock and starting to wait.
+    """
+    reads = iter([0.0, 0.0, 0.0, 0.0, 0.05])
+    slept = []
+
+    async def sleep(seconds):
+        slept.append(seconds)
+
+    async def scenario():
+        bucket = TokenBucket(rate=10, capacity=1, clock=lambda: next(reads), sleep=sleep)
+        await bucket.acquire()
+        await bucket.acquire()
+
+    run(scenario())
+
+    # the slot is at 0.1 and the wait starts at 0.05, so half of it has passed
+    assert slept == [pytest.approx(0.05)]
