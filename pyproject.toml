@@ -41,7 +41,10 @@ dev = [
     "fakeredis>=2.26",
     "ruff>=0.9",
     "mypy>=1.14",
-    "django-stubs[compatible-mypy]>=5.1",
+    # <6.1: 6.1.0 resolves every Self-returning QuerySet method to Any, so a plain
+    # queryset.filter() trips no-any-return under strict. Manager methods are unaffected,
+    # which is why only admin.py sees it. Lift the ceiling once upstream fixes it.
+    "django-stubs[compatible-mypy]>=5.1,<6.1",
 ]
 
 [project.urls]

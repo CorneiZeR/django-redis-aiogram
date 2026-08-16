@@ -14,11 +14,13 @@ reviews:
   auto_review:
     enabled: true
     drafts: false
-    # 2.0 lands as a stack of pull requests that target each other rather than
-    # the default branch; without this CodeRabbit skips every one of them
+    # a release lands as a stack of pull requests that target a release branch or
+    # each other rather than the default branch; without this CodeRabbit skips
+    # every one of them and reports "reviews are disabled for this base branch"
     base_branches:
       - '2\.0'
       - 'feat/.*'
+      - 'release/.*'
 
   path_filters:
     - '!**/__pycache__/**'
