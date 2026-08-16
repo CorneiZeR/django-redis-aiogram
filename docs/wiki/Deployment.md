@@ -191,8 +191,9 @@ was *scheduled*, which meant polling mode did not have that guarantee at all.
 Waiting for the send is something the handler opts into: `bot.send_raw`, which
 this command uses, does — a handler of your own taking only `**kwargs` is still
 acknowledged when it returns. Older servers lack `LMOVE` and fall back to plain
-pops, which is **at-most-once**: a kill
-between the pop and the call loses that one message. A send that *fails* is
+pops, which is **at-most-once**: a kill between the pop and the call loses that
+one message — unless `REQUIRE_CRASH_SAFE` is on, in which case the command
+refuses to start at all rather than run that way. A send that *fails* is
 acknowledged and logged either way, never redelivered for ever. See
 **[[Delivery]]**.
 

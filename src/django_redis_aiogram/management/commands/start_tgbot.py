@@ -170,7 +170,7 @@ class Command(BaseCommand):
                 # a crash loop, so say plainly that the guarantee is unproven
                 # rather than let silence read as a passed check
                 logger.warning(
-                    'could not verify crash-safe delivery: the probe did not reach Redis',
+                    'could not verify crash-safe delivery: the probe did not settle',
                     extra={'tg_key': delivery.queue_key},
                 )
             return
