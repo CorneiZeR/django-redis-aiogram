@@ -290,3 +290,31 @@ def test_the_settings_are_read_once_for_a_whole_payload(monkeypatch):
     payloads.redact_values(nested, frozenset())
 
     assert reads.count('TOKEN') == 1, reads
+
+
+@override_settings(TELEGRAM_BOT={'TOKEN': '424242:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'})
+def test_a_string_without_a_colon_never_reaches_the_token_regex(monkeypatch):
+    """The prefilter is the optimisation; the test above is only its safety net.
+
+    Those assertions pass with the prefilter deleted, because deleting it makes
+    the regex run on everything and the output is identical. This is the one that
+    fails when the optimisation is reverted.
+    """
+    from django_redis_aiogram import payloads
+
+    scanned = []
+    real = payloads._TOKEN_RE
+
+    class Spy:
+        def sub(self, replacement, text):
+            scanned.append(text)
+            return real.sub(replacement, text)
+
+    monkeypatch.setattr(payloads, '_TOKEN_RE', Spy())
+
+    payloads.redact_text('an ordinary message with no colon in it')
+    assert scanned == [], scanned
+
+    # and it still reaches the regex when it could possibly match
+    payloads.redact_text('a second bot: 999999:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb')
+    assert len(scanned) == 1, scanned
