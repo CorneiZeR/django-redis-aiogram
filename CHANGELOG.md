@@ -1,5 +1,29 @@
 # Changelog
 
+## 3.1.0 - unreleased
+
+### Fixed
+
+- **`manage.py check` no longer imports aiogram.** `DEFAULT_BOT_PROPERTIES`
+  defaults to `{}`, and the check that validates it reached for
+  `DefaultBotProperties` before noticing there was nothing to validate — so
+  every `check`, and with it every `migrate`, `runserver` and `shell`, paid for
+  aiogram in every project that installs this package. Measured on an
+  installation that configures nothing: 966 ms and 174 MiB before, 7 ms and
+  47 MiB after. A non-empty `DEFAULT_BOT_PROPERTIES` is still validated exactly
+  as before.
+
+### Infrastructure
+
+- The lazy-boot tests assert what they were meant to. The first now compares a
+  `sys.modules` delta against `sys.stdlib_module_names`, so it catches any
+  third-party import the package pulls rather than aiogram alone, and a third
+  test covers the checks. They run under `tests/bare_settings.py`, because the
+  suite's usual settings install an app whose router imports aiogram anyway.
+- `django-stubs` is held below 6.1. 6.1.0 resolves every `Self`-returning
+  `QuerySet` method to `Any`, which fails `mypy --strict` on code that has not
+  changed since 3.0.0.
+
 ## 3.0.0 - 2026-08-09
 
 Two kinds of change at once: the compatibility 2.0 shipped for 1.x is gone —
