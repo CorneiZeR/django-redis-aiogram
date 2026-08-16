@@ -98,7 +98,14 @@
   answer.
 - `publish.yml` checks that the release tag and `__version__` agree before
   building, and pins every action it runs to a commit — it is the one workflow
-  holding `id-token: write`.
+  holding `id-token: write`. The tag reaches the shell through `env` rather than
+  template interpolation, since a tag may legally contain a quote, and the build
+  tools are installed by hash from `.github/release-requirements.txt`, with
+  `.github/release-constraints.txt` pinning the backend that `python -m build`
+  resolves in an isolated environment of its own. That job is where third-party
+  code last touches the artefact PyPI receives. `hatchling>=1.27` in
+  `pyproject.toml` is unchanged: only what CI installs is pinned, not what
+  consumers build against.
 - Deprecation warnings fail the suite. Deliberately not a bare `error`: that
   escalates `ResourceWarning` into `PytestUnraisableExceptionWarning`, whose
   attribution follows GC timing and differs across the 3.10-3.14 legs.
