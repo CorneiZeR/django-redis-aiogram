@@ -17,6 +17,7 @@ from redis.exceptions import ResponseError
 from django_redis_aiogram import TelegramBot
 from django_redis_aiogram.api import API_METHODS, check_function
 from django_redis_aiogram.delivery import BlpopDelivery, defers_completion
+from django_redis_aiogram.management.commands.start_tgbot import Command
 from django_redis_aiogram.serializers import JsonSerializer, PickleSerializer
 
 LOGGER = 'django_redis_aiogram'
@@ -780,3 +781,24 @@ def test_a_cancelled_send_does_not_end_the_consumer(redis_server, caplog):
     assert [item['chat_id'] for item in cancelled] == [1, 2], 'the consumer stopped after the cancellation'
     assert 'a queued send was cancelled' in caplog.text
     assert redis_server.llen(PROCESSING) == 1, 'the cancelled message was acknowledged'
+
+
+@override_settings(TELEGRAM_BOT={'DELIVERY': 'blpop'})
+def test_an_unconfigured_project_gets_the_old_behaviour():
+    """Both settings are new, and both default to what 3.0 already did.
+
+    Asserted through behaviour rather than by reading `DEFAULTS` back, because
+    the value is only interesting for what it does: `MAX_IN_FLIGHT` at 0 is no
+    bound at all, and `REQUIRE_CRASH_SAFE` off means a Redis without `LMOVE`
+    still starts. An upgrade must not quietly gate a deployment that was working,
+    and neither default is exercised by any test that overrides the setting.
+    """
+    unbounded = Deferring()
+    unbounded._in_flight = 10_000
+    assert unbounded.at_capacity() is False, 'an unconfigured consumer grew a bound'
+
+    without_lmove = Deferring()
+    without_lmove._reliable = False
+    assert without_lmove.crash_safe is False
+    # unasked, the command starts anyway; the refusal is opt-in
+    Command._require_crash_safety(without_lmove)

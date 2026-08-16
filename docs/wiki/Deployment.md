@@ -188,10 +188,10 @@ being sent, and stays there until the send has actually finished; a restarted
 worker reclaims what it left behind — delivery is **at-least-once**, so a crash
 mid-send can produce a duplicate. Before 3.1.0 it was removed as soon as the send
 was *scheduled*, which meant polling mode did not have that guarantee at all.
-Waiting for the send is the handler's to opt into: `bot.send_raw`, which this
-command uses, does — a handler of your own taking only `**kwargs` is still
-acknowledged when it returns. Older servers
-lack `LMOVE` and fall back to plain pops, which is **at-most-once**: a kill
+Waiting for the send is something the handler opts into: `bot.send_raw`, which
+this command uses, does — a handler of your own taking only `**kwargs` is still
+acknowledged when it returns. Older servers lack `LMOVE` and fall back to plain
+pops, which is **at-most-once**: a kill
 between the pop and the call loses that one message. A send that *fails* is
 acknowledged and logged either way, never redelivered for ever. See
 **[[Delivery]]**.
