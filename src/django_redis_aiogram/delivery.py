@@ -22,6 +22,7 @@ false. A handler that takes an ``on_complete`` keyword is now handed one and the
 message waits for it; one that does not keeps the old semantics exactly.
 """
 
+import asyncio
 import hashlib
 import inspect
 import logging
@@ -357,30 +358,47 @@ class Delivery(ABC):
             'queued_at': envelope.queued_at,
             **envelope.kwargs,
         }
-        if self._defers:
+        return self._hand_over(envelope, call, handle)
+
+    def _hand_over(self, envelope: Envelope, call: dict[str, Any], handle: bytes | str) -> bool:
+        """Call the handler, and say whether the message may be acknowledged.
+
+        Cancellation is the reason this is not one ``except``: it is a
+        ``BaseException``, so letting it through would leave :meth:`run` and end
+        the consumer for the life of the container. The message stays in flight,
+        which is right — nothing sent it — but this worker has to keep reading.
+        """
+        deferring = self._defers
+        if deferring:
+            # into the dict, never alongside it as a second keyword. The queue is
+            # a trust boundary and send() forwards whatever it was given, so a
+            # payload can carry this name — as a keyword that is "got multiple
+            # values", a TypeError landing in the failure branch below, which
+            # acknowledges a message nothing sent. Assigning simply wins
+            call['on_complete'] = self._completion_for(handle)
             self._in_flight += 1
-            try:
-                self.handler(on_complete=self._completion_for(handle), **call)
-            except Exception:
-                self._in_flight -= 1
-                logger.exception(
-                    'handler failed for queued message',
-                    extra={'tg_function': envelope.function},
-                )
-                return True
-            # the send decides when this message is done. Returning True here is
-            # what made the at-least-once promise false: send_raw returns as soon
-            # as the coroutine is scheduled, so the message left the in-flight
-            # list before Telegram had seen anything
-            return False
         try:
             self.handler(**call)
+        except asyncio.CancelledError:
+            if deferring:
+                self._in_flight -= 1
+            logger.warning(
+                'a queued send was cancelled; leaving it in flight',
+                extra={'tg_function': envelope.function},
+            )
+            return False
         except Exception:
+            if deferring:
+                self._in_flight -= 1
             logger.exception(
                 'handler failed for queued message',
                 extra={'tg_function': envelope.function},
             )
-        return True
+            return True
+        # a deferring handler decides when this message is done. Returning True
+        # here is what made the at-least-once promise false: send_raw returns as
+        # soon as the coroutine is scheduled, long before Telegram has seen it
+        return not deferring
 
     def _record(self, kind: EventKind, envelope: Envelope, error: str = '') -> None:
         """Record what the consumer did with one message."""

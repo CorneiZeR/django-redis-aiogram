@@ -733,3 +733,50 @@ def test_the_hand_drain_respects_the_in_flight_bound(redis_server):
 
     assert len(delivery.handled) == 1, f'took {len(delivery.handled)} messages with a limit of one'
     assert redis_server.llen(QUEUE) == 2
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_a_queued_on_complete_key_cannot_spend_the_callback(redis_server):
+    """The queue is a trust boundary: `send()` forwards whatever it was given.
+
+    A payload carrying this name made the call pass `on_complete` twice, which is
+    a TypeError, which lands in the handler-failed branch — so a payload could
+    have a message acknowledged without anything sending it, from the other side
+    of the queue.
+    """
+    poisoned = JsonSerializer().dumps({'function': 'send_message', 'chat_id': 1, 'on_complete': 'mine'})
+    redis_server.rpush(QUEUE, poisoned)
+    delivery = Deferring()
+    drain(delivery, expected_handled=1)
+
+    assert delivery.handled, 'the handler never ran'
+    assert callable(delivery.finish[0]), 'the payload replaced the callback'
+    assert redis_server.llen(PROCESSING) == 1, 'acknowledged without sending'
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_a_cancelled_send_does_not_end_the_consumer(redis_server, caplog):
+    """`dispatch` catches Exception, and CancelledError is not one.
+
+    The synchronous send path lets it out of `run_until_complete`, so it escaped
+    `run()` and ended the consumer for the life of the container — one cancelled
+    send and the worker stops delivering, quietly, with the queue still filling.
+    """
+    cancelled = []
+
+    def cancel_once(**kwargs):
+        cancelled.append(kwargs)
+        if len(cancelled) == 1:
+            raise asyncio.CancelledError
+
+    for chat_id in (1, 2):
+        redis_server.rpush(QUEUE, payload(chat_id))
+    delivery = Recording(handler=cancel_once)
+    delivery.handled = cancelled
+
+    with caplog.at_level('WARNING', logger=LOGGER):
+        drain(delivery, expected_handled=2)
+
+    assert [item['chat_id'] for item in cancelled] == [1, 2], 'the consumer stopped after the cancellation'
+    assert 'a queued send was cancelled' in caplog.text
+    assert redis_server.llen(PROCESSING) == 1, 'the cancelled message was acknowledged'

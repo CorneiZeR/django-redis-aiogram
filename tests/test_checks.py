@@ -102,7 +102,7 @@ DOCUMENTED = re.compile('`([EW]\\d{3})`(?:\\s*[\u2013-]\\s*`([EW]\\d{3})`)?')
 # E008 and E013 guarded the keyspace settings 3.0 removed. Their ids are gone
 # rather than reused: a project silencing one must not start silencing a new rule
 RETIRED_IDS = {'E008', 'E013'}
-EXPECTED_IDS = ({f'E{code:03d}' for code in range(1, 43)} - RETIRED_IDS) | {f'W{code:03d}' for code in range(1, 10)}
+EXPECTED_IDS = ({f'E{code:03d}' for code in range(1, 47)} - RETIRED_IDS) | {f'W{code:03d}' for code in range(1, 10)}
 
 WRONG_TYPES = {
     'ENABLED': 'yes',
@@ -139,6 +139,9 @@ WRONG_TYPES = {
     'EVENT_LOG_RETENTION_DAYS': 'thirty',
     'EVENT_LOG_DATABASE': 42,
     'EVENT_LOG_SYNC': 'maybe',
+    'DRAIN_TIMEOUT': 'soon',
+    'MAX_IN_FLIGHT': 'two',
+    'REQUIRE_CRASH_SAFE': 'maybe',
     'NOT_A_SETTING': 1,
 }
 
@@ -166,11 +169,22 @@ WRONG_VALUES = {
     'EVENT_LOG_BATCH_SIZE': 5000,
     'EVENT_LOG_DATABASE': 'nope',
     'EVENT_LOG_KINDS': ('outbound.snet',),
+    # readable numbers, but not ones a bound can be made of: a drain that
+    # finishes before it starts and a limit of minus one message
+    'DRAIN_TIMEOUT': -1,
+    'MAX_IN_FLIGHT': -1,
 }
 
 # the log on and pointed at a real alias, which under tests.settings is the
 # dummy backend Django fills an empty DATABASES in with
 LOG_WITHOUT_A_DATABASE = {'EVENT_LOG': True, 'EVENT_LOG_SYNC': True}
+
+# E043 is about a pair, not a value: neither half is wrong alone, so it needs
+# its own settings rather than a slot in the maps above
+PICKLE_ON_A_DECODING_URL = {
+    'ALLOW_PICKLE': True,
+    'REDIS_URL': 'redis://localhost:6379/0?decode_responses=1',
+}
 
 
 def documented_ids():
@@ -191,7 +205,7 @@ def emitted_ids():
     scan, and the documentation check below stayed green without it.
     """
     found = set()
-    for settings in (WRONG_TYPES, WRONG_VALUES, LOG_WITHOUT_A_DATABASE):
+    for settings in (WRONG_TYPES, WRONG_VALUES, LOG_WITHOUT_A_DATABASE, PICKLE_ON_A_DECODING_URL):
         with override_settings(TELEGRAM_BOT=settings):
             found |= {str(message.id).removeprefix('django_redis_aiogram.') for message in check_settings()}
     return found
