@@ -74,6 +74,34 @@
 
 ### Infrastructure
 
+- **`pip install -e '.[dev]'` becomes `pip install -e . --group dev`.** The dev
+  requirements were an extra, so `Provides-Extra: dev` shipped in the wheel and
+  every consumer resolving the package saw a group of linters they have no use
+  for. They are a PEP 735 dependency group now, which needs pip 25.1 or newer —
+  `AGENTS.md`, `CONTRIBUTING.md` and CI all say the new command.
+- An optional `hiredis` extra: `pip install django-redis-aiogram[hiredis]` makes
+  redis-py parse the protocol in C. Worth it on a busy consumer, pointless on a
+  web tier that only ever pushes, which is why it is opt-in rather than a
+  dependency.
+- The sdist carries `docs/`, `scripts/`, `CONTRIBUTING.md`, `SECURITY.md` and
+  `AGENTS.md`, and the wheel gains the `Framework :: AsyncIO`,
+  `Framework :: Django :: 6.1` and `Topic :: Communications :: Chat`
+  classifiers, plus `Repository` and `Funding` URLs.
+- `redis_conn` is annotated for consumers. It forwards through `__getattr__`, so
+  `redis_conn.ping()` typed as `Any` while `get_redis().ping()` did not; the
+  smoke install now `assert_type`s it, which is the only place a packaging-level
+  typing regression is catchable.
+- CI gains a Django 6.1 leg and a `valkey/valkey:8` integration leg — the fork
+  most managed providers actually run. The integration suite also asserts that an
+  unknown command's error text contains `unknown command`, which is the single
+  assumption the crash-safety downgrade rests on and which fakeredis can never
+  answer.
+- `publish.yml` checks that the release tag and `__version__` agree before
+  building, and pins every action it runs to a commit — it is the one workflow
+  holding `id-token: write`.
+- Deprecation warnings fail the suite. Deliberately not a bare `error`: that
+  escalates `ResourceWarning` into `PytestUnraisableExceptionWarning`, whose
+  attribution follows GC timing and differs across the 3.10-3.14 legs.
 - The lazy-boot tests assert what they were meant to. The first now compares a
   `sys.modules` delta against `sys.stdlib_module_names`, so it catches any
   third-party import the package pulls rather than aiogram alone, and a third

@@ -94,5 +94,20 @@ def notify(chat_id: int) -> None:
 PY
 "$work/venv/bin/mypy" --strict uses_it.py 2>&1 | sed 's/^/    /'
 
+echo "--- the metadata a consumer resolves against"
+"$work/venv/bin/python" - <<'META'
+from importlib.metadata import metadata
+
+fields = metadata('django-redis-aiogram')
+classifiers = fields.get_all('Classifier') or []
+for expected in ('Framework :: AsyncIO', 'Framework :: Django :: 6.1', 'Typing :: Typed'):
+    assert expected in classifiers, f'{expected} is missing from the wheel metadata'
+extras = fields.get_all('Provides-Extra') or []
+assert 'hiredis' in extras, extras
+# dev is for this repository, not for anyone installing the package
+assert 'dev' not in extras, f'the dev extra shipped in the wheel: {extras}'
+print('    classifiers, extras and the absence of dev all check out')
+META
+
 echo
 echo "smoke install passed"

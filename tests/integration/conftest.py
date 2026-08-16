@@ -1,9 +1,9 @@
 """Fixtures for the suite that needs a real Redis.
 
 fakeredis agrees with everything, which is exactly why it cannot answer the
-questions that broke 1.x deployments: whether `LMOVE` exists, whether the server
-refuses `CONFIG SET`, whether FSM state written by one process is readable by
-the next.
+questions that broke 1.x deployments: whether `LMOVE` exists, what a server
+without it says when asked, and whether FSM state written by one process is
+readable by the next.
 """
 
 import os

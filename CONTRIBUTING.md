@@ -12,7 +12,7 @@ the commands, and the invariants that must stay covered.
 git clone git@github.com:CorneiZeR/django-redis-aiogram.git
 cd django-redis-aiogram
 python -m venv .venv && source .venv/bin/activate
-pip install -e '.[dev]'
+pip install -e . --group dev
 ```
 
 Python 3.10–3.14 is supported.
