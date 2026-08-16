@@ -174,8 +174,15 @@ class TelegramEventAdmin(ModelAdminBase):
         every deferred column would cost its own extra query when the template
         touched it. Written out rather than delegated because the deferral has to
         be lifted *before* the lookup, not after it.
+
+        Only for a reader allowed to see them. `get_fields` already keeps message
+        bodies and exception text off the page, but fetching them anyway would put
+        both on the wire and into the query log for someone the permission exists
+        to withhold them from.
         """
-        rows = self.get_queryset(request).defer(None)
+        rows = self.get_queryset(request)
+        if may_see_payloads(request):
+            rows = rows.defer(None)
         meta = TelegramEvent._meta  # noqa: SLF001 - how Django itself asks a model for its fields
         field = meta.pk if from_field is None else meta.get_field(from_field)
         if not isinstance(field, Field):

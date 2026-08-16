@@ -374,6 +374,24 @@ def test_the_changelist_does_not_fetch_the_payload_columns(client):
 
 @pytest.mark.django_db
 @override_settings(TELEGRAM_BOT=ON)
+def test_a_reader_without_the_payload_permission_never_fetches_them(client):
+    """`get_fields` keeps them off the page. Fetching them anyway would still put
+    message bodies and exception text on the wire and into the query log for
+    someone the permission exists to withhold them from."""
+    event = an_event(error='secret', detail={'text': 'private'})
+    client.force_login(a_reader('narrow', 'view_telegramevent'))
+
+    with CaptureQueriesContext(connection) as queries:
+        response = client.get(f'{CHANGELIST}{event.pk}/change/')
+
+    assert response.status_code == 200
+    rows = [q['sql'] for q in queries if 'django_redis_aiogram_event' in q['sql']]
+    assert rows, 'the detail page issued no query at all'
+    assert not any('"error"' in sql or '"detail"' in sql for sql in rows), rows
+
+
+@pytest.mark.django_db
+@override_settings(TELEGRAM_BOT=ON)
 def test_the_detail_page_still_fetches_them_in_one_query(client):
     """Deferring on the changelist routes the detail page through the same
     queryset, so without lifting it each column would cost its own extra query
@@ -425,3 +443,32 @@ def test_a_kind_filtered_changelist_needs_no_sort(client):
             cursor.execute(f'EXPLAIN QUERY PLAN {sql}')
             plan = ' '.join(str(row) for row in cursor.fetchall())
             assert 'TEMP B-TREE' not in plan.upper(), f'{plan}\nfor: {sql}'
+
+
+@pytest.mark.django_db
+@override_settings(TELEGRAM_BOT=ON)
+@pytest.mark.parametrize('order', ['created_at', '-created_at'])
+def test_the_created_at_headers_sort_at_most_a_tie(order):
+    """Django appends `-pk` to make the changelist's order deterministic, and a
+    single-column index cannot serve that on its own.
+
+    What it *can* avoid is sorting the whole result set. Measured: ascending needs
+    no sort at all, and descending sorts only the last term — the rows sharing one
+    `created_at`. Removing even that would take a `(created_at, -id)` index in
+    each direction, which is two more writes per row on a table whose whole design
+    is cheap inserts.
+
+    Falsified by dropping `drai_event_recent` from the database directly, where
+    both directions become a full `USE TEMP B-TREE FOR ORDER BY` — editing
+    `models.py` does not do it, because the test database is built from the
+    migrations.
+    """
+    rows = TelegramEvent.objects.order_by(order, '-pk')[:50]
+    sql, params = rows.query.sql_with_params()
+
+    with connection.cursor() as cursor:
+        cursor.execute(f'EXPLAIN QUERY PLAN {sql}', params)
+        plan = ' | '.join(str(row[-1]) for row in cursor.fetchall())
+
+    assert 'drai_event_recent' in plan, plan
+    assert 'USE TEMP B-TREE FOR ORDER BY' not in plan.upper(), plan
