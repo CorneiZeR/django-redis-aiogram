@@ -18,7 +18,6 @@ reviews:
     # each other rather than the default branch; without this CodeRabbit skips
     # every one of them and reports "reviews are disabled for this base branch"
     base_branches:
-      - '2\.0'
       - 'feat/.*'
       - 'release/.*'
 
