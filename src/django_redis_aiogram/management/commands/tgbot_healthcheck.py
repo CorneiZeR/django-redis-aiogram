@@ -124,12 +124,17 @@ class Command(BaseCommand):
         """
         pattern = f'{delivery.queue_key}:processing:*'
         mine = delivery.processing_key
+        # SCAN may return the same key more than once when the keyspace changes
+        # size mid-iteration, and counting one twice would invent a backlog
+        seen: set[str] = set()
         total = 0
         try:
             for key in connection.scan_iter(match=pattern, count=100):
                 name = key.decode() if isinstance(key, bytes) else key
-                if name != mine:
-                    total += int(connection.llen(name) or 0)
+                if name == mine or name in seen:
+                    continue
+                seen.add(name)
+                total += int(connection.llen(name) or 0)
         except RedisError:
             # the probe answers about this worker; a scan it could not finish is
             # not a reason to call a healthy container unhealthy

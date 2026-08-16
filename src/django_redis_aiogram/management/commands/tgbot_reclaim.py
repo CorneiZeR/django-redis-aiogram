@@ -76,7 +76,12 @@ class Command(BaseCommand):
             self.stdout.write(f'{waiting} message(s) in flight for {worker!r}; would requeue them.')
             return
 
-        limit = max(0, int(options['limit']))
+        limit = int(options['limit'])
+        if limit < 0:
+            # max(0, ...) would have read this as "no limit", which is the
+            # opposite of what someone typing a limit is asking for
+            msg = f'--limit cannot be negative, got {limit}. Use 0 for no limit.'
+            raise CommandError(msg)
         moved = 0
         while not limit or moved < limit:
             try:

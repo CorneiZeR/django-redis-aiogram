@@ -574,3 +574,26 @@ def test_reclaim_dry_run_moves_nothing(redis_server):
     assert redis_server.llen(f'{QUEUE}:processing:gone') == 1
     assert redis_server.llen(QUEUE) == 0
     assert 'would requeue' in out.getvalue()
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'WORKER_NAME': 'alive'})
+def test_reclaim_stops_at_the_limit(redis_server):
+    """`--limit` is what bounds one run's blast radius."""
+    redis_server.rpush(f'{QUEUE}:processing:gone', payload(1), payload(2))
+
+    call_command('tgbot_reclaim', worker='gone', limit=1, stdout=StringIO())
+
+    assert redis_server.llen(f'{QUEUE}:processing:gone') == 1
+    assert redis_server.llen(QUEUE) == 1
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'WORKER_NAME': 'alive'})
+def test_reclaim_refuses_a_negative_limit(redis_server):
+    """`max(0, ...)` read a negative limit as "no limit", which is the opposite
+    of what someone typing a limit is asking for."""
+    redis_server.rpush(f'{QUEUE}:processing:gone', payload(1), payload(2))
+
+    with pytest.raises(CommandError, match='cannot be negative'):
+        call_command('tgbot_reclaim', worker='gone', limit=-1)
+
+    assert redis_server.llen(f'{QUEUE}:processing:gone') == 2

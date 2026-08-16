@@ -10,6 +10,7 @@ from io import StringIO
 import pytest
 from django.core.management import CommandError, call_command
 from django.test import override_settings
+from redis.exceptions import RedisError
 
 from django_redis_aiogram.delivery import BlpopDelivery
 
@@ -247,3 +248,47 @@ def test_the_queue_limit_is_inclusive(redis_server):
     redis_server.rpush(QUEUE, b'{}')
     with pytest.raises(CommandError, match='4 messages are queued'):
         healthcheck()
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'WORKER_NAME': 'mine'})
+def test_the_probe_says_which_guarantee_is_in_force(redis_server):
+    """A probe that only says "healthy" cannot tell at-least-once from
+    at-most-once, and the difference is whether a kill loses a message."""
+    redis_server.set(f'{QUEUE}:heartbeat:mine', str(int(time.time())))
+    out = StringIO()
+
+    call_command('tgbot_healthcheck', stdout=out)
+
+    assert 'at-least-once' in out.getvalue()
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'WORKER_NAME': 'mine'})
+def test_messages_stranded_under_another_worker_are_reported(redis_server):
+    """A stranded list is invisible otherwise: nothing reads it and nothing
+    counts it, which is how it stays stranded."""
+    redis_server.set(f'{QUEUE}:heartbeat:mine', str(int(time.time())))
+    redis_server.rpush(f'{QUEUE}:processing:gone', b'{}', b'{}')
+    out = StringIO()
+
+    call_command('tgbot_healthcheck', stdout=out)
+
+    reported = out.getvalue()
+    assert '2 message(s) are in flight under other worker names' in reported
+    assert 'tgbot_reclaim' in reported
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'WORKER_NAME': 'mine'})
+def test_a_scan_that_fails_does_not_make_the_container_unhealthy(redis_server, monkeypatch):
+    """The probe answers about this worker. A scan it could not finish is not a
+    reason to restart a container that is doing its job."""
+    redis_server.set(f'{QUEUE}:heartbeat:mine', str(int(time.time())))
+
+    def refuse(*args, **kwargs):
+        raise RedisError('NOPERM')
+
+    monkeypatch.setattr(redis_server, 'scan_iter', refuse)
+    out = StringIO()
+
+    call_command('tgbot_healthcheck', stdout=out)
+
+    assert 'healthy' in out.getvalue()
