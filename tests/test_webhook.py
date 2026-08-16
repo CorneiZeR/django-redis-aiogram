@@ -4,6 +4,7 @@ The view is the one place in this package that a stranger can reach, so most of
 what is checked here is what it refuses.
 """
 
+import asyncio
 import json
 import threading
 import time
@@ -482,3 +483,57 @@ def test_members_that_are_not_strings_are_reported_not_raised():
     reported = {message.id for message in check_settings()}
 
     assert 'django_redis_aiogram.E029' in reported
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_updates_in_one_process_are_handled_concurrently(monkeypatch):
+    """A web process drives nothing, so every update took `run_until_complete`
+    **under `loop_lock`** and they handled strictly one at a time.
+
+    The rendezvous is what makes this a test rather than a stopwatch: four
+    handlers must all be inside the dispatcher at once for the barrier to
+    release. Serialized, the first one waits there for ever and the others never
+    arrive — which is exactly what happened before the loop had a thread.
+    """
+    instance = TelegramBot()
+    together = threading.Barrier(4, timeout=5)
+    arrived = []
+    broken = []
+
+    @instance.message(F.text)
+    async def rendezvous(message: types.Message) -> None:
+        arrived.append(message.text)
+        # a thread, because the barrier is a blocking primitive and this runs on
+        # the loop: four handlers have to be in flight for it to release
+        try:
+            await asyncio.get_running_loop().run_in_executor(None, together.wait)
+        except threading.BrokenBarrierError:
+            # serialized, each handler waits here alone and times out. Recorded
+            # rather than raised: the view answers 200 to a handler that raised,
+            # so letting it propagate would leave the test green
+            broken.append(message.text)
+
+    monkeypatch.setattr('django_redis_aiogram.webhook.bot', instance)
+
+    errors = []
+
+    def deliver(index):
+        try:
+            assert post(an_update(f'/together{index}', update_id=index)).status_code == 200
+        except Exception as error:
+            errors.append(error)
+
+    threads = [threading.Thread(target=deliver, args=(index,)) for index in range(4)]
+    for thread in threads:
+        thread.start()
+    deadline = time.monotonic() + 20
+    for thread in threads:
+        thread.join(timeout=max(0.0, deadline - time.monotonic()))
+
+    try:
+        assert not [thread for thread in threads if thread.is_alive()], 'a request never returned'
+        assert errors == [], errors
+        assert sorted(arrived) == [f'/together{index}' for index in range(4)], arrived
+        assert broken == [], 'the handlers never overlapped, so the barrier timed out'
+    finally:
+        instance.close()

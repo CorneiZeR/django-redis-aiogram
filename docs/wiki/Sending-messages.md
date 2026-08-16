@@ -28,8 +28,15 @@ bot.send('send_chat_action', chat_id=CHAT_ID, action='typing')
 | `send_raw()` | always call Telegram from this process |
 
 `send_raw` from a web process builds its own event loop and HTTP session. That
-works, but it makes the request wait on Telegram and does not share the bot's
-rate-limit budget. Prefer `send()`.
+works, but it does not share the bot's rate-limit budget. Prefer `send()`.
+
+Whether it *waits* depends on where it is called from, and the difference matters
+in webhook mode. From ordinary request code it drives the loop and waits. From
+inside a **handler** — which runs on that loop — it can only schedule, so the
+request returns before Telegram has been called and a failure appears in the log
+rather than in the response. Until 3.1.0 that scheduled send was not even
+stepped until the next update arrived, because a web process ran the loop only
+for the duration of one update; it now has a thread of its own.
 
 ## Keyboards
 
