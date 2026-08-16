@@ -245,3 +245,76 @@ def test_describe_never_raises(monkeypatch):
 def test_every_documented_level_is_accepted(level):
     with override_settings(TELEGRAM_BOT={'EVENT_LOG_PAYLOAD': level}):
         assert isinstance(describe({'chat_id': 1}), dict)
+
+
+@override_settings(TELEGRAM_BOT={'TOKEN': '424242:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'WEBHOOK_SECRET': 'hunter2'})
+@pytest.mark.parametrize(
+    'text',
+    [
+        'failed for https://api.telegram.org/bot424242:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/sendMessage',
+        '424242:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        'a second bot: 999999:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        'hunter2',
+        'the secret is hunter2 and the token is 424242:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    ],
+)
+def test_the_colon_prefilter_never_lets_a_credential_through(text):
+    """`redact_text` skips the regex for a string with no colon.
+
+    Every token Telegram issues has one, so the shortcut is exact — but it is the
+    kind of shortcut that is only safe until someone widens the pattern, and the
+    thing it guards is the token reaching a database row.
+    """
+    cleaned = redact_text(text)
+
+    assert '424242:' not in cleaned
+    assert 'hunter2' not in cleaned
+    assert 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' not in cleaned
+
+
+@override_settings(TELEGRAM_BOT={'TOKEN': '424242:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'})
+def test_the_settings_are_read_once_for_a_whole_payload(monkeypatch):
+    """They were read for every string, at every depth, of every event."""
+    from django_redis_aiogram import payloads
+
+    reads = []
+    original = payloads.conf.get
+
+    def counting(key, *args):
+        reads.append(key)
+        return original(key, *args)
+
+    monkeypatch.setattr(payloads.conf, 'get', counting)
+    nested = {'a': ['one', 'two', {'b': 'three', 'c': ['four', 'five']}], 'd': 'six'}
+
+    payloads.redact_values(nested, frozenset())
+
+    assert reads.count('TOKEN') == 1, reads
+
+
+@override_settings(TELEGRAM_BOT={'TOKEN': '424242:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'})
+def test_a_string_without_a_colon_never_reaches_the_token_regex(monkeypatch):
+    """The prefilter is the optimisation; the test above is only its safety net.
+
+    Those assertions pass with the prefilter deleted, because deleting it makes
+    the regex run on everything and the output is identical. This is the one that
+    fails when the optimisation is reverted.
+    """
+    from django_redis_aiogram import payloads
+
+    scanned = []
+    real = payloads._TOKEN_RE
+
+    class Spy:
+        def sub(self, replacement, text):
+            scanned.append(text)
+            return real.sub(replacement, text)
+
+    monkeypatch.setattr(payloads, '_TOKEN_RE', Spy())
+
+    payloads.redact_text('an ordinary message with no colon in it')
+    assert scanned == [], scanned
+
+    # and it still reaches the regex when it could possibly match
+    payloads.redact_text('a second bot: 999999:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb')
+    assert len(scanned) == 1, scanned

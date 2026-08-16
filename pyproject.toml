@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]  # PEP 639 license metadata
 build-backend = "hatchling.build"
 
 [project]
@@ -20,6 +20,7 @@ dependencies = [
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
+    "Topic :: Communications :: Chat",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
@@ -28,13 +29,25 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Framework :: AsyncIO",
     "Framework :: Django",
     "Framework :: Django :: 5.2",
     "Framework :: Django :: 6.0",
+    "Framework :: Django :: 6.1",
     "Typing :: Typed",
 ]
 
 [project.optional-dependencies]
+# not a runtime dependency: redis-py parses the protocol in C when this is
+# present. Worth it on a busy consumer, pointless on a web tier that only ever
+# pushes, which is why it is opt-in rather than pulled in for everybody
+hiredis = ["redis[hiredis]>=6.2"]
+
+
+# a dependency group, not an extra: an extra is published in the wheel and shows
+# up as `Provides-Extra: dev` for everyone installing the package, who has no use
+# for our linters. Needs pip 25.1+ or uv
+[dependency-groups]
 dev = [
     "pytest>=8",
     "pytest-django>=4.9",
@@ -52,6 +65,8 @@ Homepage = "https://github.com/CorneiZeR/django-redis-aiogram"
 Documentation = "https://github.com/CorneiZeR/django-redis-aiogram/wiki"
 Changelog = "https://github.com/CorneiZeR/django-redis-aiogram/blob/master/CHANGELOG.md"
 Issues = "https://github.com/CorneiZeR/django-redis-aiogram/issues"
+Repository = "https://github.com/CorneiZeR/django-redis-aiogram"
+Funding = "https://github.com/sponsors/CorneiZeR"
 
 [tool.hatch.version]
 path = "src/django_redis_aiogram/__init__.py"
@@ -60,7 +75,20 @@ path = "src/django_redis_aiogram/__init__.py"
 packages = ["src/django_redis_aiogram"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src", "tests", "README.md", "CHANGELOG.md", "LICENSE"]
+# docs/ and the contributor files travel with the sdist: a distribution nobody
+# can review or rebuild from itself is only half a distribution
+include = [
+    "src",
+    "tests",
+    "docs",
+    "scripts",
+    "README.md",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "AGENTS.md",
+    "LICENSE",
+]
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "tests.settings"
@@ -70,6 +98,14 @@ testpaths = ["tests"]
 addopts = "--ignore=tests/db"
 markers = [
     "integration: needs a real Redis; set DJANGO_REDIS_AIOGRAM_TEST_REDIS_URL to run",
+]
+# deliberately not a bare "error": that escalates ResourceWarning into
+# PytestUnraisableExceptionWarning, whose attribution follows GC timing and so
+# differs between the 3.10 and 3.14 legs — a manufactured flake, not a finding
+filterwarnings = [
+    "error::DeprecationWarning",
+    "error::PendingDeprecationWarning",
+    "error::FutureWarning",
 ]
 
 [tool.ruff]

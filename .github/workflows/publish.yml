@@ -17,22 +17,49 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: '3.13'
-      - run: pip install build twine
+      # by hash, not by name: this job is where third-party code last touches
+      # the artifact, and the wheel it produces publishes under our own identity
+      - run: pip install --require-hashes -r .github/release-requirements.txt
+      # the tag is what people install, and nothing else checks that the version
+      # inside the package agrees with it. A release that disagrees is only
+      # visible once it is on PyPI and immutable
+      - name: The tag and __version__ must agree
+        if: github.event_name == 'release'
+        # through env, not interpolated into the script: a tag may legally
+        # contain a quote, and this is the one workflow holding id-token: write
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          tag="$RELEASE_TAG"
+          version=$(python -c "import re, pathlib; print(re.search(r\"__version__ = '(.+?)'\", pathlib.Path('src/django_redis_aiogram/__init__.py').read_text()).group(1))")
+          if [ "${tag#v}" != "$version" ]; then
+            echo "release tag ${tag} does not match __version__ ${version}" >&2
+            exit 1
+          fi
+      # build resolves [build-system].requires in an environment of its own, so
+      # the pins above do not reach hatchling; PIP_CONSTRAINT is what does
       - run: python -m build
+        env:
+          PIP_CONSTRAINT: ${{ github.workspace }}/.github/release-constraints.txt
       - run: twine check dist/*
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: dist
           path: dist/
 
   publish:
     needs: build
+    # a release, and nothing else. workflow_dispatch has no tag, so the check
+    # above cannot run and a manual run would upload whatever __version__ says —
+    # to an index where a version can never be replaced. Dispatch stays useful:
+    # it builds and checks, it just does not publish
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -40,8 +67,8 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: dist
           path: dist/
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1

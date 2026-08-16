@@ -386,6 +386,39 @@ class Serializer(Protocol):
         ...
 
 
+class _TaggedEncoder(json.JSONEncoder):
+    """Writes the tagged forms while walking, rather than before it.
+
+    :func:`encode` rebuilds every container and then ``json.dumps`` walks the
+    copy, so a payload is traversed twice and duplicated once. ``default`` is
+    called only for values JSON cannot write natively, which is exactly the set
+    the codecs are for, so the same bytes come out of one pass.
+
+    A model payload is the exception, and stays about as expensive as it was:
+    :meth:`ModelCodec.encode` recurses through :func:`encode` per field, and it
+    has to — ``encode`` is exported, and a codec that returned half-tagged data
+    would break every caller that uses the two functions on their own.
+    """
+
+    def default(self, o: Any) -> Any:  # noqa: ANN401 - a queued call argument is arbitrary by nature
+        """Tag what JSON cannot write, exactly as :func:`encode` would."""
+        for codec in _CODECS:
+            if codec.matches(o):
+                return codec.encode(o)
+        if isinstance(o, Enum):
+            return o.value
+        return super().default(o)
+
+
+_ENCODER = _TaggedEncoder()
+
+#: above this many containers the payload is re-encoded the slow way to find out
+#: whether it is too deep to read back. A cheap over-estimate of nesting depth:
+#: depth can never exceed the number of containers, and braces inside strings
+#: only make it fire early, which costs a walk rather than a message
+NESTING_GUARD = 900
+
+
 class JsonSerializer:
     """The default format: tagged JSON, readable and not executable."""
 
@@ -395,7 +428,28 @@ class JsonSerializer:
     def dumps(self, payload: dict[str, Any]) -> bytes:
         """Encode a queued call as JSON bytes."""
         try:
-            return json.dumps(encode(payload)).encode('utf-8')
+            text = _ENCODER.encode(payload)
+        except SerializationError:
+            raise
+        except (TypeError, ValueError, RecursionError) as error:
+            msg = f'Cannot encode payload as JSON: {error}'
+            raise SerializationError(msg) from error
+        if text.count('{') + text.count('[') >= NESTING_GUARD:
+            self._refuse_if_unreadable(payload)
+        return text.encode('utf-8')
+
+    @staticmethod
+    def _refuse_if_unreadable(payload: dict[str, Any]) -> None:
+        """Refuse a payload this writer can produce and no reader can get back.
+
+        The C encoder does not respect Python's recursion limit, but :func:`decode`
+        does — so without this a deeply nested call would be queued happily and
+        then be undecodable for ever on the consumer, which drops it. Encoding it
+        the old way is what raises, and it is only ever reached by payloads far
+        larger than any real message.
+        """
+        try:
+            encode(payload)
         except SerializationError:
             raise
         except (TypeError, ValueError, RecursionError) as error:

@@ -15,10 +15,32 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-echo "--- building the wheel"
-python -m build --wheel --outdir "$work/dist" "$root" >/dev/null
+echo "--- building the wheel and the sdist"
+python -m build --sdist --wheel --outdir "$work/dist" "$root" >/dev/null
 wheel="$(ls "$work"/dist/*.whl)"
-echo "built $(basename "$wheel")"
+sdist="$(ls "$work"/dist/*.tar.gz)"
+echo "built $(basename "$wheel") and $(basename "$sdist")"
+
+echo "--- the sdist must carry what a rebuild and a review need"
+python - "$sdist" <<'PY'
+import sys, tarfile
+
+with tarfile.open(sys.argv[1]) as archive:
+    # the leading directory is <name>-<version>/, which no expectation should
+    # depend on, so compare on what follows it
+    names = {name.split('/', 1)[1] for name in archive.getnames() if '/' in name}
+for expected in (
+    'src/django_redis_aiogram/__init__.py',
+    'tests/test_public_surface.py',
+    'docs/wiki/Delivery.md',
+    'scripts/smoke_install.sh',
+    'CONTRIBUTING.md',
+    'SECURITY.md',
+    'AGENTS.md',
+):
+    assert expected in names, f'{expected} missing from the sdist'
+print('sources, tests, docs and the contributor files all travel with the sdist')
+PY
 
 echo "--- the wheel must carry what a consumer needs"
 python - "$wheel" <<'PY'
@@ -87,12 +109,38 @@ esac
 echo "--- types are visible to a consumer"
 "$work/venv/bin/pip" install -q mypy
 cat > uses_it.py <<'PY'
-from django_redis_aiogram import bot
+# typing.assert_type is 3.11 and up, and this script runs on whatever python a
+# contributor has. mypy installs typing_extensions itself, so this adds nothing
+from typing_extensions import assert_type
+
+from redis import Redis
+
+from django_redis_aiogram import bot, redis_conn
 
 def notify(chat_id: int) -> None:
     bot.send(chat_id=chat_id, text='hi')
+
+# redis_conn forwards through __getattr__, so it resolved to Any while
+# get_redis() did not. Nothing is called here: this is the installed package's
+# typing, checked without a server
+assert_type(redis_conn, Redis)
 PY
 "$work/venv/bin/mypy" --strict uses_it.py 2>&1 | sed 's/^/    /'
+
+echo "--- the metadata a consumer resolves against"
+"$work/venv/bin/python" - <<'META'
+from importlib.metadata import metadata
+
+fields = metadata('django-redis-aiogram')
+classifiers = fields.get_all('Classifier') or []
+for expected in ('Framework :: AsyncIO', 'Framework :: Django :: 6.1', 'Typing :: Typed'):
+    assert expected in classifiers, f'{expected} is missing from the wheel metadata'
+extras = fields.get_all('Provides-Extra') or []
+assert 'hiredis' in extras, extras
+# dev is for this repository, not for anyone installing the package
+assert 'dev' not in extras, f'the dev extra shipped in the wheel: {extras}'
+print('    classifiers, extras and the absence of dev all check out')
+META
 
 echo
 echo "smoke install passed"

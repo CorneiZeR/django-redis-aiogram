@@ -498,6 +498,36 @@ def test_a_batch_the_database_refuses_entirely_is_reported(monkeypatch):
 
 @pytest.mark.django_db(transaction=True)
 @override_settings(TELEGRAM_BOT=ON)
+def test_the_redaction_constants_are_resolved_once_for_a_whole_batch(monkeypatch):
+    """`to_row` resolves both itself when they are not handed down.
+
+    That fallback is what makes this reversible in silence: drop the hoist in
+    `write_batch` and every row rebuilds the frozenset and re-reads the settings,
+    for output that is byte-for-byte the same. A batch is 200 rows, so the only
+    thing that changes is the bill.
+    """
+    from django_redis_aiogram import eventlog
+
+    calls = []
+
+    def counting(name, original):
+        def wrapped(*args, **kwargs):
+            calls.append(name)
+            return original(*args, **kwargs)
+
+        return wrapped
+
+    monkeypatch.setattr(eventlog, 'redact_keys', counting('keys', eventlog.redact_keys))
+    monkeypatch.setattr(eventlog, 'secrets', counting('secrets', eventlog.secrets))
+
+    write_batch([an_event(chat_id=1), an_event(chat_id=2), an_event(chat_id=3)])
+
+    assert calls.count('keys') == 1, calls
+    assert calls.count('secrets') == 1, calls
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT=ON)
 def test_a_partly_refused_batch_is_not_reported(monkeypatch):
     """Only a wholesale refusal is a failed flush. One poison row is not."""
     refused = []

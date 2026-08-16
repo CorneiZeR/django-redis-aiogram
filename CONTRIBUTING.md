@@ -12,10 +12,16 @@ the commands, and the invariants that must stay covered.
 git clone git@github.com:CorneiZeR/django-redis-aiogram.git
 cd django-redis-aiogram
 python -m venv .venv && source .venv/bin/activate
-pip install -e '.[dev]'
+python -m pip install --upgrade pip
+pip install -e . --group dev
 ```
 
 Python 3.10–3.14 is supported.
+
+`--group` is [PEP 735](https://peps.python.org/pep-0735/), which pip understands
+from **25.1**. A fresh virtual environment inherits whatever pip your Python
+shipped with — on 3.10 that is old enough to reject the flag as unknown — so the
+upgrade above is not ceremony. `pip --version` if it fails.
 
 ## Before opening a pull request
 
@@ -47,12 +53,13 @@ runs `FLUSHDB` before and after every test.
 It covers what fakeredis cannot: whether `LMOVE` exists and the consumer picks
 the crash-safe path, whether a reclaim takes back only its own worker's message,
 a mixed pickle/JSON backlog draining, and FSM state surviving a restart.
-`scripts/smoke_install.sh` is the other half — it builds the wheel, installs it
-into a throwaway project and checks that Django boots with no credentials at all.
+`scripts/smoke_install.sh` is the other half — it builds the wheel and the sdist,
+checks what each of them carries, installs the wheel into a throwaway project and
+checks that Django boots with no credentials at all.
 
 CI splits those up: `ruff`, `ruff format` and `mypy` run once on Python 3.13,
-while `pytest` runs across Python 3.10–3.14 × Django 5.2/6.0, plus a job pinning
-the lowest supported versions of every dependency. Every version the package
+while `pytest` runs across Python 3.10–3.14 × Django 5.2/6.0/6.1, plus a job
+pinning the lowest supported versions of every dependency. Every version the package
 advertises has to pass before a merge.
 
 ## What the tests care about
@@ -112,3 +119,17 @@ check that they all resolve and that none is written the other way round.
 
 Explain why the change is needed, not just what changed. If it fixes a bug,
 describe the failure it produces.
+
+## Releases
+
+Publishing runs on [Trusted Publishing](https://docs.pypi.org/trusted-publishers/),
+so there is no API token anywhere. Every action is pinned to a commit, and the
+build job installs its tools by hash from `.github/release-requirements.txt`,
+with `.github/release-constraints.txt` pinning the build backend that
+`python -m build` resolves in an isolated environment of its own.
+
+Refresh both before cutting a release — the command that generates each is in
+its header — and open the refresh as its own pull request, so the diff is
+reviewed rather than landing alongside the release commit. A pin that has gone
+stale is only discovered when the release workflow runs, which is the worst
+moment to find out.

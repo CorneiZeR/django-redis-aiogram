@@ -83,6 +83,31 @@ them, so it is not one per message.
   outside the net that contains a failed flush — so a value that could not be
   parsed ended the writer and took the whole buffer with it. Checks `E036`–`E038`
   still report it at boot.
+- **The changelist's bounded count is now actually bounded.** The kind index was
+  `(kind, -created_at)` while the changelist orders by `-id`, so every filtered
+  page sorted in a temporary b-tree — the page query and the count alike. A
+  `LIMIT` can only stop early if the rows arrive ordered, so the documented
+  "counts at most 10 000 rows" was not true for any filtered view. The index is
+  `(kind, -id)` now. **This release ships migration `0002`; run `manage.py
+  migrate`.** The new index is added before the old one is dropped, so the table
+  is never without one on `kind`, and the name is new because the columns differ.
+  `AddIndex` issues a plain `CREATE INDEX`, so on a table large enough for the
+  lock to matter, run the migration in a window. What it costs: a per-kind *time
+  window* query loses its range column. `drai_event_recent` still covers a time
+  window without a kind.
+- The changelist stops fetching `error` and `detail`. It renders neither, and
+  between them they are most of what a row weighs — about 1.4 MB per fifty-row
+  page, fetched even for a reader the payload permission withholds them from.
+  The detail page asks for them back, and only for a reader allowed to see them.
+- Only indexed columns are sortable in the admin. One click on the `function`,
+  `worker` or `error_code` header was a full sort of a table sized by traffic.
+- **`tgbot_prune_events` makes forward progress past a recent low-id row.** The
+  walk's lower bound was the table's lowest id while its upper bound was filtered
+  by the cutoff, so one surviving row down there pinned every run to restart from
+  it — and a bounded `--max-chunks` run spent its budget crossing rows it could
+  not delete. The watermark is also read with `ORDER BY id DESC LIMIT 1` instead
+  of an aggregate, and the pause between chunks is skipped when a chunk deleted
+  nothing and under `--dry-run` entirely.
 
 ### Added
 
@@ -118,6 +143,31 @@ them, so it is not one per message.
 
 ### Changed
 
+- **Encoding a queued call takes one pass instead of two.** `encode()` rebuilt
+  every container and `json.dumps` then walked the copy. A `JSONEncoder` that
+  tags as it writes produces the same bytes from one walk: a plain send 2.17 →
+  0.58 µs, an envelope 4.12 → 0.84 µs, a thirty-button keyboard **53.3 → 6.1 µs**.
+  A payload built from aiogram model objects is unchanged at 1.0x — `ModelCodec`
+  still recurses per field, and it has to, because `encode` is exported and a
+  codec returning half-tagged data would break every caller that uses it alone.
+  A payload too deeply nested to read back is still refused: the C encoder
+  ignores Python's recursion limit while `decode` does not, so without a guard
+  such a call would be queued happily and then be undecodable for ever.
+- **Redaction reads the settings once per payload, not once per string.**
+  `redact_text` resolved `TOKEN` and `WEBHOOK_SECRET` for every string at every
+  depth of every event, and `to_row` rebuilt the redaction key set for every row
+  of a two-hundred-row batch. Both are hoisted. A string with no colon also skips
+  the token regex, which is exact — every token Telegram issues contains one —
+  and covered by its own test, because what it guards is the token reaching a row.
+- **The rate limiter no longer spins.** It paced correctly, but by counting
+  tokens: every waiter recomputed the same wait from the same shared state, so N
+  waiters woke together, one won and the rest went back to sleep. Measured at 40
+  queued sends it woke **113,652** times; it now wakes 35. At 500 sends the old
+  design burned 0.387 s of pure spinning. Admission also becomes strict FIFO —
+  before, a herd re-racing for the same token admitted in whatever order the loop
+  happened to resume, so the message that had waited longest had no claim on
+  going first. The limits themselves are unchanged, and every existing pacing
+  test passes untouched.
 - Redis commands are documented as deliberately un-retried. `Redis.from_url`
   builds the pool before the client, so redis-py's client-level retry default
   never reached the connection and every command already ran with zero retries;
@@ -128,6 +178,41 @@ them, so it is not one per message.
 
 ### Infrastructure
 
+- **`pip install -e '.[dev]'` becomes `pip install -e . --group dev`.** The dev
+  requirements were an extra, so `Provides-Extra: dev` shipped in the wheel and
+  every consumer resolving the package saw a group of linters they have no use
+  for. They are a PEP 735 dependency group now, which needs pip 25.1 or newer —
+  `AGENTS.md`, `CONTRIBUTING.md` and CI all say the new command.
+- An optional `hiredis` extra: `pip install django-redis-aiogram[hiredis]` makes
+  redis-py parse the protocol in C. Worth it on a busy consumer, pointless on a
+  web tier that only ever pushes, which is why it is opt-in rather than a
+  dependency.
+- The sdist carries `docs/`, `scripts/`, `CONTRIBUTING.md`, `SECURITY.md` and
+  `AGENTS.md`, and the wheel gains the `Framework :: AsyncIO`,
+  `Framework :: Django :: 6.1` and `Topic :: Communications :: Chat`
+  classifiers, plus `Repository` and `Funding` URLs.
+- `redis_conn` is annotated for consumers. It forwards through `__getattr__`, so
+  `redis_conn.ping()` typed as `Any` while `get_redis().ping()` did not; the
+  smoke install now `assert_type`s it, which is the only place a packaging-level
+  typing regression is catchable.
+- CI gains a Django 6.1 leg and a `valkey/valkey:8` integration leg — the fork
+  most managed providers actually run. The integration suite also asserts that an
+  unknown command's error text contains `unknown command`, which is the single
+  assumption the crash-safety downgrade rests on and which fakeredis can never
+  answer.
+- `publish.yml` checks that the release tag and `__version__` agree before
+  building, and pins every action it runs to a commit — it is the one workflow
+  holding `id-token: write`. The tag reaches the shell through `env` rather than
+  template interpolation, since a tag may legally contain a quote, and the build
+  tools are installed by hash from `.github/release-requirements.txt`, with
+  `.github/release-constraints.txt` pinning the backend that `python -m build`
+  resolves in an isolated environment of its own. That job is where third-party
+  code last touches the artefact PyPI receives. `hatchling>=1.27` in
+  `pyproject.toml` is unchanged: only what CI installs is pinned, not what
+  consumers build against.
+- Deprecation warnings fail the suite. Deliberately not a bare `error`: that
+  escalates `ResourceWarning` into `PytestUnraisableExceptionWarning`, whose
+  attribution follows GC timing and differs across the 3.10-3.14 legs.
 - The lazy-boot tests assert what they were meant to. The first now compares a
   `sys.modules` delta against `sys.stdlib_module_names`, so it catches any
   third-party import the package pulls rather than aiogram alone, and a third

@@ -87,31 +87,50 @@ def summarize(value: Any, *, bodies: bool, depth: int = 0) -> Any:  # noqa: ANN4
     return {_OMITTED: type(value).__name__}
 
 
-def redact_text(text: str) -> str:
+def secrets() -> tuple[str, ...]:
+    """Return the configured credentials, once per walk rather than once per string."""
+    found = (str(conf.get(name) or '').strip() for name in ('TOKEN', 'WEBHOOK_SECRET'))
+    return tuple(secret for secret in found if secret)
+
+
+def redact_text(text: str, configured: tuple[str, ...] | None = None) -> str:
     """Strip credentials from anything that came out of an exception.
 
     This is not paranoia: the token is in the API URL, aiogram and aiohttp put
     that URL in their error messages, and those messages are what an ``error``
     column holds.
+
+    ``configured`` is threaded down by :func:`redact_values` so the settings are
+    read once for a whole payload instead of once per string at every depth.
+    Resolving them here was half the cost of this function.
     """
-    for name in ('TOKEN', 'WEBHOOK_SECRET'):
-        secret = str(conf.get(name) or '').strip()
-        if secret:
-            text = text.replace(secret, _REDACTED)
+    for secret in secrets() if configured is None else configured:
+        text = text.replace(secret, _REDACTED)
+    # every token has a colon in it, so a string without one cannot match and does
+    # not need the regex walked over it. Revisit if the pattern ever widens
+    if ':' not in text:
+        return text
     # then anything token-shaped: a second bot's token is just as bad in a row
     return _TOKEN_RE.sub(_REDACTED, text)
 
 
-def redact_values(value: Any, keys: frozenset[str]) -> Any:  # noqa: ANN401 - walks whatever summarize produced
+def redact_values(
+    value: Any,  # noqa: ANN401 - walks whatever summarize produced
+    keys: frozenset[str],
+    configured: tuple[str, ...] | None = None,
+) -> Any:  # noqa: ANN401 - as above
     """Blank out values under credential-named keys, at any depth."""
+    if configured is None:
+        configured = secrets()
     if isinstance(value, dict):
         return {
-            key: _REDACTED if str(key).lower() in keys else redact_values(item, keys) for key, item in value.items()
+            key: _REDACTED if str(key).lower() in keys else redact_values(item, keys, configured)
+            for key, item in value.items()
         }
     if isinstance(value, list):
-        return [redact_values(item, keys) for item in value]
+        return [redact_values(item, keys, configured) for item in value]
     if isinstance(value, str):
-        return redact_text(value)
+        return redact_text(value, configured)
     return value
 
 

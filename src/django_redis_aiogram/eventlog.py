@@ -24,7 +24,7 @@ from django.utils import timezone
 from django_redis_aiogram.dbrouter import event_log_database
 from django_redis_aiogram.exceptions import DjangoRedisAiogramError
 from django_redis_aiogram.models import TelegramEvent
-from django_redis_aiogram.payloads import redact_keys, redact_text, redact_values
+from django_redis_aiogram.payloads import redact_keys, redact_text, redact_values, secrets
 from django_redis_aiogram.recorder import Event
 
 logger = logging.getLogger('django_redis_aiogram')
@@ -64,7 +64,11 @@ def _text(value: object, length: int) -> str:
     return str(value).replace('\x00', '')[:length]
 
 
-def to_row(event: Event) -> TelegramEvent:
+def to_row(
+    event: Event,
+    keys: frozenset[str] | None = None,
+    configured: tuple[str, ...] | None = None,
+) -> TelegramEvent:
     """Build the unsaved row for one event, sanitised so it cannot poison a batch.
 
     Redaction happens here as well as at the producer. This is the boundary rows
@@ -73,7 +77,10 @@ def to_row(event: Event) -> TelegramEvent:
     aiogram error message — which carries the API URL, which carries the token —
     straight into a column.
     """
-    keys = redact_keys()
+    if keys is None:
+        keys = redact_keys()
+    if configured is None:
+        configured = secrets()
     return TelegramEvent(
         created_at=_moment(event.created_at),
         correlation_id=event.correlation_id,
@@ -87,8 +94,8 @@ def to_row(event: Event) -> TelegramEvent:
         attempt=max(0, event.attempt),
         duration_ms=event.duration_ms,
         error_code=_text(event.error_code, 64),
-        error=_text(redact_text(str(event.error or '')), 20000),
-        detail=redact_values(event.detail or {}, keys),
+        error=_text(redact_text(str(event.error or ''), configured), 20000),
+        detail=redact_values(event.detail or {}, keys, configured),
     )
 
 
@@ -96,7 +103,9 @@ def write_batch(events: Sequence[Event]) -> None:
     """Insert one batch, recycling a connection the database has since dropped."""
     alias = log_alias()
     _recycle(alias)
-    rows = [to_row(event) for event in events]
+    # resolved once for the batch: both walk the settings, and a batch is 200 rows
+    keys, configured = redact_keys(), secrets()
+    rows = [to_row(event, keys, configured) for event in events]
     manager = TelegramEvent.objects.using(alias)
     try:
         # the savepoint is what keeps a failed log write from taking the
