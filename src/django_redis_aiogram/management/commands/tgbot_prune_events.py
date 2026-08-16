@@ -86,13 +86,17 @@ class Command(BaseCommand):
         rows = TelegramEvent.objects.using(alias)
 
         # where the walk stops: nothing older than the cutoff lives above this
-        # id. Reading it costs one pass over the rows about to be deleted, on
-        # the created_at index — not over the table
-        watermark = rows.filter(created_at__lt=cutoff).aggregate(models.Max('id'))['id__max']
+        # id. `ORDER BY id DESC LIMIT 1` rather than an aggregate — the same
+        # answer without a heap pass over exactly the set about to be deleted
+        expired = rows.filter(created_at__lt=cutoff)
+        watermark = expired.order_by('-id').values_list('id', flat=True).first()
         if watermark is None:
             self.stdout.write(f'Nothing older than {cutoff.isoformat()}.')
             return
-        low = rows.aggregate(models.Min('id'))['id__min'] or 1
+        # filtered by the cutoff like the watermark is. Taking the table's lowest
+        # id instead meant one surviving row down there pinned the walk to
+        # restart from it every night, and a --max-chunks run never got past it
+        low = expired.order_by('id').values_list('id', flat=True).first() or 1
 
         deleted = self._walk(Window(rows, low, watermark, cutoff, alias), options)
         verb = 'would delete' if options['dry_run'] else 'deleted'
@@ -114,17 +118,19 @@ class Command(BaseCommand):
             # several processes and a buffered writer are involved
             batch = rows.filter(id__gte=low, id__lte=high, created_at__lt=cutoff)
             if options['dry_run']:
-                deleted += batch.count()
+                removed_here = batch.count()
             else:
                 with transaction.atomic(using=alias):
-                    removed, _ = batch.delete()
-                deleted += removed
+                    removed_here, _ = batch.delete()
+            deleted += removed_here
             low = high + 1
             rounds += 1
             if limit and rounds >= limit:
                 self.stdout.write(f'Stopped after {rounds} chunks; rerun to continue.')
                 break
-            if pause and low <= watermark:
+            # nothing was deleted, so there is nothing for a replica to catch up
+            # on and nothing to vacuum; a dry run deletes nothing at all
+            if pause and removed_here and low <= watermark and not options['dry_run']:
                 # replicas and autovacuum both need the gaps
                 time.sleep(pause)
         return deleted
