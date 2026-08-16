@@ -53,12 +53,13 @@ runs `FLUSHDB` before and after every test.
 It covers what fakeredis cannot: whether `LMOVE` exists and the consumer picks
 the crash-safe path, whether a reclaim takes back only its own worker's message,
 a mixed pickle/JSON backlog draining, and FSM state surviving a restart.
-`scripts/smoke_install.sh` is the other half — it builds the wheel, installs it
-into a throwaway project and checks that Django boots with no credentials at all.
+`scripts/smoke_install.sh` is the other half — it builds the wheel and the sdist,
+checks what each of them carries, installs the wheel into a throwaway project and
+checks that Django boots with no credentials at all.
 
 CI splits those up: `ruff`, `ruff format` and `mypy` run once on Python 3.13,
-while `pytest` runs across Python 3.10–3.14 × Django 5.2/6.0, plus a job pinning
-the lowest supported versions of every dependency. Every version the package
+while `pytest` runs across Python 3.10–3.14 × Django 5.2/6.0/6.1, plus a job
+pinning the lowest supported versions of every dependency. Every version the package
 advertises has to pass before a merge.
 
 ## What the tests care about

@@ -15,10 +15,32 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-echo "--- building the wheel"
-python -m build --wheel --outdir "$work/dist" "$root" >/dev/null
+echo "--- building the wheel and the sdist"
+python -m build --sdist --wheel --outdir "$work/dist" "$root" >/dev/null
 wheel="$(ls "$work"/dist/*.whl)"
-echo "built $(basename "$wheel")"
+sdist="$(ls "$work"/dist/*.tar.gz)"
+echo "built $(basename "$wheel") and $(basename "$sdist")"
+
+echo "--- the sdist must carry what a rebuild and a review need"
+python - "$sdist" <<'PY'
+import sys, tarfile
+
+with tarfile.open(sys.argv[1]) as archive:
+    # the leading directory is <name>-<version>/, which no expectation should
+    # depend on, so compare on what follows it
+    names = {name.split('/', 1)[1] for name in archive.getnames() if '/' in name}
+for expected in (
+    'src/django_redis_aiogram/__init__.py',
+    'tests/test_public_surface.py',
+    'docs/wiki/Delivery.md',
+    'scripts/smoke_install.sh',
+    'CONTRIBUTING.md',
+    'SECURITY.md',
+    'AGENTS.md',
+):
+    assert expected in names, f'{expected} missing from the sdist'
+print('sources, tests, docs and the contributor files all travel with the sdist')
+PY
 
 echo "--- the wheel must carry what a consumer needs"
 python - "$wheel" <<'PY'
