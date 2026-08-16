@@ -7,14 +7,19 @@ because Django settings are not readable while the app registry is loading.
 """
 
 import threading
-import urllib.parse
+from collections.abc import Callable
 from typing import Any
 
 from django.core.exceptions import ImproperlyConfigured
 from django.core.signals import setting_changed
 from redis import Redis
+from redis.connection import parse_url as _parse_url
 
 from django_redis_aiogram.settings import SETTINGS_NAME, conf
+
+#: redis-py ships py.typed but leaves parse_url unannotated, and strict mode refuses
+#: to call it. Naming the shape here keeps the call site honest without an ignore
+parse_url: Callable[[str], dict[str, Any]] = _parse_url
 
 
 def read_timeout() -> int:
@@ -69,12 +74,21 @@ def url_decodes_responses(url: str) -> bool:
     Tolerated everywhere else — :func:`as_bytes` exists for it, because one
     ``REDIS_URL`` is often shared with a cache backend that wants decoding — but
     pickled payloads cannot survive it, so check E043 refuses that one pairing.
+
+    Asked of redis-py rather than parsed here, because the answer is surprising
+    and any reimplementation would drift from it. ``decode_responses`` has no
+    entry in ``URL_QUERY_ARGUMENT_PARSERS``, so it never goes through a boolean
+    parser: it arrives as a raw string and reaches the connection on plain
+    truthiness. ``?decode_responses=false`` and ``?decode_responses=0`` both
+    **enable** decoding; only an empty value leaves it off, and only because the
+    query parser drops blanks before redis-py sees them.
     """
-    query = urllib.parse.parse_qsl(urllib.parse.urlsplit(url).query, keep_blank_values=True)
-    values = [value.strip().lower() for key, value in query if key == 'decode_responses']
-    # redis-py reads the querystring with its own boolean parser, which treats an
-    # empty value and the usual negatives as false and everything else as true
-    return any(value not in {'', '0', 'false', 'no', 'off'} for value in values)
+    try:
+        return bool(parse_url(url).get('decode_responses'))
+    except (AttributeError, TypeError, ValueError):
+        # a URL redis-py cannot read is not this check's finding: W002 covers an
+        # empty one, and anything else fails at the first real connection
+        return False
 
 
 class _SharedConnection:

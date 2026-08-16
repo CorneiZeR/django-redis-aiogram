@@ -278,8 +278,14 @@ def test_the_shared_client_does_not_retry_commands():
         ('redis://localhost:6379/0', False),
         ('redis://localhost:6379/0?decode_responses=true', True),
         ('redis://localhost:6379/0?decode_responses=1', True),
-        ('redis://localhost:6379/0?decode_responses=false', False),
+        # redis-py has no boolean parser for this key, so the raw string reaches
+        # the connection and any non-empty value enables decoding
+        ('redis://localhost:6379/0?decode_responses=false', True),
+        ('redis://localhost:6379/0?decode_responses=0', True),
+        ('redis://localhost:6379/0?decode_responses=no', True),
+        # blank values are dropped by the query parser before redis-py sees them
         ('redis://localhost:6379/0?decode_responses=', False),
+        ('not a url at all', False),
         ('redis://localhost:6379/0?db=2&decode_responses=True', True),
         ('redis://localhost:6379/0?db=2', False),
         ('', False),

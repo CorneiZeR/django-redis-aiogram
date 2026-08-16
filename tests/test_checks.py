@@ -311,3 +311,16 @@ def test_a_decoding_url_without_pickle_is_fine():
 @override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost', 'ALLOW_PICKLE': True})
 def test_a_plain_url_with_pickle_is_fine():
     assert 'django_redis_aiogram.E043' not in ids(check_settings())
+
+
+@override_settings(
+    TELEGRAM_BOT={
+        'TOKEN': '42:x',
+        # reads as off and is not: redis-py has no boolean parser for this key, so
+        # the string 'false' reaches the connection and enables decoding
+        'REDIS_URL': 'redis://localhost:6379/0?decode_responses=false',
+        'ALLOW_PICKLE': True,
+    }
+)
+def test_a_url_that_only_looks_like_it_disables_decoding_is_refused():
+    assert 'django_redis_aiogram.E043' in ids(check_settings())
