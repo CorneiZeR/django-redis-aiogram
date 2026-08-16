@@ -637,12 +637,14 @@ class TelegramBot:
                     raise
                 self._hand_off(coroutine, loop, outbound, on_complete)
                 return
-            except BaseException:
-                # RAISE_EXCEPTION let the failure through. The send is over, and
-                # redelivering it would only fail the same way
-                _settle(on_complete)
-                raise
-            # driven to completion right here, so there is no task to hang a
+            # only a return settles. Cancellation is not completion — the same
+            # rule the task path follows — and a failure RAISE_EXCEPTION let
+            # through is already owned by the consumer's own except branch, so
+            # settling here too would report one message finished twice and
+            # drive the in-flight count below zero, quietly widening the bound
+            # MAX_IN_FLIGHT exists to hold.
+            #
+            # Driven to completion right here, so there is no task to hang a
             # done-callback on — webhook mode takes this path for every send
             _settle(on_complete)
 

@@ -221,11 +221,18 @@ class Delivery(ABC):
         an ``LREM``, which scans that list, so letting a backlog accumulate there
         turns draining it into quadratic work. Zero, the default, is the
         behaviour that shipped before deferred acknowledgement existed.
+
+        The wait keeps writing the heartbeat, for the same reason ``run()`` caps
+        the blocking pop at ``HEARTBEAT_INTERVAL``: a worker at its limit is busy,
+        not dead. Held silently past the key's ``interval * 3`` TTL it would be
+        restarted while healthy, and the messages it was still sending reclaimed
+        and sent again.
         """
         limit = max(0, int(conf['MAX_IN_FLIGHT']))
         if not limit:
             return
         while self._in_flight >= limit and not self._stop.is_set():
+            self.heartbeat()
             try:
                 raw = self._finished.get(timeout=1)
             except queue.Empty:

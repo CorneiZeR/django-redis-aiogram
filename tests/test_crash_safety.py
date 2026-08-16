@@ -5,6 +5,7 @@ removes it afterwards; a new worker reclaims whatever a crashed one left
 behind. On servers without LMOVE it falls back to plain pops.
 """
 
+import asyncio
 import threading
 
 import pytest
@@ -532,3 +533,140 @@ def test_the_real_send_path_is_the_one_that_defers():
     assert defers_completion(TelegramBot().send_raw) is True
     # and the shape every documented recipe uses must not be mistaken for it
     assert defers_completion(lambda function=None, **kwargs: None) is False
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'MAX_IN_FLIGHT': 1, 'HEARTBEAT_INTERVAL': 1})
+def test_the_heartbeat_survives_a_consumer_held_at_the_limit(redis_server):
+    """A worker at its in-flight limit is busy, not dead, and has to say so.
+
+    `run()` caps the blocking pop at HEARTBEAT_INTERVAL for exactly this reason
+    — the comment above it says a read longer than the interval would let the
+    key expire under a consumer that is doing fine. The capacity gate is a wait
+    of the same kind and outlasts the key's `interval * 3` TTL whenever a send
+    is slow, and a healthy worker that stops answering gets restarted while its
+    in-flight messages are reclaimed and sent twice.
+    """
+    beats = []
+    original = type(redis_server).set
+
+    def counting(self, name, *args, **kwargs):
+        if ':heartbeat:' in (name if isinstance(name, str) else name.decode()):
+            beats.append(name)
+        return original(self, name, *args, **kwargs)
+
+    for chat_id in (1, 2):
+        redis_server.rpush(QUEUE, payload(chat_id))
+    delivery = Deferring()
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(type(redis_server), 'set', counting)
+        thread = delivery.start_thread()
+        waiter = threading.Event()
+        for _ in range(300):  # up to three seconds, three heartbeat intervals
+            if len(beats) >= 2:
+                break
+            waiter.wait(0.01)
+        held = len(delivery.handled)
+        delivery.stop()
+        thread.join(timeout=5)
+
+    assert held == 1, f'the gate never engaged: {held} messages taken with a limit of one'
+    assert len(beats) >= 2, 'the heartbeat stopped while the consumer was held at its limit'
+
+
+@override_settings(
+    TELEGRAM_BOT={
+        **SETTINGS,
+        'TOKEN': '42:x',
+        'FSM_STORAGE': 'memory',
+        'RATE_LIMIT': None,
+    }
+)
+def test_a_cancelled_send_is_not_acknowledged_on_the_synchronous_path():
+    """Cancellation is not completion, on both paths that can report one.
+
+    The task path says so explicitly — `_completion` returns early on
+    `task.cancelled()`. The synchronous path that webhook mode takes for every
+    send caught `BaseException`, and `asyncio.CancelledError` is one, so a send
+    that never reached Telegram was reported finished and the consumer dropped
+    it from the in-flight list with nothing left to redeliver.
+    """
+    instance = TelegramBot()
+    finished = []
+
+    class Cancelled:
+        async def send_message(self, **kwargs):
+            raise asyncio.CancelledError
+
+        class session:
+            @staticmethod
+            async def close():
+                pass
+
+    instance._bot = Cancelled()
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            instance.send_raw('send_message', chat_id=1, text='x', on_complete=lambda: finished.append(True))
+    finally:
+        instance._bot = None
+        instance.close()
+
+    assert finished == [], 'a cancelled send was acknowledged'
+
+
+@override_settings(
+    TELEGRAM_BOT={
+        **SETTINGS,
+        'TOKEN': '42:x',
+        'FSM_STORAGE': 'memory',
+        'RAISE_EXCEPTION': True,
+        'MAX_RETRIES': 0,
+        'MAX_IN_FLIGHT': 2,
+        'RATE_LIMIT': None,
+    }
+)
+def test_a_message_is_only_counted_off_once(redis_server):
+    """One message, one decrement, however many ways it reports finishing.
+
+    `send_raw` is the handler here, not a stand-in, because this only goes wrong
+    on the real path: RAISE_EXCEPTION re-raises out of the synchronous drive, and
+    that used to settle the message *and* let the exception through, so
+    `dispatch` acknowledged what it caught and the message left the count twice.
+    Each occurrence drove `_in_flight` a further step below zero, and a bound
+    that has drifted negative admits more concurrent sends than MAX_IN_FLIGHT
+    names — the unbounded in-flight list the setting exists to prevent.
+    """
+    instance = TelegramBot()
+    attempts = []
+
+    class Refusing:
+        async def send_message(self, **kwargs):
+            attempts.append(kwargs)
+            # not RuntimeError: _schedule catches that one first, to spot a loop
+            # that started running under it, so it never reaches the path at issue
+            msg = 'chat not found'
+            raise ValueError(msg)
+
+        class session:
+            @staticmethod
+            async def close():
+                pass
+
+    instance._bot = Refusing()
+    delivery = Recording(handler=instance.send_raw)
+    delivery.handled = attempts
+    redis_server.rpush(QUEUE, payload(1))
+
+    try:
+        drain(delivery, expected_handled=1)
+    finally:
+        instance._bot = None
+        instance.close()
+
+    assert attempts, 'the send never ran'
+    assert delivery._defers is True, 'send_raw stopped taking on_complete, so this proves nothing'
+    # deterministically, rather than hoping the loop's last collect() won the
+    # race: a second report sitting in the queue is the drift, just not yet applied
+    delivery.collect()
+    assert delivery._in_flight == 0, f'the in-flight count drifted to {delivery._in_flight}'
+    assert redis_server.llen(PROCESSING) == 0
