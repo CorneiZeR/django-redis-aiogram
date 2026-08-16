@@ -34,9 +34,12 @@ why the package sets the deadline itself rather than relying on the client.
 redis-cli -n <db> llen TELEGRAM_BOT_MESSAGE
 ```
 
+`TELEGRAM_BOT_MESSAGE` is the default `REDIS_MESSAGES_KEY`; if you set your own,
+it is that key here and in every path below.
+
 A growing list means the consumer is not running — see above. Messages wait
 there until a worker takes them. On Redis 6.2+ a taken message sits in
-`TELEGRAM_BOT_MESSAGE:processing:<worker>` until the send has finished, and a
+`<key>:processing:<worker>` until the send has finished, and a
 restart with the same `WORKER_NAME` reclaims it: at-least-once, so a crash
 mid-send can duplicate a send. That holds for the worker `start_tgbot` runs; a
 handler of your own is only held that way if it takes an `on_complete` keyword.
