@@ -87,7 +87,9 @@ esac
 echo "--- types are visible to a consumer"
 "$work/venv/bin/pip" install -q mypy
 cat > uses_it.py <<'PY'
-from typing import assert_type
+# typing.assert_type is 3.11 and up, and this script runs on whatever python a
+# contributor has. mypy installs typing_extensions itself, so this adds nothing
+from typing_extensions import assert_type
 
 from redis import Redis
 
