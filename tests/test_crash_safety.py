@@ -15,7 +15,7 @@ from redis.exceptions import ResponseError
 
 from django_redis_aiogram import TelegramBot
 from django_redis_aiogram.api import API_METHODS, check_function
-from django_redis_aiogram.delivery import BlpopDelivery
+from django_redis_aiogram.delivery import BlpopDelivery, defers_completion
 from django_redis_aiogram.serializers import JsonSerializer, PickleSerializer
 
 LOGGER = 'django_redis_aiogram'
@@ -519,3 +519,16 @@ def test_a_handler_that_cannot_defer_keeps_the_old_semantics(redis_server):
     assert [item['chat_id'] for item in delivery.handled] == [3]
     assert redis_server.llen(PROCESSING) == 0
     assert redis_server.llen(QUEUE) == 0
+
+
+def test_the_real_send_path_is_the_one_that_defers():
+    """The production wiring, not a double written to look like it.
+
+    `defers_completion` decides by an explicit `on_complete` parameter. Every
+    test above supplies its own handler, so all of them would still pass if
+    `send_raw` lost that parameter — and the consumer would go back to
+    acknowledging before Telegram had seen anything, silently.
+    """
+    assert defers_completion(TelegramBot().send_raw) is True
+    # and the shape every documented recipe uses must not be mistaken for it
+    assert defers_completion(lambda function=None, **kwargs: None) is False
