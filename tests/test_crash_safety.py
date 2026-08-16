@@ -5,8 +5,8 @@ removes it afterwards; a new worker reclaims whatever a crashed one left
 behind. On servers without LMOVE it falls back to plain pops.
 """
 
-from io import StringIO
 import threading
+from io import StringIO
 
 import pytest
 from aiogram import exceptions
