@@ -12,6 +12,37 @@
   installation that configures nothing: 966 ms and 174 MiB before, 7 ms and
   47 MiB after. A non-empty `DEFAULT_BOT_PROPERTIES` is still validated exactly
   as before.
+- **The FSM storage is bounded by `REDIS_TIMEOUT` like everything else.** aiogram
+  builds its own Redis client and was handed no connection settings, so it had no
+  read deadline at all on the declared 6.2 floor, and redis-py 8's own five
+  seconds rather than yours above it. Every update reads FSM state, so a Redis
+  that accepts the connection and then stops answering wedged the whole bot
+  instead of one send. A `?socket_timeout=` on `REDIS_URL` still wins, as it
+  always did — redis-py resolves the URL after keyword arguments.
+- `manage.py tgbot_*` drains by hand no longer fail on a Redis older than 6.2.
+  `consume_pending()` had nothing to probe `LMOVE` support with — the consumer
+  loop learns it from `reclaim()` — so the first pop raised `ResponseError`
+  straight out of a documented helper instead of falling back to plain pops.
+
+### Added
+
+- Check `E043` refuses a `REDIS_URL` that sets `decode_responses` while
+  `ALLOW_PICKLE` is on. Decoding is otherwise supported and stays supported — one
+  URL is often shared with a cache backend — but a pickled payload is not valid
+  text, and redis-py decodes inside its own parser: the consumer raises *after*
+  the server has moved the message to the in-flight list, and every later reclaim
+  trips over the same message for ever. No restart recovers from it, which is why
+  this is an error and not a warning.
+
+### Changed
+
+- Redis commands are documented as deliberately un-retried. `Redis.from_url`
+  builds the pool before the client, so redis-py's client-level retry default
+  never reached the connection and every command already ran with zero retries;
+  that was an accident, and it is now a decision with a test behind it. Neither
+  `RPUSH` nor `BLMOVE` is idempotent, and redis-py retries the whole
+  send-and-read — a connection dropped after the server applied an `RPUSH` would
+  queue the message twice and a real person would receive two of them.
 
 ### Infrastructure
 
