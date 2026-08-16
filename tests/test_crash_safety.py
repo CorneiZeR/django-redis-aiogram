@@ -670,3 +670,66 @@ def test_a_message_is_only_counted_off_once(redis_server):
     delivery.collect()
     assert delivery._in_flight == 0, f'the in-flight count drifted to {delivery._in_flight}'
     assert redis_server.llen(PROCESSING) == 0
+
+
+def test_a_positional_only_callback_is_not_mistaken_for_acceptance():
+    """Taking the name is not the same as taking the keyword.
+
+    The callback is passed as `on_complete=...`, which a positional-only
+    parameter refuses with a TypeError — and that lands in the handler-failed
+    branch, which acknowledges. The message would be dropped without ever having
+    been sent, and the name in the signature is what made it look supported.
+    """
+
+    def positional_only(on_complete, /, **kwargs):
+        pass
+
+    def keyword_only(*, on_complete=None, **kwargs):
+        pass
+
+    assert defers_completion(positional_only) is False
+    assert defers_completion(keyword_only) is True
+    assert defers_completion(lambda on_complete=None, **kwargs: None) is True
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'MAX_IN_FLIGHT': 2})
+def test_a_callback_called_twice_counts_once(redis_server):
+    """A second report is not harmless: it takes another message's place in the
+    in-flight count, and a count that has drifted below zero admits more
+    concurrent sends than MAX_IN_FLIGHT names."""
+
+    class CallingTwice(BlpopDelivery):
+        def __init__(self):
+            self.handled = []
+            super().__init__(handler=self._handle)
+
+        def _handle(self, on_complete=None, **kwargs):
+            self.handled.append(kwargs)
+            on_complete()
+            on_complete()  # a retry wrapper, a done-callback fired twice, a bug
+
+    redis_server.rpush(QUEUE, payload(1))
+    delivery = CallingTwice()
+    drain(delivery, expected_handled=1)
+    delivery.collect()
+
+    assert delivery.handled, 'the handler never ran'
+    assert delivery._in_flight == 0, f'the in-flight count drifted to {delivery._in_flight}'
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'MAX_IN_FLIGHT': 1})
+def test_the_hand_drain_respects_the_in_flight_bound(redis_server):
+    """`consume_pending` is the documented drain that needs no thread, and it
+    schedules the same deferred sends the loop does. Without the bound it hands
+    the whole backlog to the loop at once, which is the unbounded in-flight list
+    MAX_IN_FLIGHT exists to prevent — and every one of them sits in the
+    processing list, where acknowledging is an LREM that scans it.
+    """
+    for chat_id in (1, 2, 3):
+        redis_server.rpush(QUEUE, payload(chat_id))
+    delivery = Deferring()
+
+    delivery.consume_pending()
+
+    assert len(delivery.handled) == 1, f'took {len(delivery.handled)} messages with a limit of one'
+    assert redis_server.llen(QUEUE) == 2

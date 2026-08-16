@@ -30,7 +30,6 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from functools import partial
 from typing import Any
 
 from redis.exceptions import ResponseError
@@ -56,12 +55,19 @@ def defers_completion(handler: Handler) -> bool:
     so does ``TelegramBot.send_raw`` — so treating that as acceptance would hand
     the callback to handlers that never call it, and their messages would sit in
     the in-flight list until a restart reclaimed them.
+
+    It also has to be a parameter the keyword call can reach. A positional-only
+    ``on_complete`` reads as acceptance but refuses ``on_complete=...`` with a
+    ``TypeError``, and that lands in the handler-failed branch — acknowledging a
+    message nothing ever sent.
     """
+    takes_keyword = (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
     try:
-        return 'on_complete' in inspect.signature(handler).parameters
+        parameter = inspect.signature(handler).parameters.get('on_complete')
     except (TypeError, ValueError):
         # a callable signature cannot always be read; the old semantics are safe
         return False
+    return parameter is not None and parameter.kind in takes_keyword
 
 
 class Delivery(ABC):
@@ -214,6 +220,27 @@ class Delivery(ABC):
             self._in_flight -= 1
             self.acknowledge(raw)
 
+    def _completion_for(self, handle: bytes | str) -> Callable[[], None]:
+        """One report per message, however many times the send says it finished.
+
+        A latch rather than a flag: two threads can both read an unset flag and
+        both report. A second report is not harmless — it takes another message's
+        place in the in-flight count, drives it below zero and quietly widens the
+        bound ``MAX_IN_FLIGHT`` exists to hold.
+        """
+        latch = threading.Lock()
+
+        def once() -> None:
+            if latch.acquire(blocking=False):
+                self._finished.put(handle)
+
+        return once
+
+    def at_capacity(self) -> bool:
+        """Whether this consumer is already holding as many sends as it may."""
+        limit = max(0, int(conf['MAX_IN_FLIGHT']))
+        return bool(limit) and self._in_flight >= limit
+
     def hold_for_capacity(self) -> None:
         """Stop taking messages while too many are still in flight.
 
@@ -228,10 +255,7 @@ class Delivery(ABC):
         restarted while healthy, and the messages it was still sending reclaimed
         and sent again.
         """
-        limit = max(0, int(conf['MAX_IN_FLIGHT']))
-        if not limit:
-            return
-        while self._in_flight >= limit and not self._stop.is_set():
+        while self.at_capacity() and not self._stop.is_set():
             self.heartbeat()
             try:
                 raw = self._finished.get(timeout=1)
@@ -336,7 +360,7 @@ class Delivery(ABC):
         if self._defers:
             self._in_flight += 1
             try:
-                self.handler(on_complete=partial(self._finished.put, handle), **call)
+                self.handler(on_complete=self._completion_for(handle), **call)
             except Exception:
                 self._in_flight -= 1
                 logger.exception(
@@ -401,6 +425,11 @@ class Delivery(ABC):
         connection = get_redis()
         raw: bytes | str | None
         while not self._stop.is_set():
+            self.collect()
+            if self.at_capacity():
+                # the blocking loop waits here; a drain has no thread to wait on,
+                # so it stops instead of scheduling past the bound
+                return
             if self._reliable:
                 try:
                     raw = connection.lmove(self.queue_key, self.processing_key, 'LEFT', 'RIGHT')

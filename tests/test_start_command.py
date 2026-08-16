@@ -17,6 +17,8 @@ from django_redis_aiogram.management.commands.start_tgbot import Command
 class RecordingDelivery:
     # the two the command asks about before it starts anything
     crash_safe = True
+    # named in the log line when a crash-safety probe could not reach Redis
+    queue_key = 'TELEGRAM_BOT_MESSAGE'
 
     def __init__(self, events):
         self.events = events
@@ -326,10 +328,12 @@ def test_a_server_without_lmove_is_refused_when_crash_safety_is_required(monkeyp
         'REQUIRE_CRASH_SAFE': True,
     }
 )
-def test_an_unreachable_redis_does_not_read_as_an_old_server(monkeypatch):
+def test_an_unreachable_redis_does_not_read_as_an_old_server(monkeypatch, caplog):
     """`reclaim()` returns False when it could not talk to Redis at all, with
     crash safety still intact. Refusing to start over that turns a blip into an
     outage."""
+
+    events = []
 
     class Unreachable(RecordingDelivery):
         def reclaim(self):
@@ -337,9 +341,22 @@ def test_an_unreachable_redis_does_not_read_as_an_old_server(monkeypatch):
 
     monkeypatch.setattr(
         'django_redis_aiogram.management.commands.start_tgbot.get_delivery',
-        lambda handler: Unreachable([]),
+        lambda handler: Unreachable(events),
     )
-    monkeypatch.setattr(bot, 'start_polling', lambda: bot.loop.run_until_complete(asyncio.sleep(0)))
+
+    def polled():
+        events.append('polling-started')
+        bot.loop.run_until_complete(asyncio.sleep(0))
+
+    monkeypatch.setattr(bot, 'start_polling', polled)
     monkeypatch.setattr(bot, 'close', lambda: None)
 
-    call_command('start_tgbot')
+    with caplog.at_level('WARNING', logger='django_redis_aiogram'):
+        call_command('start_tgbot')
+
+    # not merely "it did not raise": a command that returned early over the failed
+    # probe would satisfy that while starting neither the consumer nor polling
+    assert 'consumer-started' in events, events
+    assert 'polling-started' in events, events
+    # and the operator is told the guarantee went unproven rather than passed
+    assert 'could not verify crash-safe delivery' in caplog.text
