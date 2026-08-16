@@ -98,24 +98,20 @@ class Command(BaseCommand):
         self._require_crash_safety(delivery)
         threads: list[threading.Thread] = []
 
-        if mode == UpdateMode.WEBHOOK:
-            # nothing will run the loop here, so the callback below would never
-            # fire. The consumer drives the loop itself for each send instead,
-            # under the same lock a web thread uses.
-            threads.append(delivery.start_thread())
-        else:
-            # Starting the consumer before the loop runs would let a backlog reach
-            # send_raw while loop.is_running() is still False, so the coroutine
-            # would be driven from the consumer thread. Deferring the start until
-            # the loop picks up this callback keeps the loop single-threaded.
-            bot.loop.call_soon(lambda: threads.append(delivery.start_thread()))
+        # Both modes: starting the consumer before the loop runs would let a
+        # backlog reach send_raw while loop.is_running() is still False, so the
+        # coroutine would be driven from the consumer thread. Deferring the start
+        # until the loop picks up this callback keeps the loop single-threaded.
+        # Webhook mode used to start it directly because nothing ran the loop
+        # there — something does now, which is what this change is about.
+        bot.loop.call_soon(lambda: threads.append(delivery.start_thread()))
         previous = self._install_sigterm_handler()
 
         try:
             with contextlib.suppress(KeyboardInterrupt, SystemExit):
                 if mode == UpdateMode.WEBHOOK:
                     self.stdout.write('Consuming the queue; updates are expected over HTTP.')
-                    (self.idle_event or threading.Event()).wait()
+                    self._idle_on_the_loop()
                 else:
                     bot.start_polling()
         finally:
@@ -145,6 +141,27 @@ class Command(BaseCommand):
                 # installed would turn a later SIGTERM into a stray interrupt
                 with contextlib.suppress(ValueError):
                     signal.signal(signal.SIGTERM, previous)
+
+    def _idle_on_the_loop(self) -> None:
+        """Wait on the bot's loop rather than on an Event.
+
+        In webhook mode this process consumes the queue and nothing drove the
+        loop, so every send the consumer scheduled sat there until something else
+        happened to run it — the next update, or `close()`. `run_forever` is what
+        makes a scheduled send run when it is scheduled, and it unwinds on
+        SIGTERM exactly as `start_polling` does, so the teardown below is
+        unchanged.
+        """
+        stop = self.idle_event or threading.Event()
+        loop = bot.loop
+
+        def wait_then_stop() -> None:
+            stop.wait()
+            with contextlib.suppress(RuntimeError):
+                loop.call_soon_threadsafe(loop.stop)
+
+        threading.Thread(target=wait_then_stop, name='tgbot-idle', daemon=True).start()
+        loop.run_forever()
 
     @staticmethod
     def _require_crash_safety(delivery: Delivery) -> None:
