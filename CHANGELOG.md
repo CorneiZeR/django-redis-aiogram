@@ -23,7 +23,6 @@
   `consume_pending()` had nothing to probe `LMOVE` support with — the consumer
   loop learns it from `reclaim()` — so the first pop raised `ResponseError`
   straight out of a documented helper instead of falling back to plain pops.
-
 - **A send handed to the loop just before shutdown is no longer destroyed.** A
   hand-off is a `call_soon_threadsafe` callback until the loop steps, and a
   callback is not a task — so the drain could not see it, and `close()` had
@@ -38,6 +37,33 @@
   one message per shutdown. It is now `REDIS_TIMEOUT + 1`, and a thread still
   alive after it says so in the log instead of leaving silence that reads as a
   clean stop.
+- **Recording an event no longer rolls back the transaction it was recorded in.**
+  The writer discarded stale connections before every batch, and inside an
+  `atomic()` block Django closes the connection on the first check — which sets
+  `needs_rollback`. Under `EVENT_LOG_SYNC`, with `ATOMIC_REQUESTS` or a plain
+  `atomic()`, that destroyed the caller's own writes on PostgreSQL and MySQL.
+  The suite could not see it: sqlite `:memory:` refuses to close at all. Stale
+  connections are still discarded, just never while a transaction is open — and
+  only the log's own alias, never every connection in the process. With
+  `EVENT_LOG_DATABASE` pointing somewhere of its own, the sweep reached past the
+  log's connection, which is not in a transaction, to the caller's `default` one,
+  which is.
+- **A database that refuses everything is now reported as a failure.** The
+  bisecting write caught `DatabaseError` at every rung and returned normally, so
+  the writer counted a total refusal as a written batch: the suspension after
+  repeated failures was unreachable, no `log.dropped` row was ever written, and
+  a forgotten `migrate` meant a full batch of statements and tracebacks once per
+  flush interval, for ever.
+- **Events are no longer lost when the writer thread dies or when `stop()`
+  races a `record()`.** Both left a queue nobody would ever drain again, and its
+  contents disappeared with no row, no counter and no gap marker. Both now drain
+  it: what can be written is written, and what cannot is counted, so the next
+  successful flush records the gap.
+- The writer reads its own batch size, buffer size and flush interval with a
+  fallback to their defaults. They are read on the writer thread, in a loop,
+  outside the net that contains a failed flush — so a value that could not be
+  parsed ended the writer and took the whole buffer with it. Checks `E036`–`E038`
+  still report it at boot.
 
 ### Added
 
@@ -68,34 +94,6 @@
   `RPUSH` nor `BLMOVE` is idempotent, and redis-py retries the whole
   send-and-read — a connection dropped after the server applied an `RPUSH` would
   queue the message twice and a real person would receive two of them.
-
-- **Recording an event no longer rolls back the transaction it was recorded in.**
-  The writer discarded stale connections before every batch, and inside an
-  `atomic()` block Django closes the connection on the first check — which sets
-  `needs_rollback`. Under `EVENT_LOG_SYNC`, with `ATOMIC_REQUESTS` or a plain
-  `atomic()`, that destroyed the caller's own writes on PostgreSQL and MySQL.
-  The suite could not see it: sqlite `:memory:` refuses to close at all. Stale
-  connections are still discarded, just never while a transaction is open — and
-  only the log's own alias, never every connection in the process. With
-  `EVENT_LOG_DATABASE` pointing somewhere of its own, the sweep reached past the
-  log's connection, which is not in a transaction, to the caller's `default` one,
-  which is.
-- **A database that refuses everything is now reported as a failure.** The
-  bisecting write caught `DatabaseError` at every rung and returned normally, so
-  the writer counted a total refusal as a written batch: the suspension after
-  repeated failures was unreachable, no `log.dropped` row was ever written, and
-  a forgotten `migrate` meant a full batch of statements and tracebacks once per
-  flush interval, for ever.
-- **Events are no longer lost when the writer thread dies or when `stop()`
-  races a `record()`.** Both left a queue nobody would ever drain again, and its
-  contents disappeared with no row, no counter and no gap marker. Both now drain
-  it: what can be written is written, and what cannot is counted, so the next
-  successful flush records the gap.
-- The writer reads its own batch size, buffer size and flush interval with a
-  fallback to their defaults. They are read on the writer thread, in a loop,
-  outside the net that contains a failed flush — so a value that could not be
-  parsed ended the writer and took the whole buffer with it. Checks `E036`–`E038`
-  still report it at boot.
 
 ### Infrastructure
 
