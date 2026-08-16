@@ -11,6 +11,19 @@ them, so it is not one per message.
 
 ### Fixed
 
+- **Updates in one web process are handled concurrently.** A process serving the
+  webhook drove nothing, so every `feed_update` took `run_until_complete` *under
+  the loop lock* and updates handled strictly one at a time. Measured on four
+  concurrent updates with a 200 ms handler: 0.81 s serialized against 0.21 s with
+  the loop running. It also means a send scheduled from inside a handler now runs
+  when it is scheduled — before, nothing stepped it until the next update
+  arrived, or `close()`, or never.
+- In webhook mode `start_tgbot` runs the loop instead of blocking on an event, so
+  a send the consumer schedules runs when it is scheduled rather than waiting for
+  whatever happens next. Both modes now start the consumer from the loop, which
+  is what keeps a backlog from reaching `send_raw` while the loop is not running
+  yet.
+
 - **The consumer acknowledged a message before Telegram had seen it.** In polling
   mode `send_raw` returns as soon as the coroutine is scheduled, and the consumer
   treated that as delivery: the message left the in-flight list at pop speed while

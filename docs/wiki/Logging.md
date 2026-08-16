@@ -40,6 +40,7 @@ All prefixed with `tg_`, to avoid colliding with `LogRecord` attributes.
 | `tg_crash_safe` | whether the consumer holds messages in flight; false on a Redis without `LMOVE` |
 | `tg_mode` | `polling` or `webhook` |
 | `tg_update` | the update id being handled |
+| `tg_correlation_id` | the id every event about one message carries |
 | `tg_router` | a router module autodiscovery imported |
 | `tg_pending` | in-flight sends at shutdown |
 | `tg_drain_timeout` | how long shutdown gave them |
