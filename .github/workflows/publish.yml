@@ -55,6 +55,11 @@ jobs:
 
   publish:
     needs: build
+    # a release, and nothing else. workflow_dispatch has no tag, so the check
+    # above cannot run and a manual run would upload whatever __version__ says —
+    # to an index where a version can never be replaced. Dispatch stays useful:
+    # it builds and checks, it just does not publish
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     environment:
       name: pypi

@@ -6,7 +6,7 @@
 # stays the floor consumers build against; this only pins what CI installs.
 #
 # Regenerate before a release:
-#     printf 'hatchling>=1.27\n' | uv pip compile - --generate-hashes \
+#     printf 'hatchling>=1.27\n' | uv pip compile - --upgrade --generate-hashes \
 #         --universal --python-version 3.13 -o .github/release-constraints.txt
 #
 hatchling==1.32.0 \
