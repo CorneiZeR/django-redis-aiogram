@@ -49,6 +49,26 @@ logger = logging.getLogger('django_redis_aiogram')
 Handler = Callable[..., Any]
 
 
+def queue_key() -> str:
+    """Return the list queued messages are written to and read from."""
+    return str(conf['REDIS_MESSAGES_KEY'])
+
+
+def processing_key(worker: str | None = None) -> str:
+    """Where one worker keeps the message it is sending.
+
+    Per worker, so a restarting one reclaims only its own: a shared list would let
+    a starting worker pull a message out from under another that is still sending
+    it. Takes a name so `tgbot_reclaim` can address a worker that is gone.
+    """
+    return f'{queue_key()}:processing:{worker or worker_identity()}'
+
+
+def heartbeat_key(worker: str | None = None) -> str:
+    """Where one worker says it is still turning. Per worker, like the list above."""
+    return f'{queue_key()}:heartbeat:{worker or worker_identity()}'
+
+
 def defers_completion(handler: Handler) -> bool:
     """Whether ``handler`` will take the callback that says a send has finished.
 
@@ -95,7 +115,7 @@ class Delivery(ABC):
     @property
     def queue_key(self) -> str:
         """The list queued messages are written to and read from."""
-        return str(conf['REDIS_MESSAGES_KEY'])
+        return queue_key()
 
     @property
     def processing_key(self) -> str:
@@ -104,7 +124,7 @@ class Delivery(ABC):
         A shared list would let a starting worker pull a message back out from
         under another worker that is still sending it.
         """
-        return f'{self.queue_key}:processing:{worker_identity()}'
+        return processing_key()
 
     @abstractmethod
     def run(self) -> None:
@@ -180,7 +200,7 @@ class Delivery(ABC):
     @property
     def heartbeat_key(self) -> str:
         """Per worker, like the in-flight list: each one answers for itself."""
-        return f'{self.queue_key}:heartbeat:{worker_identity()}'
+        return heartbeat_key()
 
     def heartbeat(self) -> None:
         """Say the loop is still turning, at most once per HEARTBEAT_INTERVAL.

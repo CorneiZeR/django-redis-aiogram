@@ -10,6 +10,9 @@ whatever came after it.
 """
 
 import math
+import os
+import re
+import socket
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, fields
 from functools import partial
@@ -39,6 +42,8 @@ SERIALIZER_CHOICES = choices(SerializerKind)
 PAYLOAD_CHOICES = choices(PayloadDetail)
 
 _STORAGE_CHOICES = choices(StorageKind)
+#: what Docker generates when a container is started without `hostname:`
+_EPHEMERAL_HOSTNAME = re.compile(r'[0-9a-f]{12}')
 _ID_PREFIX = 'django_redis_aiogram'
 
 
@@ -256,6 +261,38 @@ def _a_url_pickle_can_survive(key: str) -> list[Problem]:
             hint=(
                 'Drop decode_responses from the URL, or turn ALLOW_PICKLE off and use the '
                 "'json' serializer. Give the cache its own URL if it needs decoding."
+            ),
+        )
+    ]
+
+
+def _a_worker_that_keeps_its_name(key: str) -> list[Problem]:
+    """Warn when the name a worker's in-flight list is keyed on cannot survive a restart.
+
+    Crash safety rests on a restarted worker recognising its own list. With
+    ``WORKER_NAME`` unset the name is the hostname — which is fine on a host, and
+    is not fine in a container started without ``hostname:``, where Docker invents
+    a fresh twelve-character hex name every time. Every restart then strands
+    whatever the last one was sending, somewhere nothing will look again.
+
+    Narrow on purpose. An unset ``WORKER_NAME`` is the documented default and
+    correct almost everywhere, so warning about it as such would fire on every
+    untouched installation and teach people to stop reading warnings. This fires
+    only on the shape that is actually broken.
+    """
+    if str(conf.get(key) or '').strip():
+        return []
+    hostname = os.environ.get('HOSTNAME') or socket.gethostname()
+    if not _EPHEMERAL_HOSTNAME.fullmatch(hostname):
+        return []
+    return [
+        Problem(
+            f"is empty and this container's hostname ({hostname}) is one Docker generated, so it "
+            'changes on every restart. The in-flight list is keyed on that name, so a worker killed '
+            'mid-send would never find its own message again.',
+            hint=(
+                'Set WORKER_NAME, or give the container a fixed `hostname:`. '
+                '`manage.py tgbot_reclaim --worker <name>` is the way back from a list already stranded.'
             ),
         )
     ]
@@ -576,6 +613,7 @@ CHECKS: tuple[Check, ...] = (
     Check('E044', 'DRAIN_TIMEOUT', partial(_a_number, minimum=0)),
     Check('E045', 'MAX_IN_FLIGHT', partial(_an_integer, minimum=0)),
     Check('E046', 'REQUIRE_CRASH_SAFE', _a_boolean),
+    Check('W010', 'WORKER_NAME', _a_worker_that_keeps_its_name),
     Check('W005', 'EVENT_LOG', _somewhere_to_write_the_log),
     Check('W006', 'EVENT_LOG_RETENTION_DAYS', _a_log_that_is_pruned),
     Check('W007', 'EVENT_LOG_BATCH_SIZE', _a_batch_the_buffer_can_hold),

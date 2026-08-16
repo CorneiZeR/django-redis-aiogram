@@ -1,0 +1,93 @@
+"""Put a dead worker's in-flight messages back on the queue.
+
+A message being sent lives in ``<queue>:processing:<worker>`` until the send
+finishes, and the worker that put it there reclaims it on its next start. That
+only works while the name is stable — a container with no ``hostname:`` and no
+``WORKER_NAME`` gets a fresh one every time, and its messages are stranded where
+nothing will ever look for them again.
+
+This is the way out, and it is deliberately manual: naming the dead worker is a
+human saying it is dead. Nothing here probes for liveness, because a worker that
+is merely slow looks exactly like one that is gone, and taking a message back
+from a live sender is how you send it twice.
+"""
+
+import logging
+from argparse import ArgumentParser
+from typing import Any
+
+from django.core.management import BaseCommand, CommandError
+
+from django_redis_aiogram.delivery import processing_key, queue_key
+from django_redis_aiogram.events import worker_identity
+from django_redis_aiogram.redis import get_redis
+
+logger = logging.getLogger('django_redis_aiogram')
+
+
+class Command(BaseCommand):
+    """Move one worker's in-flight messages back to the queue."""
+
+    help = 'Requeue the messages a dead worker left in flight'
+
+    def add_arguments(self, parser: ArgumentParser) -> None:
+        """Declare the worker to reclaim from, and the safety valves."""
+        parser.add_argument(
+            '--worker',
+            required=True,
+            help='the WORKER_NAME (or hostname) whose in-flight list to drain. Naming it is you '
+            'saying that worker is gone: reclaiming from a live one sends its message twice.',
+        )
+        parser.add_argument(
+            '--limit',
+            type=int,
+            default=0,
+            help='stop after this many messages, so one run has a bounded blast radius. 0 means no limit',
+        )
+        parser.add_argument('--dry-run', action='store_true', help='report what is there, and move nothing')
+
+    def handle(self, *args: Any, **options: Any) -> None:
+        """Walk the named worker's in-flight list back onto the queue."""
+        worker = str(options['worker']).strip()
+        if not worker:
+            msg = '--worker cannot be empty.'
+            raise CommandError(msg)
+        if worker == worker_identity():
+            # this process would be reclaiming from whatever is running here now,
+            # which on a bot container is the consumer that is mid-send
+            msg = (
+                f"{worker!r} is this process's own worker name. A running consumer reclaims its own "
+                'messages when it starts; taking them from underneath it sends them twice.'
+            )
+            raise CommandError(msg)
+
+        source, destination = processing_key(worker), queue_key()
+        connection = get_redis()
+        try:
+            waiting = int(connection.llen(source) or 0)
+        except Exception as error:
+            msg = f'could not read {source}: {error}'
+            raise CommandError(msg) from error
+
+        if not waiting:
+            self.stdout.write(f'Nothing in flight for {worker!r}.')
+            return
+        if options['dry_run']:
+            self.stdout.write(f'{waiting} message(s) in flight for {worker!r}; would requeue them.')
+            return
+
+        limit = max(0, int(options['limit']))
+        moved = 0
+        while not limit or moved < limit:
+            try:
+                # RIGHT->LEFT, like reclaim(): it puts them back at the front of
+                # the queue in the order they were taken
+                if not connection.lmove(source, destination, 'RIGHT', 'LEFT'):
+                    break
+            except Exception as error:
+                msg = f'moved {moved} message(s), then failed: {error}'
+                raise CommandError(msg) from error
+            moved += 1
+
+        logger.info('reclaimed a dead worker', extra={'tg_key': source, 'tg_count': moved})
+        self.stdout.write(self.style.SUCCESS(f'Requeued {moved} message(s) from {worker!r}.'))

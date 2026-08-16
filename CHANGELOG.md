@@ -86,6 +86,22 @@ them, so it is not one per message.
 
 ### Added
 
+- **`manage.py tgbot_reclaim --worker <name>`** puts a dead worker's in-flight
+  messages back on the queue. Crash safety rests on a restarted worker
+  recognising its own list, and a container started without `hostname:` gets a
+  fresh name from Docker every time — so every restart stranded whatever the last
+  one was sending, where nothing would look again. The command is deliberately
+  manual: naming a worker is a human saying it is gone, and one that is merely
+  slow looks exactly like one that is dead.
+- Check `W010` reports the case it can detect: `WORKER_NAME` empty while the
+  hostname is one Docker generated. Narrow on purpose — an unset `WORKER_NAME` is
+  the documented default and correct almost everywhere, so warning about it as
+  such would fire on every untouched installation and teach people to stop
+  reading warnings.
+- `manage.py tgbot_healthcheck` says which guarantee is in force, and how many
+  messages sit in flight under other worker names, so a stranded pile stops being
+  invisible. It reports rather than acts: one of those may be a message another
+  worker is sending this second.
 - `MAX_IN_FLIGHT` bounds how many sends the consumer will leave outstanding
   before it stops taking messages, with `0` — the default — meaning no bound.
   Worth setting on a worker that sees large backlogs: acknowledging is an `LREM`,

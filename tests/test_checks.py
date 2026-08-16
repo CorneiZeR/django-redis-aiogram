@@ -5,12 +5,25 @@ was only ever set inside an `isinstance` branch that a wrong type never entered.
 import pathlib
 import re
 
+import pytest
 from django.core.checks import Error
 from django.core.checks import Warning as CheckWarning
 from django.test import override_settings
 
 from django_redis_aiogram.checks import CHECKS, check_settings
 from django_redis_aiogram.defaults import DEFAULTS
+
+
+@pytest.fixture(autouse=True)
+def _stable_hostname(monkeypatch):
+    """Pin the hostname, because W010 reads it.
+
+    Without this the whole module's results depend on where it runs: a container
+    started without `hostname:` gets a twelve-character hex name, which is exactly
+    what W010 exists to report, so `test_the_defaults_report_nothing` would pass
+    on a laptop and fail in Docker. The tests that are *about* W010 patch it back.
+    """
+    monkeypatch.setenv('HOSTNAME', 'bot-worker-1')
 
 
 def ids(messages):
@@ -347,3 +360,32 @@ def test_a_drain_timeout_that_is_not_a_number_is_reported():
 @override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost', 'DRAIN_TIMEOUT': 2.5})
 def test_a_fractional_drain_timeout_is_fine():
     assert 'django_redis_aiogram.E044' not in ids(check_settings())
+
+
+@override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost'})
+def test_a_container_that_forgot_its_hostname_is_warned_about(monkeypatch):
+    """The in-flight list is keyed on the worker's name.
+
+    Docker invents a twelve-character hex hostname when a container is started
+    without `hostname:`, so every restart strands whatever the last one was
+    sending, somewhere nothing will look for it again.
+    """
+    monkeypatch.setenv('HOSTNAME', 'ba333cb79e00')
+
+    assert 'django_redis_aiogram.W010' in ids(check_settings())
+
+
+@override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost'})
+def test_a_fixed_hostname_is_not_warned_about(monkeypatch):
+    """An unset WORKER_NAME is the documented default and correct almost
+    everywhere; warning about it as such would fire on every install."""
+    monkeypatch.setenv('HOSTNAME', 'bot-worker-1')
+
+    assert 'django_redis_aiogram.W010' not in ids(check_settings())
+
+
+@override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost', 'WORKER_NAME': 'bot-1'})
+def test_a_named_worker_is_not_warned_about(monkeypatch):
+    monkeypatch.setenv('HOSTNAME', 'ba333cb79e00')
+
+    assert 'django_redis_aiogram.W010' not in ids(check_settings())

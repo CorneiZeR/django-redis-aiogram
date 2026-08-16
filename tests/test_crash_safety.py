@@ -5,11 +5,13 @@ removes it afterwards; a new worker reclaims whatever a crashed one left
 behind. On servers without LMOVE it falls back to plain pops.
 """
 
+from io import StringIO
 import threading
 
 import pytest
 from aiogram import exceptions
 from aiogram.methods import SendMessage
+from django.core.management import CommandError, call_command
 from django.test import override_settings
 from redis.exceptions import ResponseError
 
@@ -532,3 +534,43 @@ def test_the_real_send_path_is_the_one_that_defers():
     assert defers_completion(TelegramBot().send_raw) is True
     # and the shape every documented recipe uses must not be mistaken for it
     assert defers_completion(lambda function=None, **kwargs: None) is False
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'WORKER_NAME': 'gone'})
+def test_reclaim_requeues_a_dead_workers_messages(redis_server):
+    """A container with no fixed name gets a fresh one every restart, so its
+    in-flight list is stranded where nothing will look for it again. This is the
+    way back, and it is manual because only a human knows the worker is dead."""
+    redis_server.rpush(f'{QUEUE}:processing:gone', payload(1), payload(2))
+    out = StringIO()
+
+    with override_settings(TELEGRAM_BOT={**SETTINGS, 'WORKER_NAME': 'alive'}):
+        call_command('tgbot_reclaim', worker='gone', stdout=out)
+
+    assert redis_server.llen(f'{QUEUE}:processing:gone') == 0
+    assert redis_server.llen(QUEUE) == 2
+    assert 'Requeued 2' in out.getvalue()
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'WORKER_NAME': 'alive'})
+def test_reclaim_refuses_this_processs_own_worker(redis_server):
+    """A running consumer reclaims its own list when it starts. Taking messages
+    from underneath one that is mid-send is how you deliver them twice."""
+    redis_server.rpush(f'{QUEUE}:processing:alive', payload(1))
+
+    with pytest.raises(CommandError, match='own worker name'):
+        call_command('tgbot_reclaim', worker='alive')
+
+    assert redis_server.llen(f'{QUEUE}:processing:alive') == 1
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'WORKER_NAME': 'alive'})
+def test_reclaim_dry_run_moves_nothing(redis_server):
+    redis_server.rpush(f'{QUEUE}:processing:gone', payload(1))
+    out = StringIO()
+
+    call_command('tgbot_reclaim', worker='gone', dry_run=True, stdout=out)
+
+    assert redis_server.llen(f'{QUEUE}:processing:gone') == 1
+    assert redis_server.llen(QUEUE) == 0
+    assert 'would requeue' in out.getvalue()

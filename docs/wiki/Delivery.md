@@ -70,11 +70,25 @@ and the send loses that one message.
 
 The in-flight list is **per worker**: `<REDIS_MESSAGES_KEY>:processing:<name>`,
 where `<name>` is `WORKER_NAME` when it is set and the hostname (`HOSTNAME`, or
-what the host reports) otherwise. A restarted container keeps its name, which is
-what lets it reclaim its own interrupted messages and never pull one out from
-under a worker that is still sending it. If several workers share a host, give
-each its own `WORKER_NAME` — otherwise they share a list and can duplicate each
-other's sends.
+what the host reports) otherwise.
+
+**The name has to survive a restart.** That is what lets a worker reclaim its own
+interrupted messages, and never pull one out from under a worker that is still
+sending it. A container started without `hostname:` does *not* keep its name —
+Docker invents a fresh twelve-character one every time — so every restart strands
+whatever the last one was sending, in a list nothing will look at again. Set
+`WORKER_NAME`, or give the container a fixed `hostname:`; check `W010` reports
+the case it can detect.
+
+If several workers share a host, give each its own `WORKER_NAME` — otherwise they
+share a list and can duplicate each other's sends.
+
+`manage.py tgbot_reclaim --worker <name>` is the way back from a list that is
+already stranded. It is deliberately manual: naming a worker is a human saying it
+is gone, and nothing here probes for liveness, because a worker that is merely
+slow looks exactly like one that is dead and taking its message back sends it
+twice. `manage.py tgbot_healthcheck` reports how many messages sit under other
+worker names, so a stranded pile stops being invisible.
 
 Handler errors are not crashes: a message whose send *failed* is acknowledged
 and logged, not redelivered forever.

@@ -5,16 +5,21 @@ thread can be dead while polling continues, or Redis can be unreachable, and the
 container stays "healthy" either way.
 """
 
+import logging
 import time
 from argparse import ArgumentParser
 from typing import Any
 
 from django.core.management import BaseCommand, CommandError
+from redis import Redis
+from redis.exceptions import RedisError
 
 from django_redis_aiogram import bot
-from django_redis_aiogram.delivery import get_delivery
+from django_redis_aiogram.delivery import Delivery, get_delivery
 from django_redis_aiogram.redis import get_redis
 from django_redis_aiogram.settings import conf
+
+logger = logging.getLogger('django_redis_aiogram')
 
 
 class Command(BaseCommand):
@@ -97,4 +102,37 @@ class Command(BaseCommand):
             msg = f'{queued} messages are queued, over the limit of {max_queue}'
             raise CommandError(msg)
 
-        self.stdout.write(self.style.SUCCESS(f'healthy: heartbeat {age}s old, {queued} queued'))
+        stranded = self._stranded(connection, delivery)
+        guarantee = 'at-least-once' if delivery.crash_safe else 'at-most-once'
+        self.stdout.write(self.style.SUCCESS(f'healthy: heartbeat {age}s old, {queued} queued, {guarantee}'))
+        if stranded:
+            # not a failure: another worker may be sending them right now. But an
+            # invisible pile is how a stranded list stays stranded
+            self.stdout.write(
+                self.style.WARNING(
+                    f'{stranded} message(s) are in flight under other worker names. '
+                    'If one of those workers is gone, `manage.py tgbot_reclaim --worker <name>` requeues them.'
+                )
+            )
+
+    @staticmethod
+    def _stranded(connection: Redis, delivery: Delivery) -> int:
+        """Count what is in flight under a worker name that is not this one.
+
+        Read rather than acted on: a message under another name may be one another
+        worker is sending this second, and taking it back would send it twice.
+        """
+        pattern = f'{delivery.queue_key}:processing:*'
+        mine = delivery.processing_key
+        total = 0
+        try:
+            for key in connection.scan_iter(match=pattern, count=100):
+                name = key.decode() if isinstance(key, bytes) else key
+                if name != mine:
+                    total += int(connection.llen(name) or 0)
+        except RedisError:
+            # the probe answers about this worker; a scan it could not finish is
+            # not a reason to call a healthy container unhealthy
+            logger.warning('could not scan for stranded in-flight lists', extra={'tg_key': pattern})
+            return 0
+        return total

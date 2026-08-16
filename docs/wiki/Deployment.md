@@ -19,6 +19,9 @@ services:
     image: ${IMAGE}
     command: python manage.py start_tgbot
     restart: always
+    # not decoration: the in-flight list is keyed on this name, and without it
+    # Docker invents a new one on every restart — see Delivery
+    hostname: telegram-bot-1
     env_file: .env
     environment:
       DJANGO_REDIS_AIOGRAM_ENABLED: 1
