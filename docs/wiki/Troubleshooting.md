@@ -36,9 +36,10 @@ redis-cli -n <db> llen TELEGRAM_BOT_MESSAGE
 
 A growing list means the consumer is not running — see above. Messages wait
 there until a worker takes them. On Redis 6.2+ a taken message sits in
-`TELEGRAM_BOT_MESSAGE:processing:<worker>` until the send returns, and a
+`TELEGRAM_BOT_MESSAGE:processing:<worker>` until the send has finished, and a
 restart with the same `WORKER_NAME` reclaims it: at-least-once, so a crash
-mid-send can duplicate a send. Without `LMOVE` it is at-most-once. A send that
+mid-send can duplicate a send. That list is expected to be non-empty while sends
+are in flight; `MAX_IN_FLIGHT` bounds how long it gets. Without `LMOVE` it is at-most-once. A send that
 exhausted `MAX_RETRIES` is logged and acknowledged, not redelivered.
 
 ## Handlers never fire

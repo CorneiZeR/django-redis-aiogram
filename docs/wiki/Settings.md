@@ -80,6 +80,8 @@ which carries outbound messages in both modes — see **[[Webhook]]**.
 | `WORKER_NAME` | hostname | Names this worker's in-flight list — see **[[Delivery]]** |
 | `BLPOP_TIMEOUT` | `5` | How often the consumer checks for shutdown; capped just below `REDIS_TIMEOUT` |
 | `DRAIN_TIMEOUT` | `5` | Seconds `close()` gives in-flight sends to finish before cancelling them |
+| `MAX_IN_FLIGHT` | `0` | Sends the consumer leaves in flight before it stops taking messages; `0` is no bound |
+| `REQUIRE_CRASH_SAFE` | `False` | Refuse to start where a message cannot survive the worker being killed mid-send |
 | `REDIS_TIMEOUT` | `10` | Seconds a single Redis call may take before the server counts as gone |
 | `HEARTBEAT_INTERVAL` | `10` | Seconds between the consumer's reports; the key lives three times as long |
 | `HEALTHCHECK_MAX_QUEUE` | `0` | Longest queue still considered healthy; the check fails only above it, and `0` disables it |
@@ -165,6 +167,8 @@ entry naming a retired one is dead but harmless.
 | `E041` | `EVENT_LOG_DATABASE` names an alias that is not in `DATABASES` |
 | `E043` | `REDIS_URL` sets `decode_responses` while `ALLOW_PICKLE` is `True` |
 | `E044` | `DRAIN_TIMEOUT` is not a finite number, or is negative |
+| `E045` | `MAX_IN_FLIGHT` is not an integer, or is negative |
+| `E046` | `REQUIRE_CRASH_SAFE` is not a boolean |
 | `W005` | the log is on while its database has no engine, so every event is dropped |
 | `W006` | the log is on with `EVENT_LOG_RETENTION_DAYS` at 0, so nothing ever deletes a row |
 | `W007` | `EVENT_LOG_BATCH_SIZE` is above `EVENT_LOG_BUFFER_SIZE`, so the batch can never fill |

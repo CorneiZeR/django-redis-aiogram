@@ -7,7 +7,7 @@ from io import StringIO
 from types import SimpleNamespace
 
 import pytest
-from django.core.management import call_command
+from django.core.management import CommandError, call_command
 from django.test import override_settings
 
 from django_redis_aiogram import bot
@@ -15,8 +15,14 @@ from django_redis_aiogram.management.commands.start_tgbot import Command
 
 
 class RecordingDelivery:
+    # the two the command asks about before it starts anything
+    crash_safe = True
+
     def __init__(self, events):
         self.events = events
+
+    def reclaim(self):
+        return True
 
     def start_thread(self):
         self.events.append('consumer-started')
@@ -280,3 +286,60 @@ def test_a_consumer_that_outlives_its_join_is_reported(monkeypatch, caplog):
     # alone passes with `extra` deleted
     warning = next(r for r in caplog.records if 'did not stop in time' in r.message)
     assert warning.tg_timeout == 11
+
+
+@override_settings(
+    TELEGRAM_BOT={
+        'TOKEN': '42:x',
+        'REDIS_URL': 'redis://localhost:6379/0',
+        'REQUIRE_CRASH_SAFE': True,
+    }
+)
+def test_a_server_without_lmove_is_refused_when_crash_safety_is_required(monkeypatch):
+    """Probed before the thread starts on purpose: `run()` is a daemon thread, so
+    a SystemExit raised there kills only that thread and leaves the process
+    polling updates with a dead consumer."""
+
+    class OldServer(RecordingDelivery):
+        def reclaim(self):
+            self.crash_safe = False
+            return True
+
+    started = []
+    monkeypatch.setattr(
+        'django_redis_aiogram.management.commands.start_tgbot.get_delivery',
+        lambda handler: OldServer(started),
+    )
+    monkeypatch.setattr(bot, 'start_polling', lambda: None)
+    monkeypatch.setattr(bot, 'close', lambda: None)
+
+    with pytest.raises(CommandError, match='LMOVE'):
+        call_command('start_tgbot')
+
+    assert started == [], 'the consumer thread started anyway'
+
+
+@override_settings(
+    TELEGRAM_BOT={
+        'TOKEN': '42:x',
+        'REDIS_URL': 'redis://localhost:6379/0',
+        'REQUIRE_CRASH_SAFE': True,
+    }
+)
+def test_an_unreachable_redis_does_not_read_as_an_old_server(monkeypatch):
+    """`reclaim()` returns False when it could not talk to Redis at all, with
+    crash safety still intact. Refusing to start over that turns a blip into an
+    outage."""
+
+    class Unreachable(RecordingDelivery):
+        def reclaim(self):
+            return False
+
+    monkeypatch.setattr(
+        'django_redis_aiogram.management.commands.start_tgbot.get_delivery',
+        lambda handler: Unreachable([]),
+    )
+    monkeypatch.setattr(bot, 'start_polling', lambda: bot.loop.run_until_complete(asyncio.sleep(0)))
+    monkeypatch.setattr(bot, 'close', lambda: None)
+
+    call_command('start_tgbot')
