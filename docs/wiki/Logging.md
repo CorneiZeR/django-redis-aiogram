@@ -60,7 +60,7 @@ All prefixed with `tg_`, to avoid colliding with `LogRecord` attributes.
 | `delivery started` | INFO | the consumer is up |
 | `message sent` | INFO | one call succeeded |
 | `the event log is falling behind; events are being dropped` | ERROR | the writer cannot keep up; rows are being lost, messages are not |
-| `the event log is suspended after repeated failures` | ERROR | three failed batches in a row, usually a missing `migrate` |
+| `the event log is suspended after repeated failures` | ERROR | five failed batches in a row, usually a missing `migrate` |
 | `leaving a refused pickle message in flight` | ERROR | `ALLOW_PICKLE` is off and a pickled payload is waiting for it |
 | `leaving a message from a newer version in flight` | ERROR | the web tier was deployed ahead of the bot container |
 

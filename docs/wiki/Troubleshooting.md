@@ -112,8 +112,9 @@ In order of how often it is the answer:
 1. `TELEGRAM_BOT['EVENT_LOG']` is off. It is off by default, and `record()`
    returns before it reads anything else.
 2. `migrate` has not run. The writer logs `no such table` once per batch and
-   drops what it held; after three failures in a row it suspends for a minute
-   rather than hammering the database.
+   drops what it held; after five failures in a row it suspends for a minute
+   rather than hammering the database, and records a `log.dropped` row for the
+   gap once it gets through again.
 3. The process you are looking at is not the one that records. `outbound.queued`
    is written by whichever process called `send_redis`; `outbound.sent` by the
    bot container. Enabling the log in one and not the other gives you half a

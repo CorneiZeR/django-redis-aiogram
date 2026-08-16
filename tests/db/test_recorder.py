@@ -17,7 +17,7 @@ from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
 
 from django_redis_aiogram.enums import EventKind
-from django_redis_aiogram.eventlog import ROW_BY_ROW, write_batch
+from django_redis_aiogram.eventlog import ROW_BY_ROW, EventLogRefusedError, write_batch
 from django_redis_aiogram.models import TelegramEvent
 from django_redis_aiogram.recorder import FAILURE_LIMIT, Event, EventRecorder
 
@@ -438,3 +438,139 @@ def test_a_batch_too_big_to_save_one_by_one_is_bisected(paused_writer):
 
     assert sizes == [ROW_BY_ROW * 2, ROW_BY_ROW, ROW_BY_ROW], sizes
     assert TelegramEvent.objects.count() == ROW_BY_ROW * 2, 'bisection lost rows'
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT={**ON, 'EVENT_LOG_SYNC': True})
+def test_recording_does_not_doom_the_transaction_it_runs_inside(monkeypatch):
+    """The one bug here that destroyed the caller's own data.
+
+    `close_old_connections()` ran before every batch. Inside an `atomic()` block
+    the autocommit setting no longer matches the one in `DATABASES`, so
+    `close_if_unusable_or_obsolete()` takes its very first branch and closes —
+    and `BaseDatabaseWrapper.close()` sets `needs_rollback` when it closes inside
+    a transaction. Under `EVENT_LOG_SYNC`, with `ATOMIC_REQUESTS` or a plain
+    `atomic()`, recording an event therefore rolled back the writes the caller
+    made alongside it.
+
+    The suite could not see it: `tests/db_settings.py` is sqlite `:memory:`, and
+    the SQLite backend refuses to close an in-memory database at all. So this
+    reports itself as a file-backed one, and stubs the real close so nothing is
+    actually torn down.
+    """
+    monkeypatch.setattr(connection, 'is_in_memory_db', lambda: False)
+    monkeypatch.setattr(connection, '_close', lambda: None)
+    recorder = EventRecorder()
+
+    try:
+        with transaction.atomic():
+            recorder.record(an_event(chat_id=321))
+            doomed = connection.needs_rollback
+    finally:
+        connection.needs_rollback = False
+        connection.closed_in_transaction = False
+
+    assert doomed is False
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT=ON)
+def test_a_batch_the_database_refuses_entirely_is_reported(monkeypatch):
+    """The ladder caught `DatabaseError` at every rung and returned normally.
+
+    The recorder read that as a written batch: its failure counter never moved,
+    so `FAILURE_LIMIT` and `FAILURE_BACKOFF` were unreachable and no
+    `log.dropped` row was ever written. A forgotten `migrate` meant a full batch
+    of statements and a full batch of tracebacks per flush interval, for ever.
+    """
+
+    def refuse(*args, **kwargs):
+        msg = 'no such table: django_redis_aiogram_event'
+        raise DatabaseError(msg)
+
+    monkeypatch.setattr(QuerySet, 'bulk_create', refuse)
+    monkeypatch.setattr(TelegramEvent, 'save', refuse)
+
+    with pytest.raises(EventLogRefusedError):
+        write_batch([an_event(chat_id=1), an_event(chat_id=2)])
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT=ON)
+def test_a_partly_refused_batch_is_not_reported(monkeypatch):
+    """Only a wholesale refusal is a failed flush. One poison row is not."""
+    refused = []
+    # captured before the patch: Model.save inserts through _do_insert, not through
+    # bulk_create, so the good row still reaches the table
+    original_save = TelegramEvent.save
+
+    def one_bad_row(self, *args, **kwargs):
+        if self.chat_id == 2:
+            refused.append(self.chat_id)
+            msg = 'value too long'
+            raise DatabaseError(msg)
+        return original_save(self, *args, **kwargs)
+
+    def refuse_the_batch(*args, **kwargs):
+        msg = 'batch refused'
+        raise DatabaseError(msg)
+
+    monkeypatch.setattr(QuerySet, 'bulk_create', refuse_the_batch)
+    monkeypatch.setattr(TelegramEvent, 'save', one_bad_row)
+
+    write_batch([an_event(chat_id=1), an_event(chat_id=2)])
+
+    assert refused == [2]
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT=ON)
+def test_the_writer_suspends_itself_after_repeated_refusals(paused_writer, monkeypatch):
+    """What the changelog and Troubleshooting both promise, and what could not
+    happen while `write_batch` returned normally on a total failure."""
+
+    def refuse(*args, **kwargs):
+        msg = 'no such table: django_redis_aiogram_event'
+        raise DatabaseError(msg)
+
+    monkeypatch.setattr(QuerySet, 'bulk_create', refuse)
+    monkeypatch.setattr(TelegramEvent, 'save', refuse)
+    recorder = EventRecorder()
+
+    failures = 0
+    blocked_until = 0.0
+    for _ in range(FAILURE_LIMIT):
+        failures, blocked_until = recorder._flush([an_event(chat_id=5)], failures=failures)
+
+    assert blocked_until > time.monotonic()
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT=ON)
+def test_events_left_by_a_dying_writer_are_written_not_lost(paused_writer):
+    """A thread target that raises used to clear the slot and walk away, and
+    everything still queued went with it — no row, no counter, no gap marker."""
+    recorder = EventRecorder()
+    recorder.record(an_event(chat_id=11))
+    buffer = recorder._queue
+
+    recorder._abandon(buffer)
+
+    assert TelegramEvent.objects.filter(chat_id=11).count() == 1
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT=ON)
+def test_events_racing_stop_are_still_written(paused_writer):
+    """stop() detaches the queue under the guard, but a record() that already
+    read it puts into the detached one, which nothing else will ever look at."""
+    recorder = EventRecorder()
+    recorder.record(an_event(chat_id=12))
+    buffer = recorder._queue
+
+    # exactly what a producer that lost the race leaves behind
+    recorder.stop(timeout=0.1)
+    buffer.put_nowait(an_event(chat_id=13))
+    recorder._abandon(buffer)
+
+    assert TelegramEvent.objects.filter(chat_id=13).count() == 1
