@@ -551,15 +551,27 @@ def test_the_writer_suspends_itself_after_repeated_refusals(paused_writer, monke
 
 @pytest.mark.django_db(transaction=True)
 @override_settings(TELEGRAM_BOT=ON)
-def test_events_left_by_a_dying_writer_are_written_not_lost(paused_writer):
+def test_events_left_by_a_dying_writer_are_written_not_lost(monkeypatch):
     """A thread target that raises used to clear the slot and walk away, and
-    everything still queued went with it — no row, no counter, no gap marker."""
+    everything still queued went with it — no row, no counter, no gap marker.
+
+    The writer is killed for real rather than `_abandon` being called by hand:
+    what is under test is that `_run`'s finally reaches for it at all, and a test
+    that calls it directly passes with that line deleted.
+    """
+
+    def die(*args, **kwargs):
+        msg = 'the writer fell over'
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(EventRecorder, '_collect', die)
     recorder = EventRecorder()
     recorder.record(an_event(chat_id=11))
-    buffer = recorder._queue
+    writer = recorder._thread
 
-    recorder._abandon(buffer)
+    writer.join(timeout=5)
 
+    assert not writer.is_alive()
     assert TelegramEvent.objects.filter(chat_id=11).count() == 1
 
 
@@ -616,18 +628,25 @@ def test_recording_to_another_alias_leaves_the_callers_connection_alone(monkeypa
         'EVENT_LOG_FLUSH_INTERVAL': 'soon',
     }
 )
-def test_unreadable_writer_dials_fall_back_to_their_defaults(paused_writer):
+def test_unreadable_writer_dials_fall_back_to_their_defaults():
     """These are read on the writer thread, in a loop, outside `_flush`'s net.
 
     A raise there ends the writer and takes the whole buffer with it, which is a
     steep price for a typo. Checks E036-E038 still report the value at boot.
+
+    The real writer, not `drain_once()`: the batch size and the flush interval are
+    read in `_collect`, which only the writer loop runs, so a paused one would
+    leave two of the three dials untested.
     """
     recorder = EventRecorder()
+    try:
+        recorder.record(an_event(chat_id=8))
+        assert recorder._queue.maxsize == DEFAULTS['EVENT_LOG_BUFFER_SIZE']
+        recorder.flush(timeout=5)
 
-    recorder.record(an_event(chat_id=8))
-
-    assert recorder._queue.maxsize == DEFAULTS['EVENT_LOG_BUFFER_SIZE']
-    assert recorder.drain_once() == 1
+        assert TelegramEvent.objects.filter(chat_id=8).count() == 1
+    finally:
+        recorder.stop(timeout=5)
 
 
 @pytest.mark.django_db(transaction=True)
@@ -645,17 +664,25 @@ def test_a_gap_reported_keeps_what_was_dropped_while_it_was_reported(paused_writ
 
 @pytest.mark.django_db(transaction=True)
 @override_settings(TELEGRAM_BOT=ON)
-def test_an_event_put_into_a_detached_queue_is_moved_to_the_live_one(paused_writer):
+def test_an_event_put_into_a_detached_queue_is_moved_to_the_live_one(paused_writer, monkeypatch):
     """stop() detaches the queue under the guard; a record() that already read it
-    puts into the detached one, and nothing else will ever look at that queue."""
+    puts into the detached one, and nothing else will ever look at that queue.
+
+    Driven through `record()` rather than by calling `_rehome`: the wiring under
+    test is the queue-identity check, and calling the helper directly passes with
+    that check deleted. `_buffer` hands back the detached queue exactly once,
+    which is what a producer that read it before the swap is holding.
+    """
     recorder = EventRecorder()
     recorder.record(an_event(chat_id=21))
     orphan = recorder._queue
     recorder.stop(timeout=0.1)
 
-    # what a producer that lost the race leaves behind
-    orphan.put_nowait(an_event(chat_id=22))
-    recorder._rehome(orphan)
+    stale = [orphan]
+    live = recorder._buffer
+    monkeypatch.setattr(recorder, '_buffer', lambda: stale.pop() if stale else live())
+
+    recorder.record(an_event(chat_id=22))
 
     assert orphan.empty()
     assert recorder.drain_once() == 1
