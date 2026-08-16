@@ -87,6 +87,15 @@
 
 ### Changed
 
+- **The rate limiter no longer spins.** It paced correctly, but by counting
+  tokens: every waiter recomputed the same wait from the same shared state, so N
+  waiters woke together, one won and the rest went back to sleep. Measured at 40
+  queued sends it woke **113,652** times; it now wakes 35. At 500 sends the old
+  design burned 0.387 s of pure spinning. Admission also becomes strict FIFO —
+  before, a herd re-racing for the same token admitted in whatever order the loop
+  happened to resume, so the message that had waited longest had no claim on
+  going first. The limits themselves are unchanged, and every existing pacing
+  test passes untouched.
 - Redis commands are documented as deliberately un-retried. `Redis.from_url`
   builds the pool before the client, so redis-py's client-level retry default
   never reached the connection and every command already ran with zero retries;
