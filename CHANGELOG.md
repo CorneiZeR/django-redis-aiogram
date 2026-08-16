@@ -2,8 +2,27 @@
 
 ## 3.1.0 - unreleased
 
+**At-least-once delivery is true now, and was not before.** A message is
+acknowledged when its send finishes rather than when it is scheduled, so
+duplicates after a crash are real where they used to be impossible — and losses
+were. **Make your handlers idempotent on your own business key**, not on
+`correlation_id`: a handler's replies inherit the id of the update that caused
+them, so it is not one per message.
+
 ### Fixed
 
+- **The consumer acknowledged a message before Telegram had seen it.** In polling
+  mode `send_raw` returns as soon as the coroutine is scheduled, and the consumer
+  treated that as delivery: the message left the in-flight list at pop speed while
+  Telegram is fed at `overall_per_second`. A `docker stop` with a backlog sent
+  what the drain had time for — roughly 180 messages at the defaults — and lost
+  the rest, with nothing left to redeliver, while the module docstring,
+  **Delivery**, **Deployment** and **Troubleshooting** all promised
+  at-least-once. Webhook mode always had the guarantee, because there the
+  consumer drives the send to completion itself. A handler that accepts an
+  `on_complete` keyword is now handed one and the message waits for it; one that
+  does not — which is every documented recipe — keeps the old semantics exactly,
+  so nothing outside this package changes behaviour.
 - **`manage.py check` no longer imports aiogram.** `DEFAULT_BOT_PROPERTIES`
   defaults to `{}`, and the check that validates it reached for
   `DefaultBotProperties` before noticing there was nothing to validate — so
@@ -67,6 +86,18 @@
 
 ### Added
 
+- `MAX_IN_FLIGHT` bounds how many sends the consumer will leave outstanding
+  before it stops taking messages, with `0` — the default — meaning no bound.
+  Worth setting on a worker that sees large backlogs: acknowledging is an `LREM`,
+  which scans the in-flight list, so an unbounded one turns draining a backlog
+  into quadratic work.
+- `REQUIRE_CRASH_SAFE` refuses to start where `LMOVE` is missing, rather than
+  running at-most-once and only saying so in a log line. Checked before the
+  consumer thread starts: a failure raised inside it would kill the thread and
+  leave the process polling updates with nothing draining the queue. An
+  unreachable Redis is not mistaken for an old server.
+- `Delivery.crash_safe` reports which guarantee is actually in force.
+- Checks `E045` and `E046` for the two settings above.
 - `DRAIN_TIMEOUT` sets how long `close()` gives in-flight sends before cancelling
   them. It was hardcoded at five seconds and `start_tgbot` called `close()` bare,
   so a deployment could raise `stop_grace_period` all it liked and never buy the

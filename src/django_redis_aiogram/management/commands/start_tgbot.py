@@ -14,13 +14,14 @@ from collections.abc import Callable
 from types import FrameType
 from typing import Any
 
-from django.core.management import BaseCommand
+from django.core.management import BaseCommand, CommandError
 
 from django_redis_aiogram import bot
-from django_redis_aiogram.delivery import get_delivery
+from django_redis_aiogram.delivery import Delivery, get_delivery
 from django_redis_aiogram.enums import UpdateMode
 from django_redis_aiogram.recorder import recorder
 from django_redis_aiogram.redis import read_timeout
+from django_redis_aiogram.settings import SETTINGS_NAME, coerce_bool, conf
 from django_redis_aiogram.webhook import MODES, current_mode
 
 logger = logging.getLogger('django_redis_aiogram')
@@ -94,6 +95,7 @@ class Command(BaseCommand):
             )
 
         delivery = get_delivery(handler=bot.send_raw)
+        self._require_crash_safety(delivery)
         threads: list[threading.Thread] = []
 
         if mode == UpdateMode.WEBHOOK:
@@ -143,6 +145,32 @@ class Command(BaseCommand):
                 # installed would turn a later SIGTERM into a stray interrupt
                 with contextlib.suppress(ValueError):
                     signal.signal(signal.SIGTERM, previous)
+
+    @staticmethod
+    def _require_crash_safety(delivery: Delivery) -> None:
+        """Refuse to start where a killed worker loses the message it was sending.
+
+        Probed here rather than from inside ``run()``: that is a daemon thread, so
+        a ``SystemExit`` raised there kills only the thread and leaves a process
+        polling updates with a dead consumer. A ``CommandError`` gives a non-zero
+        exit and a restart loop somebody can see.
+
+        ``reclaim()`` is the probe, and it is the same call ``run()`` opens with.
+        An unreachable Redis returns False with crash safety still intact, which
+        must not be read as an old server — a blip is not a reason to refuse to
+        start.
+        """
+        if not coerce_bool(conf['REQUIRE_CRASH_SAFE'], f"{SETTINGS_NAME}['REQUIRE_CRASH_SAFE']"):
+            return
+        delivery.reclaim()
+        if delivery.crash_safe:
+            return
+        msg = (
+            'This Redis predates LMOVE (6.2), so a worker killed mid-send loses that message, '
+            f"and {SETTINGS_NAME}['REQUIRE_CRASH_SAFE'] refuses to run that way. Upgrade the "
+            'server, or set it to False to accept at-most-once delivery.'
+        )
+        raise CommandError(msg)
 
     @staticmethod
     def _install_sigterm_handler() -> Handler:

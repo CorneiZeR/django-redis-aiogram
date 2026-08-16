@@ -13,7 +13,7 @@ import time
 import uuid
 import weakref
 from asyncio import AbstractEventLoop
-from collections.abc import Coroutine, Mapping
+from collections.abc import Callable, Coroutine, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -92,6 +92,42 @@ def task_correlation_id(task: 'asyncio.Task[Any]') -> uuid.UUID:
 # cannot be entered twice. Two bots handed the same loop must share one lock.
 _loop_locks: 'weakref.WeakKeyDictionary[AbstractEventLoop, threading.Lock]' = weakref.WeakKeyDictionary()
 _loop_locks_guard = threading.Lock()
+
+
+def _completion(on_complete: Callable[[], None]) -> 'Callable[[asyncio.Task[None]], None]':
+    """Turn a completion callback into a task done-callback.
+
+    Cancellation is not completion. A send drained away at shutdown never reached
+    Telegram, so the consumer must *not* acknowledge it — leaving it in the
+    in-flight list is exactly what lets the next start pick it up again, and is
+    what makes the at-least-once guarantee true rather than documented.
+
+    Everything else counts as finished, including a send that was refused or that
+    gave up: redelivering those would only fail again, which is the contract
+    `Delivery.dispatch` has always had.
+    """
+
+    def done(task: 'asyncio.Task[None]') -> None:
+        if task.cancelled():
+            return
+        _settle(on_complete)
+
+    return done
+
+
+def _settle(on_complete: Callable[[], None] | None) -> None:
+    """Say the send is finished, without letting that break anything.
+
+    The callback runs on the loop's callback path, where an exception would be
+    reported against the task rather than against whatever the callback does —
+    and the send itself is over either way.
+    """
+    if on_complete is None:
+        return
+    try:
+        on_complete()
+    except Exception:
+        logger.exception('could not acknowledge a completed send')
 
 
 def loop_lock(loop: AbstractEventLoop) -> threading.Lock:
@@ -386,6 +422,7 @@ class TelegramBot:
         *,
         correlation_id: uuid.UUID | str | None = None,
         queued_at: float = 0.0,
+        on_complete: Callable[[], None] | None = None,
         **kwargs: Any,
     ) -> uuid.UUID:
         """Call an aiogram bot method, retrying on Telegram rate limits.
@@ -393,6 +430,13 @@ class TelegramBot:
         Returns the correlation id every event about this message carries.
         ``queued_at`` is set by the consumer when the call came off the queue,
         which is what makes time-in-queue measurable and tells the two apart.
+
+        ``on_complete`` is called once the send has actually finished — sent,
+        refused or given up on — and **not** called when the send is refused
+        before it starts or cancelled at shutdown. The consumer passes one so it
+        can acknowledge the message then rather than now: this method returns as
+        soon as the coroutine is *scheduled*, which is long before Telegram has
+        seen anything.
         """
         check_function(function)
         identifier = resolve_correlation_id(correlation_id)
@@ -478,7 +522,7 @@ class TelegramBot:
 
         call_kwargs = {**conf['DEFAULT_KWARGS'](function), **kwargs}
         outbound = Outbound(identifier, function, call_kwargs)
-        self._schedule(send(), outbound)
+        self._schedule(send(), outbound, on_complete)
         return identifier
 
     @staticmethod
@@ -508,7 +552,12 @@ class TelegramBot:
             )
         )
 
-    def _register(self, task: 'asyncio.Task[None]', outbound: 'Outbound') -> None:
+    def _register(
+        self,
+        task: 'asyncio.Task[None]',
+        outbound: 'Outbound',
+        on_complete: Callable[[], None] | None = None,
+    ) -> None:
         """Track a send so :meth:`close` can wait for it.
 
         Registration happens when the task is created, not when it starts
@@ -518,6 +567,8 @@ class TelegramBot:
         self._sends[task] = outbound
         task.add_done_callback(self._sends.pop)
         task.add_done_callback(self._log_task_failure)
+        if on_complete is not None:
+            task.add_done_callback(_completion(on_complete))
 
     @staticmethod
     def _log_task_failure(task: 'asyncio.Task[None]') -> None:
@@ -528,12 +579,20 @@ class TelegramBot:
         if error is not None:
             logger.error('scheduled send failed', exc_info=error)
 
-    def _schedule(self, coroutine: Coroutine[Any, Any, None], outbound: 'Outbound') -> None:
+    def _schedule(
+        self,
+        coroutine: Coroutine[Any, Any, None],
+        outbound: 'Outbound',
+        on_complete: Callable[[], None] | None = None,
+    ) -> None:
         """Run a coroutine on the bot loop from whichever thread we are on.
 
         The delivery consumer runs in its own thread while the loop belongs to
         the polling thread; calling create_task across that boundary is not
         thread safe and silently corrupts the loop's internals.
+
+        Every path that refuses the coroutine leaves ``on_complete`` uncalled: the
+        message was not sent, so the consumer has to keep it in flight.
         """
         if self._closing:
             # the loop is being torn down, so nothing would ever run this
@@ -549,7 +608,7 @@ class TelegramBot:
 
         loop = self.loop
         if running is loop:
-            self._register(self._start(coroutine, loop, outbound), outbound)
+            self._register(self._start(coroutine, loop, outbound), outbound, on_complete)
             return
 
         # several web threads may send at once, and run_until_complete is not
@@ -568,7 +627,7 @@ class TelegramBot:
                 # decided under the lock: seen from outside it, a loop another
                 # thread drives for one run_until_complete looks running right
                 # up to the moment it stops, and the handoff would be lost
-                self._hand_off(coroutine, loop, outbound)
+                self._hand_off(coroutine, loop, outbound, on_complete)
                 return
             try:
                 loop.run_until_complete(coroutine)
@@ -576,13 +635,23 @@ class TelegramBot:
                 # polling started between the check above and this call
                 if not loop.is_running():
                     raise
-                self._hand_off(coroutine, loop, outbound)
+                self._hand_off(coroutine, loop, outbound, on_complete)
+                return
+            except BaseException:
+                # RAISE_EXCEPTION let the failure through. The send is over, and
+                # redelivering it would only fail the same way
+                _settle(on_complete)
+                raise
+            # driven to completion right here, so there is no task to hang a
+            # done-callback on — webhook mode takes this path for every send
+            _settle(on_complete)
 
     def _hand_off(
         self,
         coroutine: Coroutine[Any, Any, None],
         loop: AbstractEventLoop,
         outbound: 'Outbound',
+        on_complete: Callable[[], None] | None = None,
     ) -> None:
         """Create the task on the loop thread, so it is registered before it runs."""
 
@@ -595,7 +664,7 @@ class TelegramBot:
                 self._record_drop(outbound, 'the bot started shutting down')
                 logger.error('send dropped: the bot started shutting down')
                 return
-            self._register(self._start(coroutine, loop, outbound), outbound)
+            self._register(self._start(coroutine, loop, outbound), outbound, on_complete)
 
         try:
             loop.call_soon_threadsafe(start)

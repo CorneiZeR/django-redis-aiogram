@@ -184,8 +184,10 @@ consumer does. Several are safe if you want the redundancy: the pop is atomic,
 so a queued message goes to exactly one worker.
 
 On Redis 6.2+ a message is moved to a per-worker processing list while it is
-being sent, and a restarted worker reclaims what it left there — delivery is
-**at-least-once**, so a crash mid-send can produce a duplicate. Older servers
+being sent, and stays there until the send has actually finished; a restarted
+worker reclaims what it left behind — delivery is **at-least-once**, so a crash
+mid-send can produce a duplicate. Before 3.1.0 it was removed as soon as the send
+was *scheduled*, which meant polling mode did not have that guarantee at all. Older servers
 lack `LMOVE` and fall back to plain pops, which is **at-most-once**: a kill
 between the pop and the call loses that one message. A send that *fails* is
 acknowledged and logged either way, never redelivered for ever. See

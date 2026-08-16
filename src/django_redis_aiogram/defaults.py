@@ -47,6 +47,14 @@ DEFAULTS: dict[str, Any] = {
     # seconds close() gives in-flight sends to finish before cancelling them. An
     # int so the environment can set it; settings may hold a float
     'DRAIN_TIMEOUT': 5,
+    # how many sends the consumer will leave in flight before it stops taking
+    # messages. 0 means no bound, which is what shipped before the consumer
+    # waited for a send to finish. Acknowledging scans the in-flight list, so an
+    # unbounded one turns draining a backlog into quadratic work
+    'MAX_IN_FLIGHT': 0,
+    # refuse to start where a message cannot survive the worker being killed
+    # mid-send, rather than running at-most-once without saying so
+    'REQUIRE_CRASH_SAFE': False,
     'REDIS_TIMEOUT': 10,
     # how often the consumer refreshes the key `tgbot_healthcheck` reads. The key
     # lives three times as long, so one missed refresh is not a failure

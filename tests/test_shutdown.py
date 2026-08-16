@@ -7,6 +7,7 @@ import signal
 import threading
 import time
 from io import StringIO
+from types import SimpleNamespace
 
 import pytest
 from django.core.management import call_command
@@ -17,6 +18,10 @@ from django_redis_aiogram.client import Outbound, loop_lock
 from django_redis_aiogram.defaults import DEFAULTS
 from django_redis_aiogram.events import new_correlation_id
 from django_redis_aiogram.management.commands.start_tgbot import Command as StartCommand
+
+
+async def stub_close():
+    """Enough of an aiogram session for close() to release it."""
 
 
 def an_outbound(function='send_message', **kwargs):
@@ -443,3 +448,50 @@ def test_an_unreadable_drain_budget_does_not_break_shutdown():
     instance.close()
 
     assert seen == [float(DEFAULTS['DRAIN_TIMEOUT'])]
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_a_send_cancelled_at_shutdown_is_not_acknowledged():
+    """Cancellation is not completion.
+
+    A send drained away never reached Telegram, so acknowledging it would destroy
+    it — leaving it in the in-flight list is exactly what lets the next start
+    pick it up, and is what makes at-least-once true rather than documented.
+    """
+    instance = TelegramBot()
+    started = threading.Event()
+
+    async def never_returns(**kwargs):
+        started.set()
+        await asyncio.sleep(60)
+
+    instance._bot = SimpleNamespace(send_message=never_returns, session=SimpleNamespace(close=stub_close))
+    acknowledged = []
+
+    with running_loop(instance):
+        instance.send_raw(chat_id=1, text='x', on_complete=lambda: acknowledged.append(True))
+        assert started.wait(5), 'the send never started'
+
+    instance.close(drain_timeout=0.05)
+
+    assert acknowledged == [], 'a cancelled send was acknowledged'
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_a_finished_send_is_acknowledged_once():
+    """Sent, refused or given up on — all three are finished, and redelivering
+    any of them would only repeat itself."""
+    instance = TelegramBot()
+    instance._bot = stub_bot()
+    acknowledged = []
+
+    with running_loop(instance):
+        instance.send_raw(chat_id=1, text='x', on_complete=lambda: acknowledged.append(True))
+        for _ in range(500):
+            if acknowledged:
+                break
+            threading.Event().wait(0.01)
+
+    instance.close()
+
+    assert acknowledged == [True]

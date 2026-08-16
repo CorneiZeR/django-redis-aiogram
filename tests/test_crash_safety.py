@@ -424,3 +424,98 @@ def test_draining_by_hand_downgrades_on_an_old_server(old_redis_server):
 
     assert [item['chat_id'] for item in handled] == [9]
     assert delivery._reliable is False
+
+
+class Deferring(BlpopDelivery):
+    """A handler that takes the completion callback and holds onto it.
+
+    Stands in for `send_raw`, which returns as soon as the coroutine is scheduled
+    — long before Telegram has seen anything.
+    """
+
+    def __init__(self):
+        self.handled = []
+        self.finish = []
+        super().__init__(handler=self._handle)
+
+    def _handle(self, on_complete=None, **kwargs):
+        self.handled.append(kwargs)
+        self.finish.append(on_complete)
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_a_message_stays_in_flight_until_its_send_finishes(redis_server):
+    """The whole at-least-once promise.
+
+    `send_raw` returns once the coroutine is *scheduled*, so acknowledging when
+    the handler returns took the message out of the in-flight list before
+    Telegram had seen it. A kill anywhere in between lost it, with nothing left
+    to redeliver — while the module docstring, Delivery, Deployment and
+    Troubleshooting all promised at-least-once.
+    """
+    redis_server.rpush(QUEUE, payload(1))
+    delivery = Deferring()
+    drain(delivery, expected_handled=1)
+
+    assert [item['chat_id'] for item in delivery.handled] == [1]
+    assert redis_server.llen(PROCESSING) == 1, 'acknowledged before the send finished'
+    assert redis_server.llen(QUEUE) == 0
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_a_finished_send_leaves_the_in_flight_list(redis_server):
+    """And the other half: once the send says it is done, the message goes."""
+    redis_server.rpush(QUEUE, payload(2))
+    delivery = Deferring()
+    thread = delivery.start_thread()
+    for _ in range(500):
+        if delivery.finish:
+            break
+        threading.Event().wait(0.01)
+
+    assert delivery.finish, 'the handler was never called'
+    delivery.finish[0]()  # what the send's done-callback does
+    for _ in range(500):
+        if redis_server.llen(PROCESSING) == 0:
+            break
+        threading.Event().wait(0.01)
+    delivery.stop()
+    thread.join(timeout=5)
+
+    assert redis_server.llen(PROCESSING) == 0
+    assert redis_server.llen(QUEUE) == 0
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'MAX_IN_FLIGHT': 2})
+def test_the_consumer_stops_taking_messages_at_the_limit(redis_server):
+    """Acknowledging is an LREM, which scans the in-flight list — so letting a
+    backlog accumulate there turns draining it into quadratic work."""
+    for chat_id in range(6):
+        redis_server.rpush(QUEUE, payload(chat_id))
+    delivery = Deferring()
+    thread = delivery.start_thread()
+    for _ in range(500):
+        if len(delivery.handled) >= 2:
+            break
+        threading.Event().wait(0.01)
+    threading.Event().wait(0.2)  # long enough for an unbounded consumer to take the rest
+
+    taken = len(delivery.handled)
+    delivery.stop()
+    thread.join(timeout=5)
+
+    assert taken == 2, f'took {taken} messages with a limit of two'
+    assert redis_server.llen(QUEUE) == 4
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_a_handler_that_cannot_defer_keeps_the_old_semantics(redis_server):
+    """Every documented recipe takes `**kwargs` and nothing else, and each one
+    has to go on being acknowledged the moment it returns."""
+    redis_server.rpush(QUEUE, payload(3))
+    delivery = Recording()
+    drain(delivery, expected_handled=1)
+
+    assert [item['chat_id'] for item in delivery.handled] == [3]
+    assert redis_server.llen(PROCESSING) == 0
+    assert redis_server.llen(QUEUE) == 0
