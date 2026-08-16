@@ -23,7 +23,9 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: '3.13'
-      - run: pip install build twine
+      # by hash, not by name: this job is where third-party code last touches
+      # the artifact, and the wheel it produces publishes under our own identity
+      - run: pip install --require-hashes -r .github/release-requirements.txt
       # the tag is what people install, and nothing else checks that the version
       # inside the package agrees with it. A release that disagrees is only
       # visible once it is on PyPI and immutable
@@ -40,7 +42,11 @@ jobs:
             echo "release tag ${tag} does not match __version__ ${version}" >&2
             exit 1
           fi
+      # build resolves [build-system].requires in an environment of its own, so
+      # the pins above do not reach hatchling; PIP_CONSTRAINT is what does
       - run: python -m build
+        env:
+          PIP_CONSTRAINT: ${{ github.workspace }}/.github/release-constraints.txt
       - run: twine check dist/*
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:

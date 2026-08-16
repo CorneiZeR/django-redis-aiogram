@@ -118,3 +118,17 @@ check that they all resolve and that none is written the other way round.
 
 Explain why the change is needed, not just what changed. If it fixes a bug,
 describe the failure it produces.
+
+## Releases
+
+Publishing runs on [Trusted Publishing](https://docs.pypi.org/trusted-publishers/),
+so there is no API token anywhere. Every action is pinned to a commit, and the
+build job installs its tools by hash from `.github/release-requirements.txt`,
+with `.github/release-constraints.txt` pinning the build backend that
+`python -m build` resolves in an isolated environment of its own.
+
+Refresh both before cutting a release — the command that generates each is in
+its header — and open the refresh as its own pull request, so the diff is
+reviewed rather than landing alongside the release commit. A pin that has gone
+stale is only discovered when the release workflow runs, which is the worst
+moment to find out.
