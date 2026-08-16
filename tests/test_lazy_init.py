@@ -150,14 +150,22 @@ def test_settings_mapping_protocol():
     assert len(settings) == len(dict(settings))
 
 
-def test_importing_the_package_does_not_import_aiogram():
-    """aiogram costs most of a second; only using the bot may pay it."""
+def test_importing_the_package_pulls_nothing_third_party():
+    """aiogram costs most of a second; only using the bot may pay it.
+
+    A delta rather than an absolute set: a `.pth` file in site-packages can import
+    anything it likes before this script runs, so what was already loaded says nothing
+    about what the package is responsible for.
+    """
     script = textwrap.dedent("""
         import sys
 
+        before = set(sys.modules)
         import django_redis_aiogram
+        pulled = {name.split('.')[0] for name in set(sys.modules) - before}
+        pulled -= sys.stdlib_module_names | {'django_redis_aiogram'}
 
-        assert 'aiogram' not in sys.modules, 'importing the package pulled aiogram'
+        assert not pulled, f'importing the package pulled {sorted(pulled)}'
         assert django_redis_aiogram.__version__
 
         _ = django_redis_aiogram.bot
@@ -186,7 +194,9 @@ def test_a_disabled_django_boot_never_pays_for_aiogram():
 
         django.setup()
 
-        assert 'aiogram' not in sys.modules, 'a disabled boot still imported aiogram'
+        FORBIDDEN = {'aiogram', 'pydantic'}
+        loaded = {name.split('.')[0] for name in sys.modules} & FORBIDDEN
+        assert not loaded, f'a disabled boot imported {sorted(loaded)}'
         print('cheap boot ok')
     """)
     result = subprocess.run(  # noqa: S603 - our own interpreter, and a script written right above
@@ -203,6 +213,39 @@ def test_a_disabled_django_boot_never_pays_for_aiogram():
     )
     assert result.returncode == 0, result.stderr
     assert 'cheap boot ok' in result.stdout
+
+
+def test_running_the_system_checks_does_not_import_aiogram():
+    """`manage.py check` runs inside every migrate, runserver and shell.
+
+    Under tests.bare_settings, because tests/settings.py installs an app whose router
+    imports aiogram at django.setup() and would answer this question for the checks.
+    """
+    script = textwrap.dedent("""
+        import sys
+
+        import django
+
+        django.setup()
+        from django.core.management import call_command
+
+        call_command('check')
+
+        FORBIDDEN = {'aiogram', 'pydantic'}
+        loaded = {name.split('.')[0] for name in sys.modules} & FORBIDDEN
+        assert not loaded, f'the system checks imported {sorted(loaded)}'
+        print('cheap checks ok')
+    """)
+    result = subprocess.run(  # noqa: S603 - our own interpreter, and a script written right above
+        [sys.executable, '-c', script],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=SUBPROCESS_TIMEOUT,
+        env={**os.environ, 'DJANGO_SETTINGS_MODULE': 'tests.bare_settings'},
+    )
+    assert result.returncode == 0, result.stderr
+    assert 'cheap checks ok' in result.stdout
 
 
 def test_dir_lists_the_lazy_exports():

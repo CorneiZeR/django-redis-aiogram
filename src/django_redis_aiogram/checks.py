@@ -132,6 +132,10 @@ def _known_bot_properties(key: str) -> list[Problem]:
     value = conf.get(key)
     if not isinstance(value, Mapping):
         return []
+    # before the import, not after: the default is {}, which is a Mapping, so without
+    # this every `manage.py check` in every project would pay for aiogram
+    if not value:
+        return []
     # deferred: aiogram costs most of a second, and checks only run on demand
     from aiogram.client.default import DefaultBotProperties  # noqa: PLC0415 - as above
 
