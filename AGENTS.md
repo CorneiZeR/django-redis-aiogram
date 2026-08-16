@@ -40,6 +40,7 @@ tests/              pytest, fakeredis, no network
 ## Commands
 
 ```shell
+python -m pip install --upgrade pip   # --group is PEP 735, pip 25.1 and up
 pip install -e . --group dev
 ruff check . && ruff format --check . && mypy && python -m pytest -q
 python -m pytest -q --ds=tests.db_settings tests/db

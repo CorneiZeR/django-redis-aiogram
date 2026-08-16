@@ -12,10 +12,16 @@ the commands, and the invariants that must stay covered.
 git clone git@github.com:CorneiZeR/django-redis-aiogram.git
 cd django-redis-aiogram
 python -m venv .venv && source .venv/bin/activate
+python -m pip install --upgrade pip
 pip install -e . --group dev
 ```
 
 Python 3.10–3.14 is supported.
+
+`--group` is [PEP 735](https://peps.python.org/pep-0735/), which pip understands
+from **25.1**. A fresh virtual environment inherits whatever pip your Python
+shipped with — on 3.10 that is old enough to reject the flag as unknown — so the
+upgrade above is not ceremony. `pip --version` if it fails.
 
 ## Before opening a pull request
 
