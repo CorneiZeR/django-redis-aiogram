@@ -14,6 +14,7 @@ from django.test import override_settings
 
 from django_redis_aiogram import TelegramBot, bot
 from django_redis_aiogram.client import Outbound, loop_lock
+from django_redis_aiogram.defaults import DEFAULTS
 from django_redis_aiogram.events import new_correlation_id
 from django_redis_aiogram.management.commands.start_tgbot import Command as StartCommand
 
@@ -427,3 +428,18 @@ def test_close_takes_its_drain_budget_from_the_setting():
     instance.close()
 
     assert seen == [9.0]
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'DRAIN_TIMEOUT': 'soon'})
+def test_an_unreadable_drain_budget_does_not_break_shutdown():
+    """E044 reports it at boot. Here the safe answer is the default: the drain sits
+    between stopping the consumer and flushing the event log, so raising costs the
+    rows that describe what the drain just did."""
+    instance = TelegramBot()
+    instance._bot = stub_bot()
+    seen = []
+    instance._drain = seen.append
+
+    instance.close()
+
+    assert seen == [float(DEFAULTS['DRAIN_TIMEOUT'])]

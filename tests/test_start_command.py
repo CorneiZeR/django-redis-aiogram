@@ -276,3 +276,7 @@ def test_a_consumer_that_outlives_its_join_is_reported(monkeypatch, caplog):
         call_command('start_tgbot')
 
     assert 'the delivery consumer did not stop in time' in caplog.text
+    # the field, not just the sentence: Logging.md documents it, and the message
+    # alone passes with `extra` deleted
+    warning = next(r for r in caplog.records if 'did not stop in time' in r.message)
+    assert warning.tg_timeout == 11

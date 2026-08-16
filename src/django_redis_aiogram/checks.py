@@ -9,6 +9,7 @@ setting is gone: a project silencing ``E013`` must not silently start silencing
 whatever came after it.
 """
 
+import math
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, fields
 from functools import partial
@@ -96,6 +97,24 @@ def _an_integer(key: str, *, minimum: int | None = None) -> list[Problem]:
     # bool is a subclass of int, so it has to be rejected explicitly
     if isinstance(value, bool) or not isinstance(value, int):
         return [Problem(f'must be an integer, got {type(value).__name__}.')]
+    if minimum is not None and value < minimum:
+        return [Problem(f'must be >= {minimum}, got {value}.')]
+    return []
+
+
+def _a_number(key: str, *, minimum: float | None = None) -> list[Problem]:
+    """Require a finite number, at or above ``minimum`` when one is given.
+
+    Wider than :func:`_an_integer` because seconds are a place a fraction is a
+    reasonable thing to write. `nan` is refused with the rest: comparisons against
+    it are all false, so it would slip past the bound and then make every deadline
+    built from it expire immediately.
+    """
+    value = conf.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return [Problem(f'must be a number, got {type(value).__name__}.')]
+    if not math.isfinite(value):
+        return [Problem(f'must be a finite number, got {value}.')]
     if minimum is not None and value < minimum:
         return [Problem(f'must be >= {minimum}, got {value}.')]
     return []
@@ -554,6 +573,7 @@ CHECKS: tuple[Check, ...] = (
     Check('E041', 'EVENT_LOG_DATABASE', _a_configured_log_database),
     Check('E042', 'EVENT_LOG_SYNC', _a_boolean),
     Check('E043', 'REDIS_URL', _a_url_pickle_can_survive),
+    Check('E044', 'DRAIN_TIMEOUT', partial(_a_number, minimum=0)),
     Check('W005', 'EVENT_LOG', _somewhere_to_write_the_log),
     Check('W006', 'EVENT_LOG_RETENTION_DAYS', _a_log_that_is_pruned),
     Check('W007', 'EVENT_LOG_BATCH_SIZE', _a_batch_the_buffer_can_hold),

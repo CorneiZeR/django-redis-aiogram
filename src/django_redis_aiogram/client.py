@@ -7,6 +7,7 @@ jobs, the test suite — that only ever queue a message.
 
 import asyncio
 import logging
+import math
 import threading
 import time
 import uuid
@@ -29,6 +30,7 @@ from redis import Redis
 
 from django_redis_aiogram.api import check_function
 from django_redis_aiogram.context import current_correlation_id
+from django_redis_aiogram.defaults import DEFAULTS
 from django_redis_aiogram.enums import EventKind, StorageKind
 from django_redis_aiogram.envelope import pack
 from django_redis_aiogram.events import new_correlation_id
@@ -99,6 +101,21 @@ def loop_lock(loop: AbstractEventLoop) -> threading.Lock:
         if lock is None:
             lock = _loop_locks[loop] = threading.Lock()
         return lock
+
+
+def drain_budget() -> float:
+    """How long :meth:`TelegramBot.close` may spend draining.
+
+    Falls back rather than raising: check E044 reports an unreadable value at boot,
+    and shutdown is the worst moment to refuse — the drain sits between stopping
+    the consumer and flushing the event log, so an exception here costs the rows
+    that describe what the drain just did.
+    """
+    try:
+        budget = float(conf['DRAIN_TIMEOUT'])
+    except (TypeError, ValueError):
+        budget = float(DEFAULTS['DRAIN_TIMEOUT'])
+    return budget if math.isfinite(budget) and budget >= 0 else float(DEFAULTS['DRAIN_TIMEOUT'])
 
 
 def build_default_properties() -> DefaultBotProperties:
@@ -335,7 +352,7 @@ class TelegramBot:
         `stop_grace_period` all it liked and never buy the drain a second more.
         """
         if drain_timeout is None:
-            drain_timeout = float(conf['DRAIN_TIMEOUT'])
+            drain_timeout = drain_budget()
         self._closing = True
         try:
             if self._loop is not None or self._bot is not None or self._dispatcher is not None:

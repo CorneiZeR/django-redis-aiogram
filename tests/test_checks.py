@@ -324,3 +324,26 @@ def test_a_plain_url_with_pickle_is_fine():
 )
 def test_a_url_that_only_looks_like_it_disables_decoding_is_refused():
     assert 'django_redis_aiogram.E043' in ids(check_settings())
+
+
+@override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost', 'DRAIN_TIMEOUT': 'soon'})
+def test_an_unreadable_drain_timeout_is_reported():
+    """`close()` reads this while shutting down, which is the worst place to raise."""
+    assert 'django_redis_aiogram.E044' in ids(check_settings())
+
+
+@override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost', 'DRAIN_TIMEOUT': -1})
+def test_a_negative_drain_timeout_is_reported():
+    """A negative budget makes the drain expire before it starts."""
+    assert 'django_redis_aiogram.E044' in ids(check_settings())
+
+
+@override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost', 'DRAIN_TIMEOUT': float('nan')})
+def test_a_drain_timeout_that_is_not_a_number_is_reported():
+    """Every comparison against nan is false, so it slips past a plain bound."""
+    assert 'django_redis_aiogram.E044' in ids(check_settings())
+
+
+@override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost', 'DRAIN_TIMEOUT': 2.5})
+def test_a_fractional_drain_timeout_is_fine():
+    assert 'django_redis_aiogram.E044' not in ids(check_settings())

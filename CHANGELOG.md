@@ -46,6 +46,11 @@
   so a deployment could raise `stop_grace_period` all it liked and never buy the
   drain a second more. The Deployment page now has the arithmetic for sizing the
   grace period against all three waits.
+- Check `E044` refuses a `DRAIN_TIMEOUT` that is not a finite number, or is
+  negative. `close()` reads it while shutting down, between stopping the consumer
+  and flushing the event log, so raising there would cost the rows describing what
+  the drain just did — it falls back to the default rather than refusing, and the
+  check is what tells you at boot.
 - Check `E043` refuses a `REDIS_URL` that sets `decode_responses` while
   `ALLOW_PICKLE` is on. Decoding is otherwise supported and stays supported — one
   URL is often shared with a cache backend — but a pickled payload is not valid
