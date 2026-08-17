@@ -351,7 +351,7 @@ def test_close_refuses_to_tear_down_a_running_loop(caplog):
     with running_loop(instance), caplog.at_level('WARNING', logger='django_redis_aiogram'):
         instance.close(drain_timeout=0.1)
 
-    assert 'skipping close: stop polling before closing the bot' in caplog.text
+    assert 'skipping close: stop polling, or the loop thread, before closing the bot' in caplog.text
     # nothing was half-released, so closing again after polling stops still works
     assert instance._loop is not None
     assert instance._bot is not None

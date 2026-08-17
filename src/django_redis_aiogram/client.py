@@ -15,6 +15,7 @@ import uuid
 import weakref
 from asyncio import AbstractEventLoop
 from collections.abc import Callable, Coroutine, Mapping
+from concurrent import futures
 from dataclasses import dataclass
 from typing import Any
 
@@ -230,6 +231,9 @@ class TelegramBot:
         #: set once that thread is actually running the loop. Every caller waits
         #: on it, not only the one that started the thread
         self._runner_ready = threading.Event()
+        #: updates a request thread is blocked on. Stopping the loop under one of
+        #: these would leave that thread waiting on a future nothing will finish
+        self._updates: set[futures.Future[None]] = set()
         # only true while close() is flushing the loop, so the refusal below can tell
         # a hand-off queued before shutdown from one queued during it
         self._draining = False
@@ -359,13 +363,18 @@ class TelegramBot:
                 # what every update did before, one at a time under this lock
                 loop.run_until_complete(coroutine)
                 return
-            # polling drives this loop, so hand the update over. Decided under
-            # the lock: a loop another request is driving looks running until it
-            # stops, and the update would then wait for ever
+            # something runs this loop — polling, or the thread started above —
+            # so hand the update over. Decided under the lock: a loop another
+            # request is driving looks running until it stops, and the update
+            # would then wait for ever
             future = asyncio.run_coroutine_threadsafe(coroutine, loop)
+            self._updates.add(future)
 
-        # waiting outside the lock, so the next request is not held up by ours
-        future.result()
+        try:
+            # waiting outside the lock, so the next request is not held up by ours
+            future.result()
+        finally:
+            self._updates.discard(future)
 
     def _ensure_loop_runs(self) -> None:
         """Give this process's loop a thread of its own, once.
@@ -408,17 +417,33 @@ class TelegramBot:
         if self._runner is not None and not self._runner_ready.wait(RUNNER_TIMEOUT):
             logger.warning('the event loop thread did not start in time', extra={'tg_timeout': RUNNER_TIMEOUT})
 
-    def _stop_runner(self) -> None:
+    def _stop_runner(self, drain_timeout: float) -> None:
         """Stop the thread this process gave the loop, if it started one.
 
         Before the teardown, not after: `close()` refuses outright on a running
         loop, so a bot that started a runner could never be closed.
+
+        Updates in flight are waited for first, and cancelled if they outlast the
+        drain. A request thread blocks on `future.result()` with no deadline, so
+        stopping the loop under one would leave that thread waiting on a future
+        nothing will ever finish — a web worker held for the life of the process.
+        Cancelling before the loop stops is what turns that into an exception the
+        request can answer with.
         """
         runner, self._runner = self._runner, None
         self._runner_ready.clear()
         if runner is None:
             return
         loop = self._loop
+        pending = list(self._updates)
+        if pending:
+            logger.info('waiting for updates in flight', extra={'tg_pending': len(pending)})
+            futures.wait(pending, timeout=max(0.0, drain_timeout))
+            unfinished = [future for future in pending if not future.done()]
+            if unfinished:
+                logger.warning('cancelling updates still in flight', extra={'tg_pending': len(unfinished)})
+                for future in unfinished:
+                    future.cancel()
         if loop is not None and not loop.is_closed():
             with contextlib.suppress(RuntimeError):
                 loop.call_soon_threadsafe(loop.stop)
@@ -465,14 +490,14 @@ class TelegramBot:
         self._closing = True
         # before anything else: close() refuses on a running loop, so a process
         # that gave the loop a thread could otherwise never close its bot
-        self._stop_runner()
+        self._stop_runner(drain_timeout)
         try:
             if self._loop is not None or self._bot is not None or self._dispatcher is not None:
                 loop = self.loop
                 if loop.is_running():
                     # run_until_complete and loop.close() both raise on a running
                     # loop; leaving everything in place keeps close() retryable
-                    logger.warning('skipping close: stop polling before closing the bot')
+                    logger.warning('skipping close: stop polling, or the loop thread, before closing the bot')
                     return
                 # a send from another thread may be driving this loop; the lock
                 # keeps the teardown from interleaving with it

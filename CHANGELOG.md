@@ -32,6 +32,11 @@ them, so it is not one per message.
   whatever happens next. Both modes now start the consumer from the loop, which
   is what keeps a backlog from reaching `send_raw` while the loop is not running
   yet.
+- `close()` waits for the updates a webhook process is still answering before it
+  stops that loop, and cancels what outlasts `DRAIN_TIMEOUT`. A request thread
+  waits on its update with no deadline of its own, so stopping the loop under one
+  would hold that worker for the life of the process; cancelling turns it into an
+  error the request can answer with.
 
 - **The consumer acknowledged a message before Telegram had seen it.** In polling
   mode `send_raw` returns as soon as the coroutine is scheduled, and the consumer

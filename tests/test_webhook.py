@@ -663,3 +663,42 @@ def test_send_raw_stops_waiting_once_the_loop_has_a_thread():
     assert drove >= 0.25, f'it returned in {drove:.2f}s, so it did not wait'
     assert handed_called is False, 'with a thread it must hand off, not wait'
     assert handed < 0.1, f'it took {handed:.2f}s, so it waited after all'
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_close_does_not_strand_a_request_waiting_on_its_update(monkeypatch):
+    """`close()` stops the loop thread before its teardown, and a request thread
+    is blocked on `future.result()` with no deadline.
+
+    Stopping the loop under one leaves that thread waiting on a future nothing
+    will ever finish — a web worker held for the life of the process, while the
+    teardown carries on to `loop.close()`. Waiting for updates in flight, and
+    cancelling what outlasts the drain, is what turns that into an exception the
+    request can answer with.
+    """
+    instance = TelegramBot()
+    inside = threading.Event()
+    answered = []
+
+    @instance.message(F.text)
+    async def slow(message: types.Message) -> None:
+        inside.set()
+        await asyncio.sleep(30)  # far longer than the drain: it must be cancelled
+
+    monkeypatch.setattr('django_redis_aiogram.webhook.bot', instance)
+
+    def deliver():
+        try:
+            answered.append(post(an_update('/slow')).status_code)
+        except BaseException as error:
+            answered.append(type(error).__name__)
+
+    request = threading.Thread(target=deliver, daemon=True)
+    request.start()
+    assert inside.wait(10), 'the handler never ran'
+
+    instance.close(drain_timeout=0.2)
+    request.join(timeout=10)
+
+    assert not request.is_alive(), 'the request thread is still waiting on a stopped loop'
+    assert answered, 'the request never returned'

@@ -42,7 +42,7 @@ All prefixed with `tg_`, to avoid colliding with `LogRecord` attributes.
 | `tg_update` | the update id being handled |
 | `tg_correlation_id` | the id every event about one message carries |
 | `tg_router` | a router module autodiscovery imported |
-| `tg_pending` | in-flight sends at shutdown |
+| `tg_pending` | work still in flight at shutdown: sends, or the updates a webhook process is answering |
 | `tg_drain_timeout` | how long shutdown gave them |
 | `tg_kind` | the event log kind of a row |
 | `tg_count` | events in the batch being written |
@@ -58,6 +58,7 @@ All prefixed with `tg_`, to avoid colliding with `LogRecord` attributes.
 | `dropping undecodable queued message` | ERROR | a payload could not be deserialized |
 | `blocking pop failed, retrying` | ERROR | lost the Redis connection; it retries |
 | `the delivery consumer did not stop in time` | WARNING | the consumer outlived its join at shutdown; a message it holds may be redelivered |
+| `cancelling updates still in flight` | WARNING | a webhook update outlasted the drain at shutdown; its request gets an error rather than a hung worker |
 | `rate limited by telegram` | WARNING | refused and backing off |
 | `delivery started` | INFO | the consumer is up |
 | `message sent` | INFO | one call succeeded |
