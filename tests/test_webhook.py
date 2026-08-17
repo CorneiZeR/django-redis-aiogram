@@ -830,6 +830,20 @@ def test_a_loop_thread_that_dies_is_replaced(monkeypatch):
     try:
         # the first update loses its thread and is refused, which is correct
         assert post(an_update('/first')).status_code == 503
+        # observably dead before the second update, or it would be waiting on a
+        # thread that is merely slow — a different path from the one under test
+        for _ in range(500):
+            if instance._runner is not None and not instance._runner.is_alive():
+                break
+            time.sleep(0.01)
+        corpse = instance._runner
+        assert corpse is not None, 'the runner was never registered'
+        assert not corpse.is_alive(), 'the thread did not die'
+        # and the replacement gets the real deadline: 50 ms was only needed to
+        # make the first request give up quickly, and a loaded machine can take
+        # longer than that to start a thread and reach run_forever
+        monkeypatch.setattr('django_redis_aiogram.client.RUNNER_TIMEOUT', 5.0)
+
         # the second must not inherit that corpse
         assert post(an_update('/second', update_id=2)).status_code == 200
         assert handled == ['/second'], handled

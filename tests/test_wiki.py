@@ -77,6 +77,23 @@ def test_readme_wiki_links_resolve():
     assert not broken, f'README links to missing wiki pages: {broken}'
 
 
+def test_wiki_link_syntax_stays_in_the_wiki():
+    """`[[Page]]` is wiki-only syntax, and renders literally everywhere else.
+
+    The changelog is read on the repository page and as the package description,
+    where a double-bracket link shows its own brackets. It names pages in prose
+    instead — "the Deployment page" — and this is what keeps a habit from one
+    file leaking into the other.
+    """
+    outside = {'CHANGELOG.md', 'README.md'}
+    offenders = {
+        name: [line for line in (ROOT / name).read_text(encoding='utf-8').splitlines() if '[[' in line]
+        for name in outside
+    }
+    broken = {name: lines for name, lines in offenders.items() if lines}
+    assert not broken, f'wiki link syntax outside the wiki: {broken}'
+
+
 def test_home_and_sidebar_exist():
     assert (WIKI / 'Home.md').is_file()
     assert (WIKI / '_Sidebar.md').is_file()

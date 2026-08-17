@@ -25,8 +25,8 @@ them, so it is not one per message.
   practical difference is the exception — a send that fails after its retries
   raised into the view under `RAISE_EXCEPTION` and is now logged instead.
   A process that never serves the webhook is unaffected, and `send()`, which
-  queues, never had this behaviour. **[[Sending-messages]]** says what to do when
-  you need the answer.
+  queues, never had this behaviour. The Sending messages page says what to do
+  when you need the answer.
 - In webhook mode `start_tgbot` runs the loop instead of blocking on an event, so
   a send the consumer schedules runs when it is scheduled rather than waiting for
   whatever happens next. Both modes now start the consumer from the loop, which
