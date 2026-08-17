@@ -121,19 +121,38 @@ def test_the_async_client_survives_the_loop_being_recreated(server, redis_url):
     assert [message.kwargs['chat_id'] for message in queued] == [1, 2]
 
 
+def rpush_calls(server):
+    """How many ``RPUSH`` calls this server has served, or ``None`` if it will not say.
+
+    A delta from ``INFO commandstats`` rather than ``CONFIG RESETSTAT`` and an
+    absolute count. Managed Redis providers commonly disable ``CONFIG`` entirely,
+    and the rest of this suite needs only ``FLUSHDB`` — a test that fails, or skips,
+    on the kind of server people are most likely to point it at is a test that does
+    not run where it matters.
+
+    An empty section means the server does not report per-command statistics at
+    all; a section without ``RPUSH`` in it means none have been served yet, which
+    is a count of zero and not an absence of information.
+    """
+    stats = server.info('commandstats')
+    if not stats:
+        return None
+    return int(stats.get('cmdstat_rpush', {}).get('calls', 0))
+
+
 def test_a_broadcast_writes_one_round_trip_per_chunk(server, redis_url):
     """The whole argument for `asend_many` is the round trips, and a real server
-    is the only thing that can count them.
+    is the only thing that can count them."""
+    before = rpush_calls(server)
+    if before is None:
+        pytest.skip('this server does not report INFO commandstats, so round trips cannot be counted')
 
-    `commandstats` is reset first so the count belongs to this test alone.
-    """
-    server.config_resetstat()
     with override_settings(TELEGRAM_BOT=settings(redis_url)):
         identifiers = asyncio.run(TelegramBot().asend_many(range(10), chunk_size=4, text='hi'))
         asyncio.run(TelegramBot().aclose())
 
     assert len(identifiers) == 10
     assert server.llen(QUEUE) == 10
-    pushes = int(server.info('commandstats').get('cmdstat_rpush', {}).get('calls', 0))
     # ten chats, chunks of four: three pushes, not ten
+    pushes = rpush_calls(server) - before
     assert pushes == 3, f'{pushes} RPUSH calls for three chunks'
