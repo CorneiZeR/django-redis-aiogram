@@ -156,6 +156,13 @@ deepest pages are unreachable; at that depth the answer is a filter, not another
 page. Django would otherwise run `COUNT(*)` over the whole filtered queryset on
 every page load.
 
+A `LIMIT` only stops early if the rows arrive already ordered, which is why the
+kind index is on `(kind, -id)` — the same `-id` the changelist orders by. Before
+3.1.0 it was `(kind, -created_at)`, so every filtered page sorted in a temporary
+b-tree first and the bound above was not true. The list also leaves `error` and
+`detail` in the table: it renders neither, and between them they are most of what
+a row weighs. The detail page asks for them back.
+
 ## Growth, and the job that bounds it
 
 Budget roughly **0.3 kB per event** including indexes. A million events a day is

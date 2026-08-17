@@ -12,9 +12,9 @@ import uuid
 from typing import TYPE_CHECKING, Any, cast
 
 from django.contrib import admin, messages
-from django.core.exceptions import ImproperlyConfigured
+from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.core.paginator import Paginator
-from django.db.models import QuerySet
+from django.db.models import Field, QuerySet
 from django.http import HttpRequest
 from django.utils.functional import cached_property
 from django.utils.html import format_html, format_html_join
@@ -23,6 +23,9 @@ from django_redis_aiogram.eventlog import log_alias
 from django_redis_aiogram.events import failure_kinds, kind_choices
 from django_redis_aiogram.models import TelegramEvent
 from django_redis_aiogram.settings import SETTINGS_NAME, coerce_bool, conf
+
+#: fetched only on the page that renders them; see TelegramEventAdmin.get_queryset
+PAYLOAD_COLUMNS = ('error', 'detail')
 
 if TYPE_CHECKING:
     # django-stubs parameterises these; at runtime neither is subscriptable
@@ -142,12 +145,53 @@ class TelegramEventAdmin(ModelAdminBase):
     # insert from becoming a constraint check
     list_select_related = False
     ordering = ('-id',)
+    # only the columns an index can serve: function, worker and error_code have
+    # none, and one click on those headers sorts a table sized by traffic
+    sortable_by = ('created_at', 'kind', 'chat_id')
     # no date_hierarchy: its drilldown truncates created_at for every row, which
     # is a full scan no index can serve
 
     def get_queryset(self, request: HttpRequest) -> QuerySet[TelegramEvent]:
-        """Read from the alias the writer writes to, router installed or not."""
-        return super().get_queryset(request).using(log_alias())
+        """Read from the alias the writer writes to, router installed or not.
+
+        The two wide columns are left behind. Between them they are most of what
+        a row weighs — about 1.4 MB per fifty-row page — and the changelist
+        renders neither, so they were fetched to be discarded, including for a
+        user `get_fields` withholds them from. :meth:`get_object` asks for them
+        back on the one page that shows them.
+        """
+        return super().get_queryset(request).using(log_alias()).defer(*PAYLOAD_COLUMNS)
+
+    def get_object(
+        self,
+        request: HttpRequest,
+        object_id: str,
+        from_field: str | None = None,
+    ) -> TelegramEvent | None:
+        """Fetch one row with its payload columns, since this page renders them.
+
+        Django routes the detail page through `get_queryset` too, so without this
+        every deferred column would cost its own extra query when the template
+        touched it. Written out rather than delegated because the deferral has to
+        be lifted *before* the lookup, not after it.
+
+        Only for a reader allowed to see them. `get_fields` already keeps message
+        bodies and exception text off the page, but fetching them anyway would put
+        both on the wire and into the query log for someone the permission exists
+        to withhold them from.
+        """
+        rows = self.get_queryset(request)
+        if may_see_payloads(request):
+            rows = rows.defer(None)
+        meta = TelegramEvent._meta  # noqa: SLF001 - how Django itself asks a model for its fields
+        field = meta.pk if from_field is None else meta.get_field(from_field)
+        if not isinstance(field, Field):
+            # this model holds no relations, so nothing else can turn up here
+            return None
+        try:
+            return rows.get(**{field.name: field.to_python(object_id)})
+        except (TelegramEvent.DoesNotExist, ValidationError, ValueError):
+            return None
 
     def changelist_view(self, request: HttpRequest, extra_context: dict[str, Any] | None = None) -> Any:  # noqa: ANN401 - Django types this as a bare response
         """Render the list, saying so when the count stopped at the cap.

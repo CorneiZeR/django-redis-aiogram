@@ -19,7 +19,7 @@ src/django_redis_aiogram/
     delivery.py     BlpopDelivery, the one consumer
     serializers.py  tagged JSON, and pickle behind ALLOW_PICKLE
     throttling.py   token buckets, one budget per token
-    checks.py       system checks E001-E042, W001-W009
+    checks.py       system checks E001-E044, W001-W009
     settings.py     lazy settings with an environment fallback
     redis.py        lazy connection
     routers.py      autodiscover
@@ -40,7 +40,8 @@ tests/              pytest, fakeredis, no network
 ## Commands
 
 ```shell
-pip install -e '.[dev]'
+python -m pip install --upgrade pip   # --group is PEP 735, pip 25.1 and up
+pip install -e . --group dev
 ruff check . && ruff format --check . && mypy && python -m pytest -q
 python -m pytest -q --ds=tests.db_settings tests/db
 ```

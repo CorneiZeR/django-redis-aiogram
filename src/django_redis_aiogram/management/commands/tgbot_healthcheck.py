@@ -21,6 +21,10 @@ from django_redis_aiogram.settings import conf
 
 logger = logging.getLogger('django_redis_aiogram')
 
+# round trips, not keys: MATCH filters on the server but SCAN walks the whole
+# keyspace either way, and this probe runs on a timer
+STRANDED_SCAN_ROUNDS = 20
+
 
 class Command(BaseCommand):
     """Check Redis, the consumer's heartbeat and the queue length, in that order."""
@@ -102,7 +106,7 @@ class Command(BaseCommand):
             msg = f'{queued} messages are queued, over the limit of {max_queue}'
             raise CommandError(msg)
 
-        stranded = self._stranded(connection, delivery)
+        stranded, swept = self._stranded(connection, delivery)
         guarantee = 'at-least-once' if delivery.crash_safe else 'at-most-once'
         self.stdout.write(self.style.SUCCESS(f'healthy: heartbeat {age}s old, {queued} queued, {guarantee}'))
         if stranded:
@@ -110,17 +114,25 @@ class Command(BaseCommand):
             # invisible pile is how a stranded list stays stranded
             self.stdout.write(
                 self.style.WARNING(
-                    f'{stranded} message(s) are in flight under other worker names. '
-                    'If one of those workers is gone, `manage.py tgbot_reclaim --worker <name>` requeues them.'
+                    f'{stranded if swept else f"at least {stranded}"} message(s) are in flight under '
+                    'other worker names. If one of those workers is gone, '
+                    '`manage.py tgbot_reclaim --worker <name>` requeues them.'
                 )
             )
 
     @staticmethod
-    def _stranded(connection: Redis, delivery: Delivery) -> int:
+    def _stranded(connection: Redis, delivery: Delivery) -> tuple[int, bool]:
         """Count what is in flight under a worker name that is not this one.
 
         Read rather than acted on: a message under another name may be one another
         worker is sending this second, and taking it back would send it twice.
+
+        Bounded, and returns whether it finished. ``MATCH`` filters on the server
+        but ``SCAN`` still walks the whole keyspace, and the compose recipe runs
+        this probe every thirty seconds — on a Redis shared with a cache backend,
+        which the settings page suggests is common, an unbounded sweep is a full
+        pass over someone else's keys twice a minute. A partial answer is worth
+        having; one that pretends to be complete is not.
         """
         pattern = f'{delivery.queue_key}:processing:*'
         mine = delivery.processing_key
@@ -128,16 +140,21 @@ class Command(BaseCommand):
         # size mid-iteration, and counting one twice would invent a backlog
         seen: set[str] = set()
         total = 0
+        cursor = 0
         try:
-            for key in connection.scan_iter(match=pattern, count=100):
-                name = key.decode() if isinstance(key, bytes) else key
-                if name == mine or name in seen:
-                    continue
-                seen.add(name)
-                total += int(connection.llen(name) or 0)
+            for _ in range(STRANDED_SCAN_ROUNDS):
+                cursor, keys = connection.scan(cursor=cursor, match=pattern, count=100)
+                for key in keys:
+                    name = key.decode() if isinstance(key, bytes) else key
+                    if name == mine or name in seen:
+                        continue
+                    seen.add(name)
+                    total += int(connection.llen(name) or 0)
+                if not cursor:
+                    return total, True
         except RedisError:
             # the probe answers about this worker; a scan it could not finish is
             # not a reason to call a healthy container unhealthy
             logger.warning('could not scan for stranded in-flight lists', extra={'tg_key': pattern})
-            return 0
-        return total
+            return 0, False
+        return total, False

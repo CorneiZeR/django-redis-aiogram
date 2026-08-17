@@ -613,12 +613,12 @@ CHECKS: tuple[Check, ...] = (
     Check('E044', 'DRAIN_TIMEOUT', partial(_a_number, minimum=0)),
     Check('E045', 'MAX_IN_FLIGHT', partial(_an_integer, minimum=0)),
     Check('E046', 'REQUIRE_CRASH_SAFE', _a_boolean),
-    Check('W010', 'WORKER_NAME', _a_worker_that_keeps_its_name),
     Check('W005', 'EVENT_LOG', _somewhere_to_write_the_log),
     Check('W006', 'EVENT_LOG_RETENTION_DAYS', _a_log_that_is_pruned),
     Check('W007', 'EVENT_LOG_BATCH_SIZE', _a_batch_the_buffer_can_hold),
     Check('W008', 'EVENT_LOG_KINDS', _kinds_this_version_records),
     Check('W009', 'EVENT_LOG_SYNC', _a_writer_that_does_not_block),
+    Check('W010', 'WORKER_NAME', _a_worker_that_keeps_its_name),
     Check('W003', '', _known_keys),
     Check(
         'W001',

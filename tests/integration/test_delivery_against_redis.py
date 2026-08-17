@@ -12,6 +12,8 @@ from io import StringIO
 import pytest
 from django.core.management import CommandError, call_command
 from django.test import override_settings
+from redis import Redis
+from redis.exceptions import ResponseError
 
 from django_redis_aiogram import TelegramBot
 from django_redis_aiogram.delivery import BlpopDelivery
@@ -300,3 +302,22 @@ def test_an_idle_consumer_survives_more_rounds_than_the_deadline(server, redis_u
         )
         failures = [record for record in caplog.records if 'blocking pop failed' in record.message]
         assert not failures, f'an idle round raised: {[record.message for record in failures]}'
+
+
+def test_an_unknown_command_says_so_in_the_words_the_downgrade_looks_for(redis_url):
+    """The whole crash-safety downgrade rests on one substring.
+
+    `Delivery._downgrade_without_lmove` decides a server predates 6.2 by finding
+    `unknown command` in the error text, and falls back to at-most-once pops when
+    it does. Nothing else in the suite can check that: fakeredis has every
+    command, so the classifier is otherwise only ever run against a double
+    written to produce the string it looks for.
+    """
+    connection = Redis.from_url(redis_url)
+    try:
+        with pytest.raises(ResponseError) as raised:
+            connection.execute_command('DEFINITELYNOTACOMMAND', 'x')
+    finally:
+        connection.close()
+
+    assert 'unknown command' in str(raised.value).lower(), str(raised.value)

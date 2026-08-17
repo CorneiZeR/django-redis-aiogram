@@ -34,12 +34,29 @@ why the package sets the deadline itself rather than relying on the client.
 redis-cli -n <db> llen TELEGRAM_BOT_MESSAGE
 ```
 
-A growing list means the consumer is not running — see above. Messages wait
-there until a worker takes them. On Redis 6.2+ a taken message sits in
-`TELEGRAM_BOT_MESSAGE:processing:<worker>` until the send has finished, and a
-restart with the same `WORKER_NAME` reclaims it: at-least-once, so a crash
-mid-send can duplicate a send. That list is expected to be non-empty while sends
-are in flight; `MAX_IN_FLIGHT` bounds how long it gets. Without `LMOVE` it is at-most-once. A send that
+`TELEGRAM_BOT_MESSAGE` is the default `REDIS_MESSAGES_KEY`; if you set your own,
+it is that key here and in every path below.
+
+A growing list does not by itself mean the consumer is stopped: producers can
+simply be outpacing it, and `MAX_IN_FLIGHT` deliberately holds intake back while
+sends are outstanding. Check the heartbeat and the in-flight list below before
+concluding the worker is down — see above for one that genuinely is. Messages
+wait in the queue until a worker takes them. On Redis 6.2+ a taken message sits in
+`<key>:processing:<worker>` until the send has finished, and a restart under the
+same **worker identity** reclaims it: at-least-once, so a crash mid-send can
+duplicate a send. That identity is `WORKER_NAME` when it is set and the hostname
+otherwise — so on a platform that gives each container a fresh hostname, a
+recreated worker looks like a different one and leaves the old list untouched.
+Set `WORKER_NAME` to something stable wherever hostnames change.
+
+All of that holds for the worker `start_tgbot` runs; a handler of your own is
+only held that way if it takes an `on_complete` keyword.
+
+That list is expected to be non-empty while sends are in flight, and an entry
+stays until its send finishes or shutdown cancels it. `MAX_IN_FLIGHT` bounds how
+many sends the consumer leaves outstanding, and so how far the list can run
+ahead. Without `LMOVE` it is at-most-once, unless `REQUIRE_CRASH_SAFE` is on —
+then the worker refuses to start rather than deliver that way. A send that
 exhausted `MAX_RETRIES` is logged and acknowledged, not redelivered.
 
 ## Handlers never fire

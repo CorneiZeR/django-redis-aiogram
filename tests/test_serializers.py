@@ -15,16 +15,18 @@ import pytest
 from aiogram import types
 from aiogram.client.default import Default
 from aiogram.methods import SendMediaGroup, SendMessage
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.types.input_file import BufferedInputFile, FSInputFile, URLInputFile
 from django.core.exceptions import ImproperlyConfigured
 from django.test import override_settings
 
-from django_redis_aiogram.enums import SerializationTag, SerializerKind
+from django_redis_aiogram.enums import PayloadDetail, SerializationTag, SerializerKind
 from django_redis_aiogram.serializers import (
     _CODECS,
     JsonSerializer,
     PickleSerializer,
     SerializationError,
+    encode,
     get_serializer,
     loads,
 )
@@ -317,3 +319,55 @@ def test_writing_pickle_the_reader_refuses_is_rejected_at_runtime():
     """E022 reports this, but a WSGI process never runs the system checks."""
     with pytest.raises(ImproperlyConfigured, match='ALLOW_PICKLE'):
         get_serializer()
+
+
+def test_the_one_pass_encoder_writes_the_same_bytes():
+    """The encoder replaces a walk that built a tagged copy first, so the only
+    thing that may change is the cost."""
+    corpus = [
+        {'function': 'send_message', 'chat_id': 1, 'text': 'hello'},
+        {'tag': SerializationTag.MODEL, 'mode': PayloadDetail.FULL},
+        {SerializationTag.MODEL: 'as a key', PayloadDetail.SUMMARY: 'and this one'},
+        {'when': datetime.datetime(2026, 8, 16, 3, 4, 5, tzinfo=datetime.timezone.utc)},
+        {'day': datetime.date(2026, 8, 16), 'money': Decimal('1.10'), 'blob': b'\x00\xff'},
+        {'nested': [{'deep': ({'tuple': 1}, [2, 3])}]},
+        {'sentinel': Default('parse_mode')},
+        {'markup': InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='b', callback_data='c')]])},
+    ]
+
+    for payload in corpus:
+        assert JsonSerializer().dumps(payload) == json.dumps(encode(payload)).encode('utf-8'), payload
+
+
+def test_a_payload_too_deep_to_read_back_is_refused():
+    """The C encoder ignores Python's recursion limit; `decode` does not.
+
+    So without the guard a deeply nested call would be written happily and then
+    be undecodable for ever on the consumer, which drops it — a message destroyed
+    by an optimisation.
+    """
+    payload: dict = {'function': 'send_message'}
+    node = payload
+    for _ in range(sys.getrecursionlimit() + 100):
+        node['next'] = {}
+        node = node['next']
+
+    with pytest.raises(SerializationError):
+        JsonSerializer().dumps(payload)
+
+
+def test_an_ordinary_payload_never_pays_for_the_guard(monkeypatch):
+    """The guard re-encodes the slow way, so it must not fire on real messages."""
+    from django_redis_aiogram import serializers
+
+    calls = []
+    original = serializers.encode
+    monkeypatch.setattr(serializers, 'encode', lambda value: calls.append(value) or original(value))
+    keyboard = {
+        'chat_id': 1,
+        'reply_markup': {'inline_keyboard': [[{'text': f'b{i}', 'callback_data': f'c{i}'}] for i in range(30)]},
+    }
+
+    JsonSerializer().dumps(keyboard)
+
+    assert calls == []

@@ -54,6 +54,19 @@ Duplicates after a kill are therefore real now where they were not before.
 handler's replies inherit the id of the update that caused them, so it is not
 one per message.
 
+### It follows the handler, not the queue
+
+Waiting for the send is something the *handler* opts into, by taking an
+`on_complete` keyword. `bot.send_raw` does, and `manage.py start_tgbot` uses it,
+so a normal worker has the guarantee above.
+
+A handler of your own that takes only `**kwargs` — the shape every recipe on
+**[[Testing]]** uses — keeps the pre-3.1.0 semantics exactly: it is acknowledged
+the moment it returns, which is at-most-once if it goes on to do the sending
+somewhere else. That is deliberate, so existing handlers are not silently made to
+hold messages they never release. Take `on_complete` and call it when your send
+finishes if you want the message held until then.
+
 `MAX_IN_FLIGHT` bounds how many sends the consumer will leave outstanding before
 it stops taking messages. The default, `0`, is no bound. It is worth setting on a
 worker that sees large backlogs: acknowledging is an `LREM`, which scans the
@@ -99,10 +112,11 @@ the in-flight list — and `False` means it does not, leaving the message there
 for a later run to reclaim. Withholding the acknowledgement only saves the
 message where there *is* an in-flight list: without `LMOVE` the message was
 already popped before it was refused, so `False` and `True` come to the same
-thing and it is gone. Two cases return `False` today. A pickled
-payload refused because `ALLOW_PICKLE` is off, which is the one failure a
-change of configuration can undo; and a handler that accepted `on_complete`,
-where the acknowledgement is not withheld but deferred to the send. Everything
+thing and it is gone. Three cases return `False` today. A pickled payload
+refused because `ALLOW_PICKLE` is off, which is the one failure a change of
+configuration can undo; a handler that accepted `on_complete`, where the
+acknowledgement is not withheld but deferred to the send; and a send cancelled
+rather than failed, which reached nothing and is left for a reclaim. Everything
 else — undecodable bytes, a method that is not Telegram API, a handler that
 raised before it scheduled anything — returns `True`, because redelivering it
 would only fail again.

@@ -162,8 +162,17 @@ class Command(BaseCommand):
         """
         if not coerce_bool(conf['REQUIRE_CRASH_SAFE'], f"{SETTINGS_NAME}['REQUIRE_CRASH_SAFE']"):
             return
-        delivery.reclaim()
+        settled = delivery.reclaim()
         if delivery.crash_safe:
+            if not settled:
+                # NOPERM and WRONGTYPE come back this way too, and unlike a blip
+                # they do not clear. Refusing here would turn every restart into
+                # a crash loop, so say plainly that the guarantee is unproven
+                # rather than let silence read as a passed check
+                logger.warning(
+                    'could not verify crash-safe delivery: the probe did not settle',
+                    extra={'tg_key': delivery.queue_key},
+                )
             return
         msg = (
             'This Redis predates LMOVE (6.2), so a worker killed mid-send loses that message, '

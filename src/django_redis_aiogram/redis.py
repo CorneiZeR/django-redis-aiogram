@@ -8,7 +8,7 @@ because Django settings are not readable while the app registry is loading.
 
 import threading
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django.core.exceptions import ImproperlyConfigured
 from django.core.signals import setting_changed
@@ -161,7 +161,13 @@ class RedisProxy:
         return f'<RedisProxy {state}>'
 
 
-redis_conn = RedisProxy()
+if TYPE_CHECKING:
+    #: the proxy forwards everything through __getattr__, which types as Any — so
+    #: `redis_conn.ping()` was unchecked while `get_redis().ping()` was not, and
+    #: this annotation is what tells a consumer's mypy the difference
+    redis_conn: Redis
+else:
+    redis_conn = RedisProxy()
 
 
 def _reset_on_setting_change(setting: str, **_kwargs: object) -> None:

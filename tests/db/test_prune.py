@@ -137,13 +137,18 @@ def test_a_recent_row_inside_the_id_range_survives():
     writer are involved, so a recent row can sit below the watermark. Dropping
     created_at from the predicate would delete it.
     """
-    recent = an_event(days_old=1)  # the lower id
+    below = an_event(days_old=40)  # the lowest id, and expired
+    recent = an_event(days_old=1)  # a survivor in the middle of the range
     old = an_event(days_old=40)  # the watermark, above it
 
     prune(days=30, chunk=1000, sleep=0)
 
     assert TelegramEvent.objects.filter(pk=recent.pk).exists(), 'an id-only delete swept up a recent row'
     assert not TelegramEvent.objects.filter(pk=old.pk).exists()
+    # old/recent/old, so the created_at predicate cannot go dead when the walk's
+    # lower bound moves: with the survivor at the bottom, a range that started
+    # above it would pass while deleting nothing it should not
+    assert not TelegramEvent.objects.filter(pk=below.pk).exists()
 
 
 @pytest.mark.django_db(databases=['default', 'logs'])
@@ -208,3 +213,41 @@ def test_each_chunk_gets_its_own_transaction(monkeypatch):
 
     assert len(entered) == 3, f'expected one transaction per chunk, got {len(entered)}'
     assert TelegramEvent.objects.count() == 0
+
+
+@pytest.mark.django_db
+@override_settings(TELEGRAM_BOT={'EVENT_LOG': True})
+def test_a_surviving_low_id_row_does_not_pin_the_walk():
+    """`low` was the table's lowest id while the watermark was cutoff-filtered.
+
+    One recent row down there and every run restarted from it, so a bounded
+    `--max-chunks` run spent its whole budget crossing rows it could not delete
+    and never reached the expired ones.
+    """
+    survivor = an_event(days_old=1)  # the lowest id, and not expired
+    for _ in range(5):
+        an_event(days_old=40)
+
+    prune(days=30, chunk=1, sleep=0, max_chunks=2)
+
+    assert TelegramEvent.objects.filter(pk=survivor.pk).exists()
+    # exact, not "fewer than before": with chunk=1 the old walk spent its first
+    # chunk on the survivor's own id and deleted nothing there, so it got through
+    # one expired row where this gets through two
+    assert TelegramEvent.objects.count() == 4, 'a chunk was spent on the surviving row'
+
+
+@pytest.mark.django_db
+@override_settings(TELEGRAM_BOT={'EVENT_LOG': True})
+def test_a_dry_run_does_not_pace_itself(monkeypatch):
+    """The pause is for replicas and autovacuum. A dry run deletes nothing, so
+    there is nothing to pace, and a nightly `--dry-run` over a large table slept
+    once per chunk for no reason."""
+    slept = []
+    monkeypatch.setattr('django_redis_aiogram.management.commands.tgbot_prune_events.time.sleep', slept.append)
+    for _ in range(4):
+        an_event(days_old=40)
+
+    prune(days=30, chunk=1, sleep=0.1, dry_run=True)
+
+    assert slept == []

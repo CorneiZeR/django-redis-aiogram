@@ -278,6 +278,29 @@ def test_messages_stranded_under_another_worker_are_reported(redis_server):
 
 
 @override_settings(TELEGRAM_BOT={**SETTINGS, 'WORKER_NAME': 'mine'})
+def test_the_stranded_sweep_is_bounded_and_says_when_it_stopped_early(redis_server):
+    """`MATCH` filters on the server, but `SCAN` walks the whole keyspace.
+
+    The compose recipe runs this probe every thirty seconds, and the settings
+    page suggests sharing one Redis with a cache backend — so an unbounded sweep
+    is a full pass over someone else's keys twice a minute. It stops instead, and
+    a count it cannot stand behind is reported as a floor rather than a total.
+    """
+    redis_server.set(f'{QUEUE}:heartbeat:mine', str(int(time.time())))
+    redis_server.rpush(f'{QUEUE}:processing:gone', b'{}')
+    # more keys than the bound can reach at a hundred a round
+    for index in range(4000):
+        redis_server.set(f'unrelated:{index}', b'x')
+    out = StringIO()
+
+    call_command('tgbot_healthcheck', stdout=out)
+
+    reported = out.getvalue()
+    assert 'healthy' in reported
+    assert 'at least' in reported, reported
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'WORKER_NAME': 'mine'})
 def test_a_scan_that_fails_does_not_make_the_container_unhealthy(redis_server, monkeypatch):
     """The probe answers about this worker. A scan it could not finish is not a
     reason to restart a container that is doing its job."""

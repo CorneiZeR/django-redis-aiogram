@@ -403,3 +403,78 @@ def test_unreadable_allow_pickle_is_reported_not_raised():
 
     assert 'django_redis_aiogram.E017' in reported
     assert 'django_redis_aiogram.E022' not in reported
+
+
+def test_admission_is_strict_fifo():
+    """A herd re-racing for the same token admits in whatever order the loop
+    happens to resume, so the message that waited longest had no claim on going
+    first. Claiming a slot up front makes arrival order the admission order.
+
+    On a real loop, like the wakeup count below: under `FakeClock` each waiter
+    that wakes finds the bucket already refilled, so no herd forms and the old
+    design comes out ordered too. Against a real one it admits
+    `[0, 14, 26, 13, 28, 2, ...]`.
+    """
+    admitted = []
+
+    async def scenario():
+        bucket = TokenBucket(rate=400, capacity=1)
+
+        async def caller(index):
+            await bucket.acquire()
+            admitted.append(index)
+
+        await asyncio.gather(*(caller(index) for index in range(30)))
+
+    run(scenario())
+
+    assert admitted == list(range(30))
+
+
+def test_a_backlog_wakes_once_per_admitted_call():
+    """Counting tokens made every waiter recompute the same wait from the same
+    state, so N waiters woke together and N-1 went back to sleep — about N²/2
+    wakeups for N sends.
+
+    On a real loop, not `FakeClock`: its `sleep` advances the clock by the whole
+    wait, so the herd never forms and the count comes out right on either design.
+    """
+    waits = []
+
+    async def counting_sleep(seconds):
+        waits.append(seconds)
+        await asyncio.sleep(0)
+
+    async def scenario():
+        bucket = TokenBucket(rate=200, capacity=5, sleep=counting_sleep)
+        await asyncio.gather(*(bucket.acquire() for _ in range(40)))
+
+    run(scenario())
+
+    # forty calls, five of them inside the burst
+    assert len(waits) == 35
+
+
+def test_the_wait_is_measured_from_when_it_starts():
+    """The slot is claimed under the lock; the wait is not.
+
+    A clock sampled while claiming is already stale by the time the sleep is
+    computed, and sleeping `slot - stale` overshoots by exactly that gap. The
+    scripted clock puts the gap where it would be in production — between
+    releasing the lock and starting to wait.
+    """
+    reads = iter([0.0, 0.0, 0.0, 0.0, 0.05])
+    slept = []
+
+    async def sleep(seconds):
+        slept.append(seconds)
+
+    async def scenario():
+        bucket = TokenBucket(rate=10, capacity=1, clock=lambda: next(reads), sleep=sleep)
+        await bucket.acquire()
+        await bucket.acquire()
+
+    run(scenario())
+
+    # the slot is at 0.1 and the wait starts at 0.05, so half of it has passed
+    assert slept == [pytest.approx(0.05)]

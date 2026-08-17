@@ -353,3 +353,122 @@ def test_the_permissions_are_refusals_not_opinions():
     assert admin_instance.has_add_permission(None) is False
     assert admin_instance.has_change_permission(None) is False
     assert admin_instance.has_delete_permission(None) is False
+
+
+@pytest.mark.django_db
+@override_settings(TELEGRAM_BOT=ON)
+def test_the_changelist_does_not_fetch_the_payload_columns(client):
+    """`error` and `detail` are most of what a row weighs, and the list renders
+    neither — about 1.4 MB per fifty-row page fetched to be discarded, including
+    for a reader `get_fields` withholds them from."""
+    an_event(error='x' * 500, detail={'text': 'y' * 500})
+    client.force_login(a_reader('lean', 'view_telegramevent'))
+
+    with CaptureQueriesContext(connection) as queries:
+        client.get(CHANGELIST)
+
+    selects = [q['sql'] for q in queries if 'django_redis_aiogram_event' in q['sql'] and 'COUNT(' not in q['sql']]
+    assert selects, 'the changelist issued no query at all'
+    assert not any('"error"' in sql or '"detail"' in sql for sql in selects), selects
+
+
+@pytest.mark.django_db
+@override_settings(TELEGRAM_BOT=ON)
+def test_a_reader_without_the_payload_permission_never_fetches_them(client):
+    """`get_fields` keeps them off the page. Fetching them anyway would still put
+    message bodies and exception text on the wire and into the query log for
+    someone the permission exists to withhold them from."""
+    event = an_event(error='secret', detail={'text': 'private'})
+    client.force_login(a_reader('narrow', 'view_telegramevent'))
+
+    with CaptureQueriesContext(connection) as queries:
+        response = client.get(f'{CHANGELIST}{event.pk}/change/')
+
+    assert response.status_code == 200
+    rows = [q['sql'] for q in queries if 'django_redis_aiogram_event' in q['sql']]
+    assert rows, 'the detail page issued no query at all'
+    assert not any('"error"' in sql or '"detail"' in sql for sql in rows), rows
+
+
+@pytest.mark.django_db
+@override_settings(TELEGRAM_BOT=ON)
+def test_the_detail_page_still_fetches_them_in_one_query(client):
+    """Deferring on the changelist routes the detail page through the same
+    queryset, so without lifting it each column would cost its own extra query
+    the moment the template touched it."""
+    event = an_event(error='boom', detail={'text': 'hello'})
+    client.force_login(a_reader('full', 'view_telegramevent', 'view_telegramevent_payload'))
+
+    with CaptureQueriesContext(connection) as queries:
+        response = client.get(f'{CHANGELIST}{event.pk}/change/')
+
+    assert response.status_code == 200
+    body = response.content.decode()
+    assert 'boom' in body
+    rows = [q['sql'] for q in queries if 'django_redis_aiogram_event' in q['sql'] and 'WHERE' in q['sql'].upper()]
+    assert any('"error"' in sql and '"detail"' in sql for sql in rows), rows
+
+
+@pytest.mark.django_db
+@override_settings(TELEGRAM_BOT=ON)
+def test_only_indexed_columns_are_sortable():
+    """One click on an unindexed header sorts a table sized by traffic."""
+    from django_redis_aiogram.admin import TelegramEventAdmin
+
+    assert set(TelegramEventAdmin.sortable_by) == {'created_at', 'kind', 'chat_id'}
+
+
+@pytest.mark.django_db
+@override_settings(TELEGRAM_BOT=ON)
+def test_a_kind_filtered_changelist_needs_no_sort(client):
+    """The index was `(kind, -created_at)` while `ordering` is `-id`.
+
+    So every filtered changelist sorted in a temp b-tree — the page query and
+    the bounded count alike — which is what made the count's documented bound
+    untrue: it can only stop early if the rows arrive already ordered.
+
+    Asserted on the plan rather than on `_meta.indexes`: a snapshot of the model
+    would pass with an index the database never chooses.
+    """
+    an_event()
+    client.force_login(a_reader('planner', 'view_telegramevent'))
+
+    with CaptureQueriesContext(connection) as queries:
+        client.get(f'{CHANGELIST}?kind={EventKind.OUTBOUND_SENT.value}')
+
+    touched = [q['sql'] for q in queries if 'django_redis_aiogram_event' in q['sql']]
+    assert touched, 'the changelist issued no query at all'
+    with connection.cursor() as cursor:
+        for sql in touched:
+            cursor.execute(f'EXPLAIN QUERY PLAN {sql}')
+            plan = ' '.join(str(row) for row in cursor.fetchall())
+            assert 'TEMP B-TREE' not in plan.upper(), f'{plan}\nfor: {sql}'
+
+
+@pytest.mark.django_db
+@override_settings(TELEGRAM_BOT=ON)
+@pytest.mark.parametrize('order', ['created_at', '-created_at'])
+def test_the_created_at_headers_sort_at_most_a_tie(order):
+    """Django appends `-pk` to make the changelist's order deterministic, and a
+    single-column index cannot serve that on its own.
+
+    What it *can* avoid is sorting the whole result set. Measured: ascending needs
+    no sort at all, and descending sorts only the last term — the rows sharing one
+    `created_at`. Removing even that would take a `(created_at, -id)` index in
+    each direction, which is two more writes per row on a table whose whole design
+    is cheap inserts.
+
+    Falsified by dropping `drai_event_recent` from the database directly, where
+    both directions become a full `USE TEMP B-TREE FOR ORDER BY` — editing
+    `models.py` does not do it, because the test database is built from the
+    migrations.
+    """
+    rows = TelegramEvent.objects.order_by(order, '-pk')[:50]
+    sql, params = rows.query.sql_with_params()
+
+    with connection.cursor() as cursor:
+        cursor.execute(f'EXPLAIN QUERY PLAN {sql}', params)
+        plan = ' | '.join(str(row[-1]) for row in cursor.fetchall())
+
+    assert 'drai_event_recent' in plan, plan
+    assert 'USE TEMP B-TREE FOR ORDER BY' not in plan.upper(), plan

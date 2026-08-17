@@ -59,8 +59,18 @@ class TelegramEvent(models.Model):
         # named explicitly and kept short: Oracle rejects an identifier over 30
         indexes = (
             models.Index(fields=('correlation_id',), name='drai_event_correlation'),
+            # two consumers: the changelist's created_at sort header and the
+            # prune watermark. Django appends -pk to make the sort deterministic,
+            # which this cannot serve on its own — measured, the descending header
+            # sorts only the last term, within rows sharing one created_at, and
+            # the ascending one needs no sort at all. A pair of (created_at, -id)
+            # indexes would remove even that, at the price of two more writes per
+            # row on a table whose whole design is cheap inserts
             models.Index(fields=('-created_at',), name='drai_event_recent'),
-            models.Index(fields=('kind', '-created_at'), name='drai_event_kind_recent'),
+            # by -id, matching `ordering`: on (kind, -created_at) every filtered
+            # changelist sorted in a temp b-tree, page query and bounded count
+            # alike, which is what made the count's documented bound untrue
+            models.Index(fields=('kind', '-id'), name='drai_event_kind_id'),
             models.Index(fields=('chat_id', '-id'), name='drai_event_chat'),
         )
 

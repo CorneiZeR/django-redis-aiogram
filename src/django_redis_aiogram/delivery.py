@@ -22,6 +22,7 @@ false. A handler that takes an ``on_complete`` keyword is now handed one and the
 message waits for it; one that does not keeps the old semantics exactly.
 """
 
+import asyncio
 import hashlib
 import inspect
 import logging
@@ -30,7 +31,6 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from functools import partial
 from typing import Any
 
 from redis.exceptions import ResponseError
@@ -76,12 +76,19 @@ def defers_completion(handler: Handler) -> bool:
     so does ``TelegramBot.send_raw`` — so treating that as acceptance would hand
     the callback to handlers that never call it, and their messages would sit in
     the in-flight list until a restart reclaimed them.
+
+    It also has to be a parameter the keyword call can reach. A positional-only
+    ``on_complete`` reads as acceptance but refuses ``on_complete=...`` with a
+    ``TypeError``, and that lands in the handler-failed branch — acknowledging a
+    message nothing ever sent.
     """
+    takes_keyword = (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
     try:
-        return 'on_complete' in inspect.signature(handler).parameters
+        parameter = inspect.signature(handler).parameters.get('on_complete')
     except (TypeError, ValueError):
         # a callable signature cannot always be read; the old semantics are safe
         return False
+    return parameter is not None and parameter.kind in takes_keyword
 
 
 class Delivery(ABC):
@@ -234,6 +241,27 @@ class Delivery(ABC):
             self._in_flight -= 1
             self.acknowledge(raw)
 
+    def _completion_for(self, handle: bytes | str) -> Callable[[], None]:
+        """One report per message, however many times the send says it finished.
+
+        A latch rather than a flag: two threads can both read an unset flag and
+        both report. A second report is not harmless — it takes another message's
+        place in the in-flight count, drives it below zero and quietly widens the
+        bound ``MAX_IN_FLIGHT`` exists to hold.
+        """
+        latch = threading.Lock()
+
+        def once() -> None:
+            if latch.acquire(blocking=False):
+                self._finished.put(handle)
+
+        return once
+
+    def at_capacity(self) -> bool:
+        """Whether this consumer is already holding as many sends as it may."""
+        limit = max(0, int(conf['MAX_IN_FLIGHT']))
+        return bool(limit) and self._in_flight >= limit
+
     def hold_for_capacity(self) -> None:
         """Stop taking messages while too many are still in flight.
 
@@ -241,11 +269,15 @@ class Delivery(ABC):
         an ``LREM``, which scans that list, so letting a backlog accumulate there
         turns draining it into quadratic work. Zero, the default, is the
         behaviour that shipped before deferred acknowledgement existed.
+
+        The wait keeps writing the heartbeat, for the same reason ``run()`` caps
+        the blocking pop at ``HEARTBEAT_INTERVAL``: a worker at its limit is busy,
+        not dead. Held silently past the key's ``interval * 3`` TTL it would be
+        restarted while healthy, and the messages it was still sending reclaimed
+        and sent again.
         """
-        limit = max(0, int(conf['MAX_IN_FLIGHT']))
-        if not limit:
-            return
-        while self._in_flight >= limit and not self._stop.is_set():
+        while self.at_capacity() and not self._stop.is_set():
+            self.heartbeat()
             try:
                 raw = self._finished.get(timeout=1)
             except queue.Empty:
@@ -346,30 +378,47 @@ class Delivery(ABC):
             'queued_at': envelope.queued_at,
             **envelope.kwargs,
         }
-        if self._defers:
+        return self._hand_over(envelope, call, handle)
+
+    def _hand_over(self, envelope: Envelope, call: dict[str, Any], handle: bytes | str) -> bool:
+        """Call the handler, and say whether the message may be acknowledged.
+
+        Cancellation is the reason this is not one ``except``: it is a
+        ``BaseException``, so letting it through would leave :meth:`run` and end
+        the consumer for the life of the container. The message stays in flight,
+        which is right — nothing sent it — but this worker has to keep reading.
+        """
+        deferring = self._defers
+        if deferring:
+            # into the dict, never alongside it as a second keyword. The queue is
+            # a trust boundary and send() forwards whatever it was given, so a
+            # payload can carry this name — as a keyword that is "got multiple
+            # values", a TypeError landing in the failure branch below, which
+            # acknowledges a message nothing sent. Assigning simply wins
+            call['on_complete'] = self._completion_for(handle)
             self._in_flight += 1
-            try:
-                self.handler(on_complete=partial(self._finished.put, handle), **call)
-            except Exception:
-                self._in_flight -= 1
-                logger.exception(
-                    'handler failed for queued message',
-                    extra={'tg_function': envelope.function},
-                )
-                return True
-            # the send decides when this message is done. Returning True here is
-            # what made the at-least-once promise false: send_raw returns as soon
-            # as the coroutine is scheduled, so the message left the in-flight
-            # list before Telegram had seen anything
-            return False
         try:
             self.handler(**call)
+        except asyncio.CancelledError:
+            if deferring:
+                self._in_flight -= 1
+            logger.warning(
+                'a queued send was cancelled; leaving it in flight',
+                extra={'tg_function': envelope.function},
+            )
+            return False
         except Exception:
+            if deferring:
+                self._in_flight -= 1
             logger.exception(
                 'handler failed for queued message',
                 extra={'tg_function': envelope.function},
             )
-        return True
+            return True
+        # a deferring handler decides when this message is done. Returning True
+        # here is what made the at-least-once promise false: send_raw returns as
+        # soon as the coroutine is scheduled, long before Telegram has seen it
+        return not deferring
 
     def _record(self, kind: EventKind, envelope: Envelope, error: str = '') -> None:
         """Record what the consumer did with one message."""
@@ -414,6 +463,11 @@ class Delivery(ABC):
         connection = get_redis()
         raw: bytes | str | None
         while not self._stop.is_set():
+            self.collect()
+            if self.at_capacity():
+                # the blocking loop waits here; a drain has no thread to wait on,
+                # so it stops instead of scheduling past the bound
+                return
             if self._reliable:
                 try:
                     raw = connection.lmove(self.queue_key, self.processing_key, 'LEFT', 'RIGHT')

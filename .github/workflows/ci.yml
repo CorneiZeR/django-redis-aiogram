@@ -24,7 +24,7 @@ jobs:
           python-version: '3.13'
           cache: pip
           cache-dependency-path: pyproject.toml
-      - run: pip install -e '.[dev]'
+      - run: pip install -e . --group dev
       - run: ruff check .
       - run: ruff format --check .
       - run: mypy
@@ -35,13 +35,17 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
-        django-version: ['5.2', '6.0']
+        django-version: ['5.2', '6.0', '6.1']
         exclude:
-          # Django 6.0 requires Python 3.12+
+          # Django 6.0 and 6.1 require Python 3.12+
           - python-version: '3.10'
             django-version: '6.0'
           - python-version: '3.11'
             django-version: '6.0'
+          - python-version: '3.10'
+            django-version: '6.1'
+          - python-version: '3.11'
+            django-version: '6.1'
     steps:
       - uses: actions/checkout@v7
         with:
@@ -51,7 +55,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: pyproject.toml
-      - run: pip install -e '.[dev]' 'django~=${{ matrix.django-version }}.0'
+      - run: pip install -e . --group dev 'django~=${{ matrix.django-version }}.0'
       - run: python -m pytest -q
 
   test-db:
@@ -67,7 +71,7 @@ jobs:
           python-version: '3.13'
           cache: pip
           cache-dependency-path: pyproject.toml
-      - run: pip install -e '.[dev]'
+      - run: pip install -e . --group dev
       - run: python -m pytest -q --ds=tests.db_settings tests/db
 
   test-floors:
@@ -83,7 +87,11 @@ jobs:
           python-version: '3.10'
           cache: pip
           cache-dependency-path: pyproject.toml
-      - run: pip install -e '.[dev]' 'django==5.2.0' 'aiogram==3.30.0' 'redis==6.2.0'
+          # the floor this repository documents: --group is PEP 735, which
+          # pip understands from 25.1. Every other job runs the runner's own
+          # pip, so CI still exercises the one contributors actually have
+          pip-version: '25.1'
+      - run: pip install -e . --group dev 'django==5.2.0' 'aiogram==3.30.0' 'redis==6.2.0'
       - run: python -m pytest -q
 
   integration:
@@ -100,11 +108,18 @@ jobs:
         include:
           - deps: latest
             pins: ''
+            image: redis:7
           - deps: floors
             pins: "'django==5.2.0' 'aiogram==3.30.0' 'redis==6.2.0'"
+            image: redis:7
+          # the fork most managed providers actually run. It answers the same
+          # protocol, which is an assumption worth testing rather than assuming
+          - deps: valkey
+            pins: ''
+            image: valkey/valkey:8
     services:
       redis:
-        image: redis:7
+        image: ${{ matrix.image }}
         ports: ['6379:6379']
         options: >-
           --health-cmd "redis-cli ping"
@@ -120,7 +135,7 @@ jobs:
           python-version: '3.13'
           cache: pip
           cache-dependency-path: pyproject.toml
-      - run: pip install -e '.[dev]' ${{ matrix.pins }}
+      - run: pip install -e . --group dev ${{ matrix.pins }}
       - run: python -m pytest -q -m integration tests/integration
         env:
           DJANGO_REDIS_AIOGRAM_TEST_REDIS_URL: redis://localhost:6379/0
