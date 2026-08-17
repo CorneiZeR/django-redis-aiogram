@@ -240,9 +240,10 @@ them, so it is not one per message.
   writes rows", `active` means "the table or a receiver is reading" and is what
   every producing seam now sits behind, and `wants_payload` guards only the
   summarising, which is the expensive part and no part of counting — so with the log
-  off a receiver gets rows without the *summarised arguments*, while still getting
-  what the seam measured itself: a send's `duration_ms`, a retry's `retry_after`, a
-  queueing failure's `stage`, a gap's `dropped` count. `EVENT_LOG_KINDS` filters
+  off a receiver gets `Event` objects without the *summarised arguments*, while still
+  getting what the seam measured itself: a send's `duration_ms`, a retry's
+  `retry_after`, a queueing failure's `stage`, a gap's `dropped` count. Rows are what
+  the table gets, and with the log off there are none. `EVENT_LOG_KINDS` filters
   receivers as well, because it is one answer to "which events does this deployment
   care about" and not two — except for `log.dropped`, which is the record that
   recording itself fell behind and is exempt in both directions, since a deployment

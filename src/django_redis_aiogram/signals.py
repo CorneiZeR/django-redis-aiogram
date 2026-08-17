@@ -54,4 +54,4 @@ from django.dispatch import Signal
 #: writer's shutdown. Under ``EVENT_LOG_SYNC`` there is no writer thread at all and
 #: receivers run on the thread that recorded the event, after its insert: that flag
 #: is for tests, and this is one more reason it is.
-events_recorded = Signal()
+events_recorded: Signal = Signal()

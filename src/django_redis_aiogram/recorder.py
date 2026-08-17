@@ -188,9 +188,10 @@ class EventRecorder:
 
         Only the table does. ``describe()`` redacts credentials, walks the
         structure and bounds the result — measured in tens of microseconds, against
-        nothing for a counter keyed on ``kind`` and ``function``. So a receiver gets
-        rows with ``detail`` left empty unless the log is on too, and the seam says
-        so where a project reads about it.
+        nothing for a counter keyed on ``kind`` and ``function``. So unless the log
+        is on too, a receiver gets ``Event`` objects whose ``detail`` carries what
+        the seam measured itself and not the summarised arguments. Rows are what the
+        table gets; with the log off there are none.
         """
         return self.enabled
 
@@ -464,12 +465,19 @@ class EventRecorder:
         reaching the ``except`` here came from a receiver: :meth:`_publish` contains
         those itself.
         """
-        dropped_before = self._dropped
+        # under the counter's lock, both of them: `_drop`'s docstring already names
+        # "the writer on a failed flush" among the threads it protects against, and
+        # this was the one place that read and wrote the count without taking it —
+        # so a producer's drop landing between this `+=`'s read and its write was
+        # silently discarded, and the `log.dropped` row then under-reported the gap
+        with self._counter:
+            dropped_before = self._dropped
         try:
             self._deliver(batch)
         except Exception:
             failures += 1
-            self._dropped += len(batch)
+            with self._counter:
+                self._dropped += len(batch)
             # one line per failure, not two: the suspension is a different
             # sentence about the same exception, not a second thing that broke
             if failures >= FAILURE_LIMIT:

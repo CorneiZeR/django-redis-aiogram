@@ -18,7 +18,7 @@ from django.test import override_settings
 
 from django_redis_aiogram import TelegramBot
 from django_redis_aiogram.instrumentation import install_instrumentation, instrumented
-from django_redis_aiogram.recorder import Event, recorder
+from django_redis_aiogram.recorder import Event, EventRecorder, recorder
 from django_redis_aiogram.signals import events_recorded
 
 
@@ -432,3 +432,48 @@ def test_a_failed_write_still_reaches_a_receiver(redis_server, collected, monkey
 
     assert kinds(collected) == ['outbound.queued'], f'a failed write cost the receiver its batch: {kinds(collected)}'
     assert 'could not write an event batch' in caplog.text, 'the failure was not reported'
+
+
+def test_the_drop_counter_is_only_ever_touched_under_its_own_lock():
+    """`_drop`'s docstring names the threads it protects against, and the writer on
+    a failed flush is one of them — but `_flush` read and wrote the count without
+    taking the lock, so a producer's drop landing between that `+=`'s read and its
+    write was discarded, and the `log.dropped` row then under-reported the gap.
+
+    Asserted on the lock rather than by racing threads: a lost update is a
+    read-modify-write interleaving, so a timing test would pass most runs and fail
+    some, which is worse than no test. This records whether `_counter` was held at
+    every write of `_dropped`, which is the invariant itself.
+    """
+    held: list[bool] = []
+
+    class Watching(EventRecorder):
+        """An `EventRecorder` that reports the lock state at each write."""
+
+        @property
+        def _dropped(self):
+            return self.__dict__.get('dropped_value', 0)
+
+        @_dropped.setter
+        def _dropped(self, value):
+            counter = self.__dict__.get('_counter')
+            if counter is not None:
+                # __init__ sets the count before it builds the lock
+                held.append(counter.locked())
+            self.__dict__['dropped_value'] = value
+
+    watcher = Watching()
+
+    def refuse(batch):
+        message = 'no such table'
+        raise RuntimeError(message)
+
+    watcher._write = refuse
+    watcher._enabled = True
+
+    watcher._drop(2)
+    watcher._flush([Event(kind='outbound.queued')], failures=0)
+
+    assert held, 'nothing wrote the counter, so nothing is being tested'
+    assert all(held), f'the counter was written unguarded {held.count(False)} of {len(held)} times'
+    assert watcher._dropped == 3, f'the count came out as {watcher._dropped} for two drops and one failed batch'
