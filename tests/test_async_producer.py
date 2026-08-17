@@ -18,10 +18,14 @@ from django.test import override_settings
 from django_redis_aiogram import TelegramBot
 from django_redis_aiogram.context import correlation_scope
 from django_redis_aiogram.envelope import unpack
+from django_redis_aiogram.exceptions import UnknownApiMethodError
 from django_redis_aiogram.redis import aget_redis, as_bytes
 from django_redis_aiogram.serializers import SerializationError, loads
 
 QUEUE = 'TELEGRAM_BOT_MESSAGE'
+#: the one line that says there is an awaitable form; asserted, so a reword
+#: cannot quietly leave Logging.md describing a message nothing emits
+MENTION = 'a synchronous send was called from a running event loop'
 SETTINGS = {'REDIS_URL': 'redis://localhost:6379/0', 'RATE_LIMIT': None}
 
 
@@ -245,8 +249,9 @@ def test_send_from_a_loop_mentions_asend_once(redis_server, caplog, monkeypatch)
     with caplog.at_level('WARNING', logger='django_redis_aiogram'):
         asyncio.run(three_sends())
 
-    mentions = [record for record in caplog.records if 'await asend()' in record.getMessage()]
+    mentions = [record for record in caplog.records if MENTION in record.getMessage()]
     assert len(mentions) == 1, f'said it {len(mentions)} times'
+    assert mentions[0].tg_alternative == 'asend', 'the line has to name the method to move to'
     assert redis_server.llen(QUEUE) == 3, 'the send itself must be unaffected'
 
 
@@ -259,7 +264,63 @@ def test_send_off_a_loop_says_nothing(redis_server, caplog, monkeypatch):
     with caplog.at_level('WARNING', logger='django_redis_aiogram'):
         TelegramBot().send(chat_id=1, text='hi')
 
-    assert 'await asend()' not in caplog.text
+    assert MENTION not in caplog.text
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+@pytest.mark.parametrize(
+    ('producer', 'alternative'),
+    [('send', 'asend'), ('send_redis', 'asend'), ('send_many', 'asend_many')],
+)
+def test_every_synchronous_route_that_writes_names_its_own_twin(
+    redis_server, caplog, monkeypatch, producer, alternative
+):
+    """The mention was on `send` alone, and that is two thirds of nothing.
+
+    A web tier that wants to be explicit calls `send_redis`; a fan-out calls
+    `send_many`, which holds the loop longest of the three because it serialises
+    every payload between round trips. Both were silent, so the async methods this
+    release adds went unmentioned to exactly the callers who needed them.
+    """
+    monkeypatch.setattr('django_redis_aiogram.client._asend_mentioned', threading.Event())
+    bot = TelegramBot()
+
+    async def once():
+        if producer == 'send_many':
+            bot.send_many([1], text='hi')
+        else:
+            getattr(bot, producer)(chat_id=1, text='hi')
+
+    with caplog.at_level('WARNING', logger='django_redis_aiogram'):
+        asyncio.run(once())
+
+    mentions = [record for record in caplog.records if MENTION in record.getMessage()]
+    assert len(mentions) == 1, f'{producer} said it {len(mentions)} times'
+    assert mentions[0].tg_alternative == alternative, f'{producer} pointed at the wrong method'
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+@pytest.mark.parametrize('bulk', ['send_many', 'asend_many'])
+@pytest.mark.parametrize('chat_ids', [[1, 2], []], ids=['with chats', 'no chats'])
+def test_the_bulk_pair_refuses_an_unknown_method_before_writing(redis_server, bulk, chat_ids):
+    """The promise that an unknown method raises before the queue now covers four.
+
+    The check lives in `_chunks`, which is a generator — its body does not run
+    until the first `next()`. That makes the empty-chat case worth asserting
+    rather than assuming: a caller broadcasting to a queryset that turned out
+    empty would otherwise get silence for a typo, and learn about it on the day
+    the queryset is not empty.
+    """
+    bot = TelegramBot()
+
+    def broadcast():
+        result = getattr(bot, bulk)(chat_ids, 'not_a_telegram_method', text='hi')
+        return asyncio.run(result) if bulk.startswith('a') else result
+
+    with pytest.raises(UnknownApiMethodError):
+        broadcast()
+
+    assert redis_server.llen(QUEUE) == 0, 'a refused method still reached the queue'
 
 
 @override_settings(TELEGRAM_BOT={'RATE_LIMIT': None, 'ENABLED': False})
@@ -327,6 +388,12 @@ def test_a_payload_that_cannot_be_serialised_is_recorded_as_lost(redis_server, b
     and for a bulk call those rows are the only record of which ones: the ids go
     with the exception. Serialising outside the guard made that promise false for
     the one failure that happens before the socket is touched at all.
+
+    The `stage` matters as much as the row. This failure means the payload never
+    left the process, so re-sending it is safe; a failed `RPUSH` means the write
+    may have been applied and only the reply lost, so re-sending may duplicate.
+    Recording both as `queueing` would have made the safe case indistinguishable
+    from the one that is not.
     """
     recorded = []
     monkeypatch.setattr('django_redis_aiogram.client.recorder.record', recorded.append)
@@ -347,7 +414,7 @@ def test_a_payload_that_cannot_be_serialised_is_recorded_as_lost(redis_server, b
 
     dropped = [event for event in recorded if event.kind == 'outbound.dropped']
     assert len(dropped) == 4, f'{len(dropped)} rows for four messages nothing could encode'
-    assert {event.detail['stage'] for event in dropped} == {'queueing'}
+    assert {event.detail['stage'] for event in dropped} == {'serialising'}
     assert redis_server.llen(QUEUE) == 0
 
 

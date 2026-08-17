@@ -153,8 +153,11 @@ them, so it is not one per message.
   concurrent sends took 0.49 s against 0.02 s — and even threaded it draws on a
   pool shared with every other `sync_to_async` in the process, the ORM's
   included. Each loop gets its own client, because these connections are
-  loop-affine; `await bot.aclose()` releases it where a lifespan hook exists, and
-  **Deployment** says why you may not need to.
+  loop-affine, and `await bot.aclose()` is the only way to close one on the loop
+  that owns it — the only loop permitted to. A process that runs a loop per unit of
+  work should call it; the registry drops clients whose loop has closed, so nothing
+  accumulates without it, but the sockets wait for the collector. **Deployment**
+  has the recipe.
 - **`bot.send_many(chat_ids, ...)`** and **`await bot.asend_many(...)`** queue one
   message per chat, a chunk of them per variadic `RPUSH`, returning an id per
   message in the order given. It speeds up *queueing*, not delivery — the rate

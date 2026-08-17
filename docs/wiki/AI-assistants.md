@@ -18,16 +18,16 @@ Project uses django-redis-aiogram 3.x. Rules:
   construct TelegramBot() per task or per request — that builds an event loop and
   an HTTP session nothing closes.
 - To send from anywhere (view, task, signal): `bot.send(chat_id=..., text=...)`.
+  It queues through Redis outside the bot container and calls Telegram directly
+  inside it. Pass another method by name: bot.send('send_photo', chat_id=..., photo=...).
+  Only Telegram API methods aiogram exposes are accepted.
 - From async code, await `bot.asend(...)` instead: `send()` writes to a socket on
   the thread the loop is running on. Same arguments, same returned id.
 - To reach many chats, `bot.send_many(chat_ids, text=...)`, or from async code
   `await bot.asend_many(chat_ids, text=...)` — un-awaited it only builds a
   coroutine and queues nothing. Either queues a chunk per round trip and returns
-  an id per message. It speeds up queueing only — the rate limits still pace
-  delivery.
-  It queues through Redis outside the bot container and calls Telegram directly
-  inside it. Pass another method by name: bot.send('send_photo', chat_id=..., photo=...).
-  Only Telegram API methods aiogram exposes are accepted.
+  an id per message, and unlike `send` both always queue, including inside the bot
+  container. They speed up queueing only — the rate limits still pace delivery.
 - Handlers go in <app>/tg_router.py and are registered with decorators on the
   shared bot: @bot.message(F.text), @bot.callback_query(...). They are ordinary
   async Django code; use afirst()/sync_to_async for the ORM.

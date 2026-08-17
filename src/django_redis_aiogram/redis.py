@@ -173,8 +173,21 @@ class _LoopConnections:
 
     ``redis.asyncio`` connections belong to the loop that created them, so the
     single shared client the rest of this module keeps would be wrong here: two
-    loops sharing one would interleave reads on the same socket. Keyed weakly, so
-    a loop that goes away takes its entry with it.
+    loops sharing one would interleave reads on the same socket.
+
+    **A weak key cannot bound this on its own, and measuring said so.** A connected
+    client holds its loop — through the connection, its writer, its transport — so
+    the value keeps the key alive and the entry never dies. Measured against a real
+    server: three loops used through :func:`aget_redis` and abandoned left three
+    live loops and three live clients, where the same three clients dropped on the
+    floor left none. That is the whole argument for the sweep in :meth:`get`, and
+    the reason no death-triggered cleanup can work here: holding a loop-affine
+    client at all is holding its loop.
+
+    The weak keys stay as the cheaper half of the same job — a client built and
+    never used holds nothing, so that entry does go by itself — but the sweep is
+    what keeps a process that runs a loop per unit of work from accumulating a
+    client, and its sockets, for every one of them.
 
     Invalidation cannot close: ``setting_changed`` is synchronous, ``aclose()`` is
     a coroutine, and closing a client belonging to another loop from another
@@ -189,18 +202,36 @@ class _LoopConnections:
         self._clients = weakref.WeakKeyDictionary()
         self._generation = 0
 
+    def _forget_closed(self) -> list[AsyncRedis]:
+        """Drop the entries whose loop is closed, and hand back their clients.
+
+        Held under the guard. The clients are returned rather than dropped here so
+        that whatever their collection costs happens outside it.
+
+        They cannot be closed properly: ``aclose()`` would have to be awaited on
+        the loop that is gone. Letting go is the whole of what is available, and it
+        is what would have happened anyway had this registry never held them.
+        """
+        closed = [loop for loop in list(self._clients.keys()) if loop.is_closed()]
+        return [self._clients.pop(loop)[1] for loop in closed]
+
     async def get(self) -> AsyncRedis:
         """Return this loop's client, building or replacing it as needed."""
         loop = _running_loop()
         # no await inside the lock, so a coroutine cannot be suspended holding it
         # and another thread's loop is only ever held off for a dict lookup
         with self._guard:
+            abandoned = self._forget_closed()
             entry = self._clients.get(loop)
             if entry is not None and entry[0] == self._generation:
-                return entry[1]
-            stale = None if entry is None else entry[1]
-            client = build_async_client()
-            self._clients[loop] = (self._generation, client)
+                stale, client = None, entry[1]
+            else:
+                stale = None if entry is None else entry[1]
+                client = build_async_client()
+                self._clients[loop] = (self._generation, client)
+        # outside the guard: letting go of the abandoned clients runs whatever
+        # their collection runs, and no other loop should wait behind it
+        abandoned.clear()
         if stale is not None:
             # on its own loop, which is the only place it may be closed
             await stale.aclose()

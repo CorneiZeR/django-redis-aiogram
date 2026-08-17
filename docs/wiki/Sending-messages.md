@@ -58,6 +58,10 @@ async def notify(request):
 
 def announce(chat_ids):
     return bot.send_many(chat_ids, text='we are back')
+
+
+async def announce_from_async(chat_ids):
+    return await bot.asend_many(chat_ids, text='we are back')
 ```
 
 `asend` is `send` for code already on an event loop. The synchronous one writes to

@@ -49,7 +49,7 @@ gives you `sent` rows with no `queued` rows to match. That is not a bug.
 | `outbound.sent` | Telegram accepted it |
 | `outbound.retried` | Telegram refused it with a rate limit; backing off |
 | `outbound.failed` | the call raised |
-| `outbound.dropped` | retries were exhausted, or shutdown cancelled it |
+| `outbound.dropped` | it never got sent: queueing refused it, retries were exhausted, or shutdown cancelled it. `detail.stage` says which |
 | `inbound.received` | an update arrived, by polling or webhook |
 | `inbound.handled` | the handlers finished |
 | `inbound.failed` | a handler raised |
@@ -57,6 +57,20 @@ gives you `sent` rows with no `queued` rows to match. That is not a bug.
 | `queue.undecodable` | a payload could not be decoded |
 | `queue.rejected` | a payload named something that is not a Telegram API method |
 | `log.dropped` | the writer fell behind and lost events — the gap, recorded |
+
+`outbound.dropped` is the one worth reading twice, because two of its causes are
+not equally recoverable and `detail.stage` is what separates them:
+
+| `detail.stage` | What happened | Safe to send again? |
+| --- | --- | --- |
+| `serialising` | the payload could not be encoded, so it never left the process | yes — Redis never saw it |
+| `queueing` | the write to Redis raised | **not certainly** — an `RPUSH` that raised may have been applied and only its reply lost |
+| absent | retries were exhausted, or shutdown cancelled the send | it reached Telegram or was refused there; see `error_code` |
+
+That matters most after a broadcast: `send_many` loses the ids of the failing
+chunk with the exception, so these rows are the only list of which messages went
+missing, and the stage is the only thing that says whether re-sending them would
+duplicate.
 
 Register your own:
 

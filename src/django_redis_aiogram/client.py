@@ -175,6 +175,13 @@ def queueing(function: str, messages: list[tuple[uuid.UUID, dict[str, Any]]]) ->
     So each transport is the two lines that write, and nothing else. The consumer
     knows one payload shape and the event log has one definition of ``queued``;
     neither can drift between the two paths, because neither path owns them.
+
+    The two ways a message is lost here are **not** the same, and the ``stage`` on
+    the drop row is what tells them apart. ``serialising`` means the payload never
+    left this process, so re-sending it is safe. ``queueing`` means the write to
+    Redis raised, and a variadic ``RPUSH`` that raised may still have been applied —
+    the reply is what went missing — so re-sending may duplicate. A broadcast makes
+    that distinction the only one available, because the ids go with the exception.
     """
     queued_at = time.time()
     serializer = get_serializer()
@@ -182,8 +189,24 @@ def queueing(function: str, messages: list[tuple[uuid.UUID, dict[str, Any]]]) ->
     # `tgbot_reclaim` all derive their keys from it, and a producer reading the
     # setting itself is the one writer that would not follow it anywhere it goes
     key = queue_key()
+
+    def dropped(stage: str, error: Exception) -> None:
+        """Record every message this failure lost, and where it lost them."""
+        for identifier, kwargs in messages:
+            recorder.record(
+                Event(
+                    kind=EventKind.OUTBOUND_DROPPED.value,
+                    correlation_id=identifier,
+                    function=function,
+                    chat_id=as_identifier(kwargs.get('chat_id')),
+                    error_code=type(error).__name__,
+                    error=str(error),
+                    detail={'stage': stage},
+                )
+            )
+
     try:
-        # inside the guard, not before it: a payload that cannot be serialised
+        # guarded, not left to the caller: a payload that cannot be serialised
         # loses its message exactly as a refused write does, and for a chunk the
         # ids go with the exception — so these rows are the only record of which
         # messages were lost
@@ -195,20 +218,13 @@ def queueing(function: str, messages: list[tuple[uuid.UUID, dict[str, Any]]]) ->
             messages=messages,
             queued_at=queued_at,
         )
+    except Exception as error:
+        dropped('serialising', error)
+        raise
+    try:
         yield write
     except Exception as error:
-        for identifier, kwargs in messages:
-            recorder.record(
-                Event(
-                    kind=EventKind.OUTBOUND_DROPPED.value,
-                    correlation_id=identifier,
-                    function=function,
-                    chat_id=as_identifier(kwargs.get('chat_id')),
-                    error_code=type(error).__name__,
-                    error=str(error),
-                    detail={'stage': 'queueing'},
-                )
-            )
+        dropped('queueing', error)
         raise
     if not recorder.enabled:
         # guarded: describing the arguments is the one part of this that costs
@@ -231,16 +247,22 @@ def queueing(function: str, messages: list[tuple[uuid.UUID, dict[str, Any]]]) ->
 _asend_mentioned = threading.Event()
 
 
-def _mention_asend() -> None:
+def _mention_asend(alternative: str) -> None:
     """Say once that there is a version of this that does not block the loop.
 
-    Deliberately not a ``DeprecationWarning``: calling ``send()`` from async code
-    is *correct* and nothing about it will stop working. It writes to a socket on
-    the thread the loop is running on, which is worth knowing once and is not
-    worth an exception.
+    Deliberately not a ``DeprecationWarning``: calling the synchronous method from
+    async code is *correct* and nothing about it will stop working. It writes to a
+    socket on the thread the loop is running on, which is worth knowing once and is
+    not worth an exception.
 
-    Only from the queueing route, so the worker's own handler path stays silent:
-    the caller there is our consumer, which has no async alternative to move to.
+    From every synchronous route that writes to Redis, which is three of them —
+    :meth:`send`, :meth:`send_redis` and :meth:`send_many`. Naming only the first
+    left the two a web tier is most likely to reach for silent, and the fan-out is
+    the one that holds the loop longest.
+
+    Not from :meth:`send_raw`: there the caller is the worker's own consumer, which
+    has no async alternative to move to, and a warning on a healthy path is how
+    people learn to stop reading them.
     """
     if _asend_mentioned.is_set():
         return
@@ -249,7 +271,10 @@ def _mention_asend() -> None:
     except RuntimeError:
         return
     _asend_mentioned.set()
-    logger.warning('send() called from a running event loop; await asend() instead to keep the loop free')
+    logger.warning(
+        'a synchronous send was called from a running event loop',
+        extra={'tg_alternative': alternative},
+    )
 
 
 def loop_lock(loop: AbstractEventLoop) -> threading.Lock:
@@ -662,7 +687,6 @@ class TelegramBot:
         identifier = resolve_correlation_id(correlation_id)
         if self.is_worker:
             return self.send_raw(function, correlation_id=identifier, **kwargs)
-        _mention_asend()
         return self.send_redis(function, correlation_id=identifier, **kwargs)
 
     async def asend(
@@ -1099,6 +1123,7 @@ class TelegramBot:
         if not accepted:
             return identifier
 
+        _mention_asend('asend')
         with queueing(function, [(identifier, kwargs)]) as write:
             get_redis().rpush(write.key, *write.payloads)
         return identifier
@@ -1164,6 +1189,8 @@ class TelegramBot:
         is why the drops are recorded rather than left to the caller to infer.
         """
         writing = self._accept_bulk(function)
+        if writing:
+            _mention_asend('asend_many')
         identifiers: list[uuid.UUID] = []
         for chunk in self._chunks(chat_ids, function, chunk_size, kwargs):
             if writing:
@@ -1231,9 +1258,12 @@ class TelegramBot:
         closes the single thing an ASGI process opens lazily and Django gives no
         hook to close.
 
-        Skipping it is not a leak so much as an untidy exit: the client goes when
-        its loop does, and Python may say so with a ``ResourceWarning``. Call it
-        from a lifespan shutdown if your server has one.
+        This is the only path that closes the connection on the loop it belongs to,
+        which is the only loop allowed to close it. Skipping it does not accumulate
+        clients — the registry drops the ones whose loop has closed — but the
+        connection stays open until its client is collected, and Python may say so
+        with a ``ResourceWarning``. Call it from a lifespan shutdown if your server
+        has one, and from anything that runs a loop per unit of work.
         """
         await aclose_redis()
 

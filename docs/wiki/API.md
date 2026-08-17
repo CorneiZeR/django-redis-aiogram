@@ -48,7 +48,7 @@ feeding the dispatcher, reusing the connection — and that keeps working;
 | `bot.send(function='send_message', **kwargs)` | queue it, or call Telegram directly inside the bot container |
 | `bot.send_redis(...)` | always queue |
 | `bot.send_raw(...)` | always call Telegram from this process |
-| `bot.send_many(chat_ids, function='send_message', *, chunk_size=100, **kwargs)` | queue one message per chat, a chunk per round trip |
+| `bot.send_many(chat_ids, function='send_message', *, chunk_size=100, **kwargs)` | always queue, one message per chat, a chunk per round trip |
 
 `function` must name a Telegram API method aiogram exposes; anything else raises
 `ValueError` before it reaches the queue. See **[[Sending-messages|Sending messages]]**.
@@ -88,10 +88,13 @@ serialises each chunk between its awaits, and that part is ordinary CPU work on
 the loop's thread. A fan-out large enough to matter belongs in a task, not in a
 request.
 
-Nothing to close. Each loop gets its own client, because `redis.asyncio`
-connections are loop-affine, and a loop that goes away takes its client with it —
-`await bot.aclose()` is available if you would rather be explicit in a lifespan
-shutdown, and **[[Deployment]]** says when that matters.
+Each loop gets its own client, because `redis.asyncio` connections are loop-affine.
+`await bot.aclose()` closes the one belonging to the loop that calls it, and it is
+worth calling from a lifespan shutdown if your server has one — it is the only
+path that closes the connection on the loop it belongs to, which is the only loop
+that may close it. Without it the connection stays open until the client is
+collected, and Python may say so with a `ResourceWarning`. **[[Deployment]]** has
+the shutdown recipe.
 
 ### Queue introspection
 

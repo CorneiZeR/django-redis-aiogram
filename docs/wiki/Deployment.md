@@ -122,9 +122,8 @@ the first call that includes a connect bounded by `REDIS_TIMEOUT`. `bot.asend()`
 is the same message without that; see **[[Sending-messages|Sending messages]]**.
 
 One thing is worth knowing rather than discovering. The async client belongs to
-the loop that created it, so each loop gets its own, and it goes when that loop
-does — which on a clean shutdown may print a `ResourceWarning` rather than closing
-tidily. If your server has a lifespan hook, close it there:
+the loop that created it, so each loop gets its own, and only that loop may close
+it. If your server has a lifespan hook, close it there:
 
 ```python
 # an ASGI lifespan shutdown, or django-ninja's
@@ -134,6 +133,15 @@ async def shutdown():
 
 That closes the async client for the loop calling it, and nothing else — the
 worker's `close()` is a different thing and belongs in the bot container.
+
+A server with one loop for its whole life will not miss it: the connection is
+closed when the process exits either way, perhaps with a `ResourceWarning`. It
+matters where a process runs **many** loops — `asyncio.run` once per job in a
+Celery task, a management command, a script. There each loop takes its own client,
+and only closing it releases the connection while the loop that owns it still
+exists. Nothing accumulates if you skip it — the registry drops clients whose loop
+has closed — but the sockets stay open until then, and the close is untidy rather
+than clean.
 
 ## Is it working?
 

@@ -41,6 +41,7 @@ All prefixed with `tg_`, to avoid colliding with `LogRecord` attributes.
 | `tg_mode` | `polling` or `webhook` |
 | `tg_update` | the update id being handled |
 | `tg_correlation_id` | the id every event about one message carries |
+| `tg_alternative` | the awaitable method a synchronous send from a loop should move to |
 | `tg_router` | a router module autodiscovery imported |
 | `tg_pending` | work still in flight at shutdown: sends, or the updates a webhook process is answering |
 | `tg_drain_timeout` | how long shutdown gave them |
@@ -67,6 +68,7 @@ All prefixed with `tg_`, to avoid colliding with `LogRecord` attributes.
 | `skipping drain` | WARNING | the same, for the drain alone: in-flight sends were left rather than waited for |
 | `scheduling a send on a loop nothing in this process runs` | WARNING | nothing polls this process and no loop thread exists, so the send is created and never stepped |
 | `rate limited by telegram` | WARNING | refused and backing off |
+| `a synchronous send was called from a running event loop` | WARNING | `send`, `send_redis` or `send_many` from async code: correct, but it writes on the loop's own thread. `tg_alternative` names the awaitable form. Said once per process |
 | `delivery started` | INFO | the consumer is up |
 | `message sent` | INFO | one call succeeded |
 | `the event log is falling behind; events are being dropped` | ERROR | the writer cannot keep up; rows are being lost, messages are not |
