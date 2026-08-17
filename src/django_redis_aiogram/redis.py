@@ -18,6 +18,7 @@ from redis import Redis
 from redis.asyncio import Redis as AsyncRedis
 from redis.connection import parse_url as _parse_url
 
+from django_redis_aiogram.events import worker_identity
 from django_redis_aiogram.settings import SETTINGS_NAME, conf
 
 #: redis-py ships py.typed but leaves parse_url unannotated, and strict mode refuses
@@ -43,6 +44,26 @@ def connection_kwargs() -> dict[str, Any]:
     """
     timeout = read_timeout()
     return {'socket_connect_timeout': timeout, 'socket_timeout': timeout}
+
+
+def queue_key() -> str:
+    """Return the list queued messages are written to and read from."""
+    return str(conf['REDIS_MESSAGES_KEY'])
+
+
+def processing_key(worker: str | None = None) -> str:
+    """Where one worker keeps the message it is sending.
+
+    Per worker, so a restarting one reclaims only its own: a shared list would let
+    a starting worker pull a message out from under another that is still sending
+    it. Takes a name so `tgbot_reclaim` can address a worker that is gone.
+    """
+    return f'{queue_key()}:processing:{worker or worker_identity()}'
+
+
+def heartbeat_key(worker: str | None = None) -> str:
+    """Where one worker says it is still turning. Per worker, like the list above."""
+    return f'{queue_key()}:heartbeat:{worker or worker_identity()}'
 
 
 def build_client() -> Redis:

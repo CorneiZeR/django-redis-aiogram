@@ -49,6 +49,38 @@ send now *runs*: before, nothing stepped it until the next update arrived, or
 If you need the answer, `await` the aiogram call yourself, or send from a process
 that does not serve the webhook.
 
+## From an async view, and to many chats
+
+```python
+async def notify(request):
+    await bot.asend(chat_id=CHAT_ID, text='done')
+
+
+def announce(chat_ids):
+    return bot.send_many(chat_ids, text='we are back')
+```
+
+`asend` is `send` for code already on an event loop. The synchronous one writes to
+a socket on the calling thread, which under ASGI is the thread serving requests —
+and on the first call that includes a TCP connect bounded by `REDIS_TIMEOUT`. The
+ids, the rows and the routing are identical.
+
+`send_many` queues one message per chat, a chunk of them per round trip, and
+returns an id per message in the order the chats were given. `asend_many` is its
+loop-friendly twin, and the case for it is stronger than for `asend`: a fan-out
+writes once per chunk and serialises every payload, so it blocks longer.
+
+Two things it does **not** do. It does not speed up delivery — the rate limits
+still pace what leaves for Telegram, so fifty thousand chats is about half an hour
+at the default thirty a second. And it makes event-log overflow *worse*, because
+the pacing that sequential round trips gave the writer is gone: raise
+`EVENT_LOG_BUFFER_SIZE`, or narrow `EVENT_LOG_KINDS`, before broadcasting. See
+**[[Event-log|Event log]]**.
+
+A chunk that fails records a drop for its own messages and raises. Earlier chunks
+are already queued and their ids are lost with the exception, which is why those
+rows exist rather than leaving you to work out how far it got.
+
 ## Keyboards
 
 ```python

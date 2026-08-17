@@ -33,7 +33,6 @@ from redis import Redis
 from django_redis_aiogram.api import check_function
 from django_redis_aiogram.context import current_correlation_id
 from django_redis_aiogram.defaults import DEFAULTS
-from django_redis_aiogram.delivery import processing_key, queue_key
 from django_redis_aiogram.enums import EventKind, StorageKind
 from django_redis_aiogram.envelope import pack
 from django_redis_aiogram.events import new_correlation_id
@@ -41,7 +40,14 @@ from django_redis_aiogram.exceptions import LoopThreadNotStartedError, ShuttingD
 from django_redis_aiogram.instrumentation import install_instrumentation, instrumented
 from django_redis_aiogram.payloads import describe
 from django_redis_aiogram.recorder import Event, as_identifier, recorder
-from django_redis_aiogram.redis import aget_redis, connection_kwargs, get_redis
+from django_redis_aiogram.redis import (
+    aclose_redis,
+    aget_redis,
+    connection_kwargs,
+    get_redis,
+    processing_key,
+    queue_key,
+)
 from django_redis_aiogram.serializers import get_serializer
 from django_redis_aiogram.settings import SETTINGS_NAME, coerce_bool, conf
 from django_redis_aiogram.throttling import RateLimiter, get_rate_limiter
@@ -207,6 +213,31 @@ def queueing(function: str, messages: list[tuple[uuid.UUID, dict[str, Any]]]) ->
                 detail=describe(kwargs),
             )
         )
+
+
+#: latched once per process: a line per send would be noise nobody can act on
+_asend_mentioned = threading.Event()
+
+
+def _mention_asend() -> None:
+    """Say once that there is a version of this that does not block the loop.
+
+    Deliberately not a ``DeprecationWarning``: calling ``send()`` from async code
+    is *correct* and nothing about it will stop working. It writes to a socket on
+    the thread the loop is running on, which is worth knowing once and is not
+    worth an exception.
+
+    Only from the queueing route, so the worker's own handler path stays silent:
+    the caller there is our consumer, which has no async alternative to move to.
+    """
+    if _asend_mentioned.is_set():
+        return
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    _asend_mentioned.set()
+    logger.warning('send() called from a running event loop; await asend() instead to keep the loop free')
 
 
 def loop_lock(loop: AbstractEventLoop) -> threading.Lock:
@@ -619,6 +650,7 @@ class TelegramBot:
         identifier = resolve_correlation_id(correlation_id)
         if self.is_worker:
             return self.send_raw(function, correlation_id=identifier, **kwargs)
+        _mention_asend()
         return self.send_redis(function, correlation_id=identifier, **kwargs)
 
     async def asend(
@@ -1082,6 +1114,18 @@ class TelegramBot:
             await client.rpush(write.key, *write.payloads)
         return identifier
 
+    def _accept_bulk(self, function: str) -> bool:
+        """Whether this process should write, decided once for the whole batch.
+
+        A disabled bot reaches neither Telegram nor Redis, and still returns an id
+        per message — the same contract :meth:`send_redis` has, so a caller can
+        store the ids beside its own rows whether or not this deployment sends.
+        """
+        if self.enabled:
+            return True
+        logger.debug('queueing skipped: bot disabled', extra={'tg_function': function})
+        return False
+
     def send_many(
         self,
         chat_ids: 'Iterable[int | str]',
@@ -1107,10 +1151,12 @@ class TelegramBot:
         chunks are already queued, and their ids are lost with the exception, which
         is why the drops are recorded rather than left to the caller to infer.
         """
+        writing = self._accept_bulk(function)
         identifiers: list[uuid.UUID] = []
         for chunk in self._chunks(chat_ids, function, chunk_size, kwargs):
-            with queueing(function, chunk) as write:
-                get_redis().rpush(write.key, *write.payloads)
+            if writing:
+                with queueing(function, chunk) as write:
+                    get_redis().rpush(write.key, *write.payloads)
             identifiers.extend(identifier for identifier, _ in chunk)
         return identifiers
 
@@ -1129,11 +1175,15 @@ class TelegramBot:
         serialises every payload, so on a serving loop it blocks longer and more
         often than a single send does.
         """
-        client = await aget_redis()
+        writing = self._accept_bulk(function)
+        # after the decision, not before: a disabled process may have no REDIS_URL
+        # at all, and building a client would raise where the point is to do nothing
+        client = await aget_redis() if writing else None
         identifiers: list[uuid.UUID] = []
         for chunk in self._chunks(chat_ids, function, chunk_size, kwargs):
-            with queueing(function, chunk) as write:
-                await client.rpush(write.key, *write.payloads)
+            if client is not None:
+                with queueing(function, chunk) as write:
+                    await client.rpush(write.key, *write.payloads)
             identifiers.extend(identifier for identifier, _ in chunk)
         return identifiers
 
@@ -1160,6 +1210,20 @@ class TelegramBot:
                 chunk = []
         if chunk:
             yield chunk
+
+    async def aclose(self) -> None:
+        """Release the async Redis client this loop was using.
+
+        Not the mirror of :meth:`close`, and deliberately not named to suggest it:
+        that one tears down the bot — loop, session, FSM storage — while this one
+        closes the single thing an ASGI process opens lazily and Django gives no
+        hook to close.
+
+        Skipping it is not a leak so much as an untidy exit: the client goes when
+        its loop does, and Python may say so with a ``ResourceWarning``. Call it
+        from a lifespan shutdown if your server has one.
+        """
+        await aclose_redis()
 
     def queue_depth(self) -> int:
         """How many messages are waiting for a worker to take them.

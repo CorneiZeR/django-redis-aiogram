@@ -48,9 +48,42 @@ feeding the dispatcher, reusing the connection — and that keeps working;
 | `bot.send(function='send_message', **kwargs)` | queue it, or call Telegram directly inside the bot container |
 | `bot.send_redis(...)` | always queue |
 | `bot.send_raw(...)` | always call Telegram from this process |
+| `bot.send_many(chat_ids, function='send_message', *, chunk_size=100, **kwargs)` | queue one message per chat, a chunk per round trip |
 
 `function` must name a Telegram API method aiogram exposes; anything else raises
 `ValueError` before it reaches the queue. See **[[Sending-messages|Sending messages]]**.
+
+### From code already on an event loop
+
+| | |
+| --- | --- |
+| `await bot.asend(...)` | as `send`, without the blocking socket write |
+| `await bot.asend_redis(...)` | as `send_redis` |
+| `await bot.asend_many(...)` | as `send_many` |
+
+Same signatures, same ids, same rows — the difference is that the write does not
+happen on the thread the loop is running on, which under ASGI is the thread
+serving requests. Reach for these from an async view or an async task, and for
+the bulk one in particular: a fan-out writes once per chunk and serialises every
+payload, so it blocks longer and more often than a single send.
+
+Nothing to close. Each loop gets its own client, because `redis.asyncio`
+connections are loop-affine, and a loop that goes away takes its client with it —
+`await bot.aclose()` is available if you would rather be explicit in a lifespan
+shutdown, and **[[Deployment]]** says when that matters.
+
+### Queue introspection
+
+| | |
+| --- | --- |
+| `bot.queue_depth()` | messages waiting for a worker, one `LLEN` |
+| `bot.inflight_depth(worker=None)` | messages one worker is part-way through sending |
+| `await bot.aqueue_depth()` / `await bot.ainflight_depth(...)` | the same, off the loop's thread |
+
+`inflight_depth` defaults to this process's own worker identity; naming another is
+how a monitor reads a list left behind by a worker that is gone. The key scheme
+behind them is this package's business — an exporter should not have to reproduce
+`<REDIS_MESSAGES_KEY>:processing:<worker>` by hand.
 
 All three return a **correlation id** — a `uuid.UUID` that ties every row about
 that message together, whichever process wrote it. Store it beside your own

@@ -59,7 +59,7 @@ TWO_X_ADDITIONS = ('send', 'router', 'enabled', 'is_worker', 'rate_limiter', 'cl
 #: 3.1.0's additions. Kept apart from the tuple above because that one is the 2.x
 #: contract and must not be edited to make a later change pass
 THREE_ONE_ADDITIONS = ('asend', 'asend_redis', 'send_many', 'asend_many')
-THREE_ONE_COROUTINES = ('asend', 'asend_redis', 'asend_many', 'aqueue_depth', 'ainflight_depth')
+THREE_ONE_COROUTINES = ('asend', 'asend_redis', 'asend_many', 'aqueue_depth', 'ainflight_depth', 'aclose')
 THREE_ONE_INTROSPECTION = ('queue_depth', 'inflight_depth')
 
 MODULE_EXPORTS = ('TelegramBot', 'bot', 'conf', 'redis_conn', 'get_redis', '__version__')

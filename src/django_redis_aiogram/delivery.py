@@ -40,33 +40,13 @@ from django_redis_aiogram.enums import DeliveryKind, EventKind
 from django_redis_aiogram.envelope import Envelope, UnknownEnvelopeVersionError, unpack
 from django_redis_aiogram.events import new_correlation_id, worker_identity
 from django_redis_aiogram.recorder import Event, as_identifier, recorder
-from django_redis_aiogram.redis import as_bytes, get_redis, read_timeout
+from django_redis_aiogram.redis import as_bytes, get_redis, heartbeat_key, processing_key, queue_key, read_timeout
 from django_redis_aiogram.serializers import PickleReadRefusedError, SerializationError, loads
 from django_redis_aiogram.settings import conf
 
 logger = logging.getLogger('django_redis_aiogram')
 
 Handler = Callable[..., Any]
-
-
-def queue_key() -> str:
-    """Return the list queued messages are written to and read from."""
-    return str(conf['REDIS_MESSAGES_KEY'])
-
-
-def processing_key(worker: str | None = None) -> str:
-    """Where one worker keeps the message it is sending.
-
-    Per worker, so a restarting one reclaims only its own: a shared list would let
-    a starting worker pull a message out from under another that is still sending
-    it. Takes a name so `tgbot_reclaim` can address a worker that is gone.
-    """
-    return f'{queue_key()}:processing:{worker or worker_identity()}'
-
-
-def heartbeat_key(worker: str | None = None) -> str:
-    """Where one worker says it is still turning. Per worker, like the list above."""
-    return f'{queue_key()}:heartbeat:{worker or worker_identity()}'
 
 
 def defers_completion(handler: Handler) -> bool:

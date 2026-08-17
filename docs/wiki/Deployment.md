@@ -114,6 +114,27 @@ raising `REDIS_TIMEOUT` raises the join, and a grace period shorter than the sum
 means Docker sends `SIGKILL` partway through, which is exactly the crash the
 in-flight list exists to survive.
 
+## Serving under ASGI
+
+Nothing here is required. A Django process under ASGI can call `bot.send()` and
+it works — it simply writes to a socket on the thread serving requests, and on
+the first call that includes a connect bounded by `REDIS_TIMEOUT`. `bot.asend()`
+is the same message without that; see **[[Sending-messages|Sending messages]]**.
+
+One thing is worth knowing rather than discovering. The async client belongs to
+the loop that created it, so each loop gets its own, and it goes when that loop
+does — which on a clean shutdown may print a `ResourceWarning` rather than closing
+tidily. If your server has a lifespan hook, close it there:
+
+```python
+# an ASGI lifespan shutdown, or django-ninja's
+async def shutdown():
+    await bot.aclose()
+```
+
+That closes the async client for the loop calling it, and nothing else — the
+worker's `close()` is a different thing and belongs in the bot container.
+
 ## Is it working?
 
 `docker ps` answers the wrong question: the process being up says nothing about

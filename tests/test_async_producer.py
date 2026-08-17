@@ -8,6 +8,7 @@ rather than re-testing the queueing.
 """
 
 import asyncio
+import threading
 import uuid
 
 import pytest
@@ -166,6 +167,104 @@ def test_the_depths_read_the_keys_this_package_owns(redis_server):
     assert asyncio.run(bot.ainflight_depth('gone')) == 3
 
 
+@override_settings(TELEGRAM_BOT=SETTINGS)
+@pytest.mark.parametrize('bulk', ['send_many', 'asend_many'])
+def test_the_ids_come_back_in_the_order_the_chats_were_given(redis_server, bulk):
+    """Two pages say so, so something has to fail when it stops being true.
+
+    The order is what lets a caller zip the ids back onto its own rows: without
+    it the return value is a bag of ids and the caller has to re-derive which
+    belongs to which chat, which is the work `send_many` was meant to save.
+    """
+    chats = [7, 8, 9, 10, 11]
+    bot = TelegramBot()
+    result = getattr(bot, bulk)(chats, chunk_size=2)
+    identifiers = asyncio.run(result) if bulk.startswith('a') else result
+
+    queued = [unpack(loads(as_bytes(raw))) for raw in redis_server.lrange(QUEUE, 0, -1)]
+
+    assert [envelope.kwargs['chat_id'] for envelope in queued] == chats
+    assert [envelope.correlation_id for envelope in queued] == identifiers, 'the ids do not line up with the chats'
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_send_from_a_loop_mentions_asend_once(redis_server, caplog, monkeypatch):
+    """Said once, and not a `DeprecationWarning`.
+
+    `send()` from async code is correct and will keep working — it just writes on
+    the thread the loop is running on. So this is a line someone reads once, not
+    an exception and not a line per message: a warning on a working path, repeated,
+    is how people learn to filter our logger out.
+    """
+    monkeypatch.setattr('django_redis_aiogram.client._asend_mentioned', threading.Event())
+    bot = TelegramBot()
+
+    async def three_sends():
+        for index in range(3):
+            bot.send(chat_id=index, text='hi')
+
+    with caplog.at_level('WARNING', logger='django_redis_aiogram'):
+        asyncio.run(three_sends())
+
+    mentions = [record for record in caplog.records if 'await asend()' in record.getMessage()]
+    assert len(mentions) == 1, f'said it {len(mentions)} times'
+    assert redis_server.llen(QUEUE) == 3, 'the send itself must be unaffected'
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_send_off_a_loop_says_nothing(redis_server, caplog, monkeypatch):
+    """Most callers are synchronous — Celery, a management command, a view — and
+    there is nothing for them to do about a message aimed at async code."""
+    monkeypatch.setattr('django_redis_aiogram.client._asend_mentioned', threading.Event())
+
+    with caplog.at_level('WARNING', logger='django_redis_aiogram'):
+        TelegramBot().send(chat_id=1, text='hi')
+
+    assert 'await asend()' not in caplog.text
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'ENABLED': False})
+@pytest.mark.parametrize('bulk', ['send_many', 'asend_many'])
+def test_a_disabled_process_queues_nothing_and_still_names_the_messages(redis_server, bulk):
+    """`ENABLED=0` means this process reaches neither Telegram nor Redis.
+
+    The single-message path has always honoured that and still returned the id, so
+    a caller can store ids beside its own rows whether or not this deployment
+    sends. The bulk pair wrote anyway when it was first written — and the async one
+    built its client before deciding, which would raise on a disabled process that
+    has no `REDIS_URL` at all, turning "do nothing" into a crash.
+    """
+    bot = TelegramBot()
+    result = getattr(bot, bulk)([1, 2, 3], text='hi')
+    identifiers = asyncio.run(result) if bulk.startswith('a') else result
+
+    assert len(identifiers) == 3, 'a disabled process still has to name the messages'
+    assert len(set(identifiers)) == 3
+    assert redis_server.llen(QUEUE) == 0, 'a disabled process wrote to Redis'
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'EVENT_LOG': True, 'EVENT_LOG_SYNC': True})
+@pytest.mark.parametrize('bulk', ['send_many', 'asend_many'])
+def test_a_broadcast_records_one_row_per_message(redis_server, bulk, monkeypatch):
+    """The event log defines `outbound.queued` as one message, and the consumer
+    writes `consumed` and `sent` rows per message against the same id.
+
+    A summary row for the batch would orphan those: they would have nothing to
+    join to. It is also why a broadcast is where the writer's buffer gets tested —
+    see the Event log page.
+    """
+    recorded = []
+    monkeypatch.setattr('django_redis_aiogram.client.recorder.record', recorded.append)
+
+    bot = TelegramBot()
+    result = getattr(bot, bulk)(range(25), chunk_size=10, text='hi')
+    identifiers = asyncio.run(result) if bulk.startswith('a') else result
+
+    queued = [event for event in recorded if event.kind == 'outbound.queued']
+    assert len(queued) == 25, f'{len(queued)} rows for 25 messages'
+    assert [event.correlation_id for event in queued] == identifiers, 'the rows do not carry the returned ids'
+
+
 def _count_writes(patch, writes, fail_on_call=None):
     """Count `rpush` calls on both transports.
 
@@ -200,3 +299,35 @@ def _count_writes(patch, writes, fail_on_call=None):
 
     wrap(fakeredis.FakeRedis, is_async=False)
     wrap(fakeredis.aioredis.FakeRedis, is_async=True)
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_closing_releases_this_loops_client(redis_server):
+    """Django has no hook that closes it, so a caller with a lifespan needs one.
+
+    Deliberately not the mirror of `close()`: that tears the bot down, this closes
+    the one thing an ASGI process opens lazily. Skipping it costs a possible
+    `ResourceWarning` when the loop goes, not a leak — which is why the docs say
+    so rather than warning about it at runtime.
+    """
+    closed = []
+
+    async def open_then_close():
+        bot = TelegramBot()
+        client = await aget_redis()
+        original = client.aclose
+
+        async def recording(*args, **kwargs):
+            closed.append(client)
+            return await original(*args, **kwargs)
+
+        client.aclose = recording
+        await bot.asend_redis(chat_id=1, text='hi')
+        await bot.aclose()
+        # and the next caller on this loop gets a fresh one, not the closed one
+        assert await aget_redis() is not client
+        await bot.aclose()
+
+    asyncio.run(open_then_close())
+
+    assert closed, 'aclose() did not reach the client'

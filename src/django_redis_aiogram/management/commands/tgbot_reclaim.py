@@ -18,9 +18,8 @@ from typing import Any
 
 from django.core.management import BaseCommand, CommandError
 
-from django_redis_aiogram.delivery import processing_key, queue_key
 from django_redis_aiogram.events import worker_identity
-from django_redis_aiogram.redis import get_redis
+from django_redis_aiogram.redis import get_redis, processing_key, queue_key
 
 logger = logging.getLogger('django_redis_aiogram')
 

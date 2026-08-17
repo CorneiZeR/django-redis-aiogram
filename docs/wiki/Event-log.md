@@ -87,6 +87,13 @@ the log.
 `EVENT_LOG_BUFFER_SIZE`, `EVENT_LOG_BATCH_SIZE` and `EVENT_LOG_FLUSH_INTERVAL`
 size it. A batch larger than the buffer can never fill, so `W007` says so.
 
+**A broadcast is where this bites.** `send_many` records one `outbound.queued` row
+per message, the same as sending them one at a time — but it removes the pacing
+the sequential round trips used to give the writer, so fifty thousand chats arrive
+as fifty thousand events in a few seconds rather than spread over minutes. Raise
+`EVENT_LOG_BUFFER_SIZE`, or narrow `EVENT_LOG_KINDS`, before the first large one.
+The messages are never at risk; the rows about them are.
+
 What is lost: on `SIGKILL`, a worker timeout or `os._exit()`, whatever is in the
 queue and in the current batch. At the defaults that is under a second of events
 plus up to 200 rows. A clean `SIGTERM` loses nothing. This is an event feed, not

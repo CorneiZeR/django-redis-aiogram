@@ -144,6 +144,33 @@ them, so it is not one per message.
 
 ### Added
 
+- **`await bot.asend(...)`**, and `asend_redis`, for code already on an event
+  loop. `send()` writes to a socket on the calling thread, which under ASGI is
+  the thread serving requests, and on a first call that includes a TCP connect
+  bounded by `REDIS_TIMEOUT`. Native `redis.asyncio` rather than a thread wrapper:
+  `sync_to_async` measured the same for one send, but its default
+  `thread_sensitive=True` runs every call in one shared thread — twenty
+  concurrent sends took 0.49 s against 0.02 s — and even threaded it draws on a
+  pool shared with every other `sync_to_async` in the process, the ORM's
+  included. Each loop gets its own client, because these connections are
+  loop-affine; `await bot.aclose()` releases it where a lifespan hook exists, and
+  **Deployment** says why you may not need to.
+- **`bot.send_many(chat_ids, ...)`** and **`await bot.asend_many(...)`** queue one
+  message per chat, a chunk of them per variadic `RPUSH`, returning an id per
+  message in the order given. It speeds up *queueing*, not delivery — the rate
+  limits still pace what leaves, so fifty thousand chats is about half an hour at
+  the default thirty a second — and it makes event-log overflow worse by removing
+  the pacing sequential round trips gave the writer. A chunk that fails records a
+  drop for its own messages and raises; the earlier chunks are already queued.
+- **`bot.queue_depth()`** and **`bot.inflight_depth(worker=None)`**, with async
+  twins, so a monitor stops reproducing `<REDIS_MESSAGES_KEY>:processing:<worker>`
+  by hand — a scheme that is this package's to change. Troubleshooting used to
+  send people to `redis-cli` for it.
+- Both producers now share one write body: serialisation, the key and both event
+  rows live in a single context manager, and each transport is the one line that
+  writes. The `await` is the only thing the two cannot share, so it is the only
+  thing they do not.
+
 - **`manage.py tgbot_reclaim --worker <name>`** puts a dead worker's in-flight
   messages back on the queue. Crash safety rests on a restarted worker
   recognising its own list, and a container started without `hostname:` gets a
