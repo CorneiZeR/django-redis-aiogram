@@ -26,8 +26,10 @@ Project uses django-redis-aiogram 3.x. Rules:
 - To reach many chats, `bot.send_many(chat_ids, text=...)`, or from async code
   `await bot.asend_many(chat_ids, text=...)` — un-awaited it only builds a
   coroutine and queues nothing. Either queues a chunk per round trip and returns
-  an id per message, and unlike `send` both always queue, including inside the bot
-  container. They speed up queueing only — the rate limits still pace delivery.
+  an id per message, and where `send` calls Telegram directly inside the bot
+  container, these two queue there as well. With `ENABLED=0` neither writes
+  anything and you still get the ids, the same as `send`. They speed up queueing
+  only — the rate limits still pace delivery.
 - Handlers go in <app>/tg_router.py and are registered with decorators on the
   shared bot: @bot.message(F.text), @bot.callback_query(...). They are ordinary
   async Django code; use afirst()/sync_to_async for the ORM.

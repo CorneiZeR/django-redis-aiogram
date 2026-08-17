@@ -16,10 +16,11 @@ TELEGRAM_BOT = {
 That is enough. `TOKEN` and `REDIS_URL` may stay empty — they are only read when
 something actually reaches Telegram or Redis.
 
-Setting `'ENABLED': False` goes further: `send`, `send_redis` and `send_raw`
-become no-ops. Convenient when Telegram is irrelevant to the suite, wrong if any
-test asserts that a message was queued — those assertions would pass over
-nothing.
+Setting `'ENABLED': False` goes further: every send becomes a no-op, the `await`
+and bulk forms included. Convenient when Telegram is irrelevant to the suite,
+wrong if any test asserts that a message was queued — those assertions would pass
+over nothing, and they would pass over nothing *quietly*, because each call still
+returns the id it would have used.
 
 ## Asserting that your code queued a message
 

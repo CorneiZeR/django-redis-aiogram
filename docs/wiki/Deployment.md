@@ -60,8 +60,10 @@ migration container, CI. See below.
 
 - no router autodiscovery, so those modules are never imported
 - no system checks registered
-- `send`, `send_redis` and `send_raw` become no-ops that build neither a bot
-  nor a connection
+- every send becomes a no-op that builds neither a bot nor a connection:
+  `send`, `send_redis`, `send_raw`, `send_many` and the `await` forms `asend`,
+  `asend_redis`, `asend_many`. Each still returns the correlation id it would
+  have used, so a caller storing ids beside its own rows behaves the same here
 - `start_tgbot` reports why and exits
 
 A disabled process needs no token and no reachable Redis at all.
@@ -126,6 +128,9 @@ the loop that created it, so each loop gets its own, and only that loop may clos
 it. If your server has a lifespan hook, close it there:
 
 ```python
+from django_redis_aiogram import bot
+
+
 # an ASGI lifespan shutdown, or django-ninja's
 async def shutdown():
     await bot.aclose()
