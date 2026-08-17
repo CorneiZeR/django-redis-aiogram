@@ -272,24 +272,28 @@ def _a_worker_that_keeps_its_name(key: str) -> list[Problem]:
     Crash safety rests on a restarted worker recognising its own list. With
     ``WORKER_NAME`` unset the name is the hostname — which is fine on a host, and
     is not fine in a container started without ``hostname:``, where Docker invents
-    a fresh twelve-character hex name every time. Every restart then strands
-    whatever the last one was sending, somewhere nothing will look again.
+    a fresh twelve-character hex name for each container it creates. Restarting
+    one in place keeps it; replacing it does not, and a redeploy replaces it. What
+    the old container was sending is then stranded where nothing will look again.
 
     Narrow on purpose. An unset ``WORKER_NAME`` is the documented default and
     correct almost everywhere, so warning about it as such would fire on every
     untouched installation and teach people to stop reading warnings. This fires
     only on the shape that is actually broken.
     """
-    if str(conf.get(key) or '').strip():
+    # the same test `worker_identity()` makes. Stripping here would warn about a
+    # hostname the worker does not use: a padded name is a poor one, but it is
+    # stable, and stability is the only thing this check is about
+    if conf.get(key):
         return []
     hostname = os.environ.get('HOSTNAME') or socket.gethostname()
     if not _EPHEMERAL_HOSTNAME.fullmatch(hostname):
         return []
     return [
         Problem(
-            f"is empty and this container's hostname ({hostname}) is one Docker generated, so it "
-            'changes on every restart. The in-flight list is keyed on that name, so a worker killed '
-            'mid-send would never find its own message again.',
+            f"is empty and this container's hostname ({hostname}) is one Docker generated, so a "
+            'replacement container gets a different one. The in-flight list is keyed on that name, '
+            'so a worker killed mid-send would never find its own message again.',
             hint=(
                 'Set WORKER_NAME, or give the container a fixed `hostname:`. '
                 '`manage.py tgbot_reclaim --worker <name>` is the way back from a list already stranded.'

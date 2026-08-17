@@ -10,7 +10,7 @@ from io import StringIO
 import pytest
 from django.core.management import CommandError, call_command
 from django.test import override_settings
-from redis.exceptions import RedisError
+from redis.exceptions import RedisError, ResponseError
 
 from django_redis_aiogram.delivery import BlpopDelivery
 
@@ -275,6 +275,29 @@ def test_messages_stranded_under_another_worker_are_reported(redis_server):
     reported = out.getvalue()
     assert '2 message(s) are in flight under other worker names' in reported
     assert 'tgbot_reclaim' in reported
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'WORKER_NAME': 'mine'})
+def test_an_old_server_is_not_reported_as_crash_safe(redis_server, monkeypatch):
+    """This command builds its own `Delivery`, and a fresh one says it is crash
+    safe until something proves otherwise — the consumer learns that from
+    `reclaim()`, which a probe must not call. Reporting the default would tell an
+    operator on a pre-6.2 Redis that messages survive a kill, which is the one
+    thing they need to know is untrue."""
+
+    def no_lmove(*args, **kwargs):
+        msg = "unknown command 'LMOVE'"
+        raise ResponseError(msg)
+
+    redis_server.set(f'{QUEUE}:heartbeat:mine', str(int(time.time())))
+    monkeypatch.setattr(redis_server, 'lmove', no_lmove)
+    out = StringIO()
+
+    call_command('tgbot_healthcheck', stdout=out)
+
+    reported = out.getvalue()
+    assert 'at-most-once' in reported, reported
+    assert 'at-least-once' not in reported, reported
 
 
 @override_settings(TELEGRAM_BOT={**SETTINGS, 'WORKER_NAME': 'mine'})

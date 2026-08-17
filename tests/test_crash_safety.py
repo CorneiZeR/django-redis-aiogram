@@ -540,7 +540,7 @@ def test_the_real_send_path_is_the_one_that_defers():
 
 @override_settings(TELEGRAM_BOT={**SETTINGS, 'WORKER_NAME': 'gone'})
 def test_reclaim_requeues_a_dead_workers_messages(redis_server):
-    """A container with no fixed name gets a fresh one every restart, so its
+    """A container with no fixed name gets a fresh one when it is replaced, so its
     in-flight list is stranded where nothing will look for it again. This is the
     way back, and it is manual because only a human knows the worker is dead."""
     redis_server.rpush(f'{QUEUE}:processing:gone', payload(1), payload(2))

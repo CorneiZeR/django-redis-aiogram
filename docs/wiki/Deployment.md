@@ -20,7 +20,7 @@ services:
     command: python manage.py start_tgbot
     restart: always
     # not decoration: the in-flight list is keyed on this name, and without it
-    # Docker invents a new one on every restart — see Delivery
+    # Docker invents a new one for each container it creates — see Delivery
     hostname: telegram-bot-1
     env_file: .env
     environment:

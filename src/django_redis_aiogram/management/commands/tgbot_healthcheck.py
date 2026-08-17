@@ -12,7 +12,7 @@ from typing import Any
 
 from django.core.management import BaseCommand, CommandError
 from redis import Redis
-from redis.exceptions import RedisError
+from redis.exceptions import RedisError, ResponseError
 
 from django_redis_aiogram import bot
 from django_redis_aiogram.delivery import Delivery, get_delivery
@@ -107,7 +107,7 @@ class Command(BaseCommand):
             raise CommandError(msg)
 
         stranded, swept = self._stranded(connection, delivery)
-        guarantee = 'at-least-once' if delivery.crash_safe else 'at-most-once'
+        guarantee = self._guarantee(connection, delivery)
         self.stdout.write(self.style.SUCCESS(f'healthy: heartbeat {age}s old, {queued} queued, {guarantee}'))
         if stranded:
             # not a failure: another worker may be sending them right now. But an
@@ -119,6 +119,35 @@ class Command(BaseCommand):
                     '`manage.py tgbot_reclaim --worker <name>` requeues them.'
                 )
             )
+
+    @staticmethod
+    def _guarantee(connection: Redis, delivery: Delivery) -> str:
+        """Which delivery guarantee this Redis can actually give.
+
+        Asked, not assumed. This command builds its own `Delivery`, and a fresh
+        one reports `crash_safe` until something proves otherwise — the consumer
+        learns the truth from `reclaim()`, which this probe must not call, since
+        requeueing a running worker's in-flight list would send those messages
+        twice.
+
+        So it asks the same question `reclaim()` does, on a key that does not
+        exist: rotating an empty list is a no-op on a server that has `LMOVE`,
+        and `unknown command` on one that does not.
+        """
+        if not delivery.crash_safe:
+            return 'at-most-once'
+        probe = f'{delivery.queue_key}:lmove-probe'
+        try:
+            connection.lmove(probe, probe, 'LEFT', 'RIGHT')
+        except ResponseError as error:
+            if 'unknown command' in str(error).lower():
+                return 'at-most-once'
+            logger.warning('could not establish which delivery guarantee is in force')
+            return 'unknown'
+        except RedisError:
+            logger.warning('could not establish which delivery guarantee is in force')
+            return 'unknown'
+        return 'at-least-once'
 
     @staticmethod
     def _stranded(connection: Redis, delivery: Delivery) -> tuple[int, bool]:

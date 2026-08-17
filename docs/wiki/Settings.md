@@ -169,7 +169,7 @@ entry naming a retired one is dead but harmless.
 | `E044` | `DRAIN_TIMEOUT` is not a finite number, or is negative |
 | `E045` | `MAX_IN_FLIGHT` is not an integer, or is negative |
 | `E046` | `REQUIRE_CRASH_SAFE` is not a boolean |
-| `W010` | `WORKER_NAME` is empty **and** the hostname is one Docker generated, so the name changes on every restart. A fixed hostname is not warned about |
+| `W010` | `WORKER_NAME` is empty **and** the hostname is one Docker generated, so a replacement container gets a different name. A fixed hostname is not warned about |
 | `W005` | the log is on while its database has no engine, so every event is dropped |
 | `W006` | the log is on with `EVENT_LOG_RETENTION_DAYS` at 0, so nothing ever deletes a row |
 | `W007` | `EVENT_LOG_BATCH_SIZE` is above `EVENT_LOG_BUFFER_SIZE`, so the batch can never fill |

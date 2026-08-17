@@ -12,6 +12,7 @@ from django.test import override_settings
 
 from django_redis_aiogram.checks import CHECKS, check_settings
 from django_redis_aiogram.defaults import DEFAULTS
+from django_redis_aiogram.events import worker_identity
 
 
 @pytest.fixture(autouse=True)
@@ -381,7 +382,7 @@ def test_a_container_that_forgot_its_hostname_is_warned_about(monkeypatch):
     """The in-flight list is keyed on the worker's name.
 
     Docker invents a twelve-character hex hostname when a container is started
-    without `hostname:`, so every restart strands whatever the last one was
+    without `hostname:`, so replacing one strands whatever the last one was
     sending, somewhere nothing will look for it again.
     """
     monkeypatch.setenv('HOSTNAME', 'ba333cb79e00')
@@ -395,6 +396,20 @@ def test_a_fixed_hostname_is_not_warned_about(monkeypatch):
     everywhere; warning about it as such would fire on every install."""
     monkeypatch.setenv('HOSTNAME', 'bot-worker-1')
 
+    assert 'django_redis_aiogram.W010' not in ids(check_settings())
+
+
+@override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost', 'WORKER_NAME': '   '})
+def test_a_padded_name_is_judged_the_way_the_worker_judges_it(monkeypatch):
+    """`worker_identity()` takes any truthy value, so a padded name *is* the name.
+
+    A check that stripped first would call this empty, look at the hostname, and
+    warn about a name the worker never uses. Poor as that name is, it is stable,
+    and stability is the only thing W010 is about.
+    """
+    monkeypatch.setenv('HOSTNAME', 'ba333cb79e00')
+
+    assert worker_identity() == '   ', 'the runtime stopped taking a padded name'
     assert 'django_redis_aiogram.W010' not in ids(check_settings())
 
 
