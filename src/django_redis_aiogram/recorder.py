@@ -14,7 +14,9 @@ inside a caller's ``atomic()`` block: on PostgreSQL a failed statement aborts
 the whole transaction, so logging would corrupt the caller's data.
 
 This module must not import ``django.db``. :mod:`django_redis_aiogram.eventlog`
-does, and the writer thread imports it on its first flush.
+does, and the writer thread imports it on its first flush — on its *first write*,
+more precisely, because since 3.1.0 the writer also runs with the log off, for
+``events_recorded`` receivers alone, and such a process never reaches it at all.
 """
 
 import asyncio
@@ -455,12 +457,12 @@ class EventRecorder:
         return batch, wakes
 
     def _flush(self, batch: list[Event], *, failures: int) -> tuple[int, float]:
-        """Publish one batch and write it, containing whatever the write raises.
+        """Write one batch and publish it, containing whatever the write raises.
 
-        The publish is inside :meth:`_deliver` and ahead of the write, so a failing
-        database costs rows and not metrics. It is inside the ``try`` all the same:
-        :meth:`_publish` contains its own receivers, so anything reaching here came
-        from the write.
+        Both happen inside :meth:`_deliver`, which writes first and publishes in a
+        ``finally`` — so a failing database costs rows and not metrics, and nothing
+        reaching the ``except`` here came from a receiver: :meth:`_publish` contains
+        those itself.
         """
         dropped_before = self._dropped
         try:

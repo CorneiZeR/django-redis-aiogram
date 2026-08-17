@@ -226,7 +226,8 @@ them, so it is not one per message.
   this is an error and not a warning.
 - **A metrics seam that is not the event log.** `django_redis_aiogram.signals`
   carries `events_recorded`, a `django.dispatch.Signal` fired once per batch on the
-  event writer's own thread with the `Event` objects that batch holds. A signal
+  event writer's own thread — except under `EVENT_LOG_SYNC`, where there is no writer
+  thread — with the `Event` objects that batch holds. A signal
   rather than a setting naming a dotted path: no path to get wrong, no check id for
   it, no lazy import cache, and no question about what a failing import means.
   `send_robust`, so a receiver that raises costs neither the other receivers their

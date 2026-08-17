@@ -14,7 +14,8 @@ time without dragging anything in.
 
 from django.dispatch import Signal
 
-#: Fired once per batch of recorded events, from the event writer's own thread.
+#: Fired once per batch of recorded events, from the event writer's own thread —
+#: except under ``EVENT_LOG_SYNC``, where there is no writer thread at all.
 #:
 #: Receivers get ``events``: a tuple of :class:`~django_redis_aiogram.recorder.Event`,
 #: whose field names are pinned by ``tests/test_public_surface.py`` and are
