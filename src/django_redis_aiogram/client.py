@@ -14,7 +14,7 @@ import time
 import uuid
 import weakref
 from asyncio import AbstractEventLoop
-from collections.abc import Callable, Coroutine, Mapping
+from collections.abc import Callable, Coroutine, Iterable, Iterator, Mapping
 from concurrent import futures
 from dataclasses import dataclass
 from typing import Any
@@ -33,6 +33,7 @@ from redis import Redis
 from django_redis_aiogram.api import check_function
 from django_redis_aiogram.context import current_correlation_id
 from django_redis_aiogram.defaults import DEFAULTS
+from django_redis_aiogram.delivery import processing_key, queue_key
 from django_redis_aiogram.enums import EventKind, StorageKind
 from django_redis_aiogram.envelope import pack
 from django_redis_aiogram.events import new_correlation_id
@@ -40,7 +41,7 @@ from django_redis_aiogram.exceptions import LoopThreadNotStartedError, ShuttingD
 from django_redis_aiogram.instrumentation import install_instrumentation, instrumented
 from django_redis_aiogram.payloads import describe
 from django_redis_aiogram.recorder import Event, as_identifier, recorder
-from django_redis_aiogram.redis import connection_kwargs, get_redis
+from django_redis_aiogram.redis import aget_redis, connection_kwargs, get_redis
 from django_redis_aiogram.serializers import get_serializer
 from django_redis_aiogram.settings import SETTINGS_NAME, coerce_bool, conf
 from django_redis_aiogram.throttling import RateLimiter, get_rate_limiter
@@ -136,6 +137,76 @@ def _settle(on_complete: Callable[[], None] | None) -> None:
         on_complete()
     except Exception:
         logger.exception('could not acknowledge a completed send')
+
+
+@dataclass
+class Queueing:
+    """One write a producer is about to make, and what it stands for.
+
+    Carries the ids so a failure can be recorded against the messages that were
+    actually lost: a variadic ``RPUSH`` fails for its whole chunk, not one entry.
+    """
+
+    key: str
+    payloads: list[bytes]
+    messages: list[tuple[uuid.UUID, dict[str, Any]]]
+    queued_at: float
+
+
+@contextlib.contextmanager
+def queueing(function: str, messages: list[tuple[uuid.UUID, dict[str, Any]]]) -> 'Iterator[Queueing]':
+    """Everything a queue write does, except the write.
+
+    The one step that cannot be shared between a synchronous producer and an
+    asynchronous one is the ``await`` — the language will not allow it. Everything
+    around it can be, and is: the serialisation, the key, and both event rows,
+    including the rule that a failure records a drop rather than letting silence
+    imply the message was queued.
+
+    So each transport is the two lines that write, and nothing else. The consumer
+    knows one payload shape and the event log has one definition of ``queued``;
+    neither can drift between the two paths, because neither path owns them.
+    """
+    queued_at = time.time()
+    serializer = get_serializer()
+    key = str(conf['REDIS_MESSAGES_KEY'])
+    write = Queueing(
+        key=key,
+        payloads=[serializer.dumps(pack(function, kwargs, identifier, queued_at)) for identifier, kwargs in messages],
+        messages=messages,
+        queued_at=queued_at,
+    )
+    try:
+        yield write
+    except Exception as error:
+        for identifier, kwargs in messages:
+            recorder.record(
+                Event(
+                    kind=EventKind.OUTBOUND_DROPPED.value,
+                    correlation_id=identifier,
+                    function=function,
+                    chat_id=as_identifier(kwargs.get('chat_id')),
+                    error_code=type(error).__name__,
+                    error=str(error),
+                    detail={'stage': 'queueing'},
+                )
+            )
+        raise
+    if not recorder.enabled:
+        # guarded: describing the arguments is the one part of this that costs
+        # something when nobody is recording
+        return
+    for identifier, kwargs in messages:
+        recorder.record(
+            Event(
+                kind=EventKind.OUTBOUND_QUEUED.value,
+                correlation_id=identifier,
+                created_at=queued_at,
+                function=function,
+                chat_id=as_identifier(kwargs.get('chat_id')),
+                detail=describe(kwargs),
+            )
+        )
 
 
 def loop_lock(loop: AbstractEventLoop) -> threading.Lock:
@@ -550,6 +621,30 @@ class TelegramBot:
             return self.send_raw(function, correlation_id=identifier, **kwargs)
         return self.send_redis(function, correlation_id=identifier, **kwargs)
 
+    async def asend(
+        self,
+        function: str = 'send_message',
+        *,
+        correlation_id: uuid.UUID | str | None = None,
+        **kwargs: Any,
+    ) -> uuid.UUID:
+        """Deliver a message from code that is already on an event loop.
+
+        The same routing as :meth:`send`, without the blocking socket write that
+        one does on the calling thread — which under ASGI is the thread serving
+        requests, and on a first call includes a TCP connect bounded by
+        ``REDIS_TIMEOUT``.
+
+        In the bot container it still calls Telegram directly, and that path was
+        never blocking: :meth:`send_raw` schedules onto the loop and returns.
+        """
+        # before the first await, so a handler's correlation_scope is still the
+        # one in effect: after an await the caller's context may have moved on
+        identifier = resolve_correlation_id(correlation_id)
+        if self.is_worker:
+            return self.send_raw(function, correlation_id=identifier, **kwargs)
+        return await self.asend_redis(function, correlation_id=identifier, **kwargs)
+
     def close(self, drain_timeout: float | None = None) -> None:
         """Finish what is in flight, then release everything this bot owns.
 
@@ -930,6 +1025,21 @@ class TelegramBot:
             extra={'tg_dropped': len(dropped), 'tg_drain_timeout': timeout},
         )
 
+    def _accept(self, function: str, correlation_id: uuid.UUID | str | None) -> tuple[uuid.UUID, bool]:
+        """Judge a queueing request, and name the message either way.
+
+        Both producers ask the same three questions, and the third has a shape
+        worth keeping in one place: a disabled bot returns the id rather than
+        raising, so a caller storing it beside its own model gets the same value
+        whether or not this deployment sends anything.
+        """
+        check_function(function)
+        identifier = resolve_correlation_id(correlation_id)
+        if not self.enabled:
+            logger.debug('queueing skipped: bot disabled', extra={'tg_function': function})
+            return identifier, False
+        return identifier, True
+
     def send_redis(
         self,
         function: str = 'send_message',
@@ -941,47 +1051,146 @@ class TelegramBot:
 
         Returns the correlation id the delivered row will carry too.
         """
-        check_function(function)
-        identifier = resolve_correlation_id(correlation_id)
-        if not self.enabled:
-            logger.debug('queueing skipped: bot disabled', extra={'tg_function': function})
+        identifier, accepted = self._accept(function, correlation_id)
+        if not accepted:
             return identifier
 
-        queued_at = time.time()
-        try:
-            get_redis().rpush(
-                conf['REDIS_MESSAGES_KEY'],
-                get_serializer().dumps(pack(function, kwargs, identifier, queued_at)),
-            )
-        except Exception as error:
-            # recorded rather than assumed: a failure here means the message was
-            # never queued, and a 'queued' row would say the opposite
-            recorder.record(
-                Event(
-                    kind=EventKind.OUTBOUND_DROPPED.value,
-                    correlation_id=identifier,
-                    function=function,
-                    chat_id=as_identifier(kwargs.get('chat_id')),
-                    error_code=type(error).__name__,
-                    error=str(error),
-                    detail={'stage': 'queueing'},
-                )
-            )
-            raise
-        if recorder.enabled:
-            # guarded: describing the arguments is the one part of this that
-            # costs something when nobody is recording
-            recorder.record(
-                Event(
-                    kind=EventKind.OUTBOUND_QUEUED.value,
-                    correlation_id=identifier,
-                    created_at=queued_at,
-                    function=function,
-                    chat_id=as_identifier(kwargs.get('chat_id')),
-                    detail=describe(kwargs),
-                )
-            )
+        with queueing(function, [(identifier, kwargs)]) as write:
+            get_redis().rpush(write.key, *write.payloads)
         return identifier
+
+    async def asend_redis(
+        self,
+        function: str = 'send_message',
+        *,
+        correlation_id: uuid.UUID | str | None = None,
+        **kwargs: Any,
+    ) -> uuid.UUID:
+        """Queue a message without blocking the loop this coroutine runs on.
+
+        The synchronous twin writes to a socket on the calling thread, which under
+        ASGI is the thread serving requests — including, on the first call, a TCP
+        connect bounded by ``REDIS_TIMEOUT``. Everything else about the message is
+        identical: same payload, same event rows, same key.
+        """
+        identifier, accepted = self._accept(function, correlation_id)
+        if not accepted:
+            return identifier
+
+        client = await aget_redis()
+        with queueing(function, [(identifier, kwargs)]) as write:
+            await client.rpush(write.key, *write.payloads)
+        return identifier
+
+    def send_many(
+        self,
+        chat_ids: 'Iterable[int | str]',
+        function: str = 'send_message',
+        *,
+        chunk_size: int = 100,
+        **kwargs: Any,
+    ) -> list[uuid.UUID]:
+        """Queue one message per chat, a chunk of them per round trip.
+
+        Returns an id per message, in the order the chats were given — not a
+        single receipt for the batch. A batch id would trade the indexed
+        ``correlation_id__in`` lookup the event log is built for against a scan of
+        the JSON column, and ``unpack`` drops keys it does not know, so the
+        consumer's own rows could never carry it anyway.
+
+        This speeds up **queueing**, not delivery: the rate limits still pace what
+        leaves for Telegram, so fifty thousand chats is still about half an hour at
+        the default thirty a second. It also removes the pacing that sequential
+        round trips gave the event log — see **Event log** before broadcasting.
+
+        A chunk that fails records a drop for its own messages and raises; earlier
+        chunks are already queued, and their ids are lost with the exception, which
+        is why the drops are recorded rather than left to the caller to infer.
+        """
+        identifiers: list[uuid.UUID] = []
+        for chunk in self._chunks(chat_ids, function, chunk_size, kwargs):
+            with queueing(function, chunk) as write:
+                get_redis().rpush(write.key, *write.payloads)
+            identifiers.extend(identifier for identifier, _ in chunk)
+        return identifiers
+
+    async def asend_many(
+        self,
+        chat_ids: 'Iterable[int | str]',
+        function: str = 'send_message',
+        *,
+        chunk_size: int = 100,
+        **kwargs: Any,
+    ) -> list[uuid.UUID]:
+        """Queue one message per chat without blocking the loop.
+
+        Everything :meth:`send_many` says applies, and the reason to reach for this
+        one is stronger than for :meth:`asend`: a fan-out writes once per chunk and
+        serialises every payload, so on a serving loop it blocks longer and more
+        often than a single send does.
+        """
+        client = await aget_redis()
+        identifiers: list[uuid.UUID] = []
+        for chunk in self._chunks(chat_ids, function, chunk_size, kwargs):
+            with queueing(function, chunk) as write:
+                await client.rpush(write.key, *write.payloads)
+            identifiers.extend(identifier for identifier, _ in chunk)
+        return identifiers
+
+    def _chunks(
+        self,
+        chat_ids: 'Iterable[int | str]',
+        function: str,
+        chunk_size: int,
+        kwargs: dict[str, Any],
+    ) -> 'Iterator[list[tuple[uuid.UUID, dict[str, Any]]]]':
+        """Group the chats into the batches one write covers.
+
+        Serialisation happens inside :func:`queueing`, one chunk at a time, which
+        is what keeps peak memory bounded: a ``BufferedInputFile`` payload times
+        fifty thousand chats would otherwise all exist at once.
+        """
+        check_function(function)
+        size = max(1, int(chunk_size))
+        chunk: list[tuple[uuid.UUID, dict[str, Any]]] = []
+        for chat_id in chat_ids:
+            chunk.append((new_correlation_id(), {**kwargs, 'chat_id': chat_id}))
+            if len(chunk) >= size:
+                yield chunk
+                chunk = []
+        if chunk:
+            yield chunk
+
+    def queue_depth(self) -> int:
+        """How many messages are waiting for a worker to take them.
+
+        One ``LLEN``. Named for what it measures rather than the command, because
+        the queue is a Redis list only until 4.0 makes the broker pluggable.
+
+        Growing is not by itself a fault — producers can outpace delivery, and
+        ``MAX_IN_FLIGHT`` holds intake back on purpose. See **Troubleshooting**.
+        """
+        return int(get_redis().llen(queue_key()) or 0)
+
+    async def aqueue_depth(self) -> int:
+        """:meth:`queue_depth` without blocking the loop this coroutine runs on."""
+        client = await aget_redis()
+        return int(await client.llen(queue_key()) or 0)
+
+    def inflight_depth(self, worker: str | None = None) -> int:
+        """How many messages one worker is part-way through sending.
+
+        Defaults to this process's own worker identity. Naming another is how a
+        monitor reads a list left behind by a worker that is gone — the scheme
+        those keys follow is this package's business, not an exporter's to
+        reproduce.
+        """
+        return int(get_redis().llen(processing_key(worker)) or 0)
+
+    async def ainflight_depth(self, worker: str | None = None) -> int:
+        """:meth:`inflight_depth` without blocking the loop this coroutine runs on."""
+        client = await aget_redis()
+        return int(await client.llen(processing_key(worker)) or 0)
 
     def message(self, *args: Any, **kwargs: Any) -> CallbackType:
         """Return a decorator registering a handler for the 'message' observer."""
