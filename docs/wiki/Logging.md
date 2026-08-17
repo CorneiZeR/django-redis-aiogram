@@ -65,6 +65,7 @@ All prefixed with `tg_`, to avoid colliding with `LogRecord` attributes.
 | `the event loop thread did not stop in time` | WARNING | it outlived its join at shutdown, so the teardown was skipped and `close()` can be retried |
 | `skipping close` | WARNING | the loop was still running, so nothing was torn down; stop polling or the loop thread and call it again |
 | `skipping drain` | WARNING | the same, for the drain alone: in-flight sends were left rather than waited for |
+| `scheduling a send on a loop nothing in this process runs` | WARNING | nothing polls this process and no loop thread exists, so the send is created and never stepped |
 | `rate limited by telegram` | WARNING | refused and backing off |
 | `delivery started` | INFO | the consumer is up |
 | `message sent` | INFO | one call succeeded |

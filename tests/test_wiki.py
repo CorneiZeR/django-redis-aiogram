@@ -77,6 +77,34 @@ def test_readme_wiki_links_resolve():
     assert not broken, f'README links to missing wiki pages: {broken}'
 
 
+def test_every_documented_log_message_is_still_emitted():
+    """The other direction from the table's own purpose.
+
+    `Logging.md` lists the events worth alerting on — a curated subset, not every
+    warning the package writes, so requiring the code to be exhausted by it would
+    be wrong. What is worth enforcing is the reverse: a row describing a message
+    nothing emits any more sends someone to build an alert that can never fire.
+    """
+    import ast
+
+    page = (ROOT / 'docs' / 'wiki' / 'Logging.md').read_text(encoding='utf-8')
+    documented = re.findall(r'^\| `([a-z][^`]+)` \| (?:ERROR|WARNING|INFO) \|', page, re.M)
+    assert documented, 'no message rows found on the Logging page'
+
+    emitted = []
+    for path in sorted((ROOT / 'src' / 'django_redis_aiogram').rglob('*.py')):
+        for node in ast.walk(ast.parse(path.read_text(encoding='utf-8'))):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            if node.func.attr not in {'debug', 'info', 'warning', 'error', 'exception'}:
+                continue
+            if node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
+                emitted.append(node.args[0].value)
+
+    stale = [message for message in documented if not any(message in line for line in emitted)]
+    assert not stale, f'documented but no longer emitted: {stale}'
+
+
 def test_wiki_link_syntax_stays_in_the_wiki():
     """`[[Page]]` is wiki-only syntax, and renders literally everywhere else.
 
