@@ -88,7 +88,7 @@ def test_every_documented_log_message_is_still_emitted():
     import ast
 
     page = (ROOT / 'docs' / 'wiki' / 'Logging.md').read_text(encoding='utf-8')
-    documented = re.findall(r'^\| `([a-z][^`]+)` \| (?:ERROR|WARNING|INFO) \|', page, re.M)
+    documented = re.findall(r'^\| `([a-z][^`]+)` \| (?:ERROR|WARNING|INFO) \|', page, re.MULTILINE)
     assert documented, 'no message rows found on the Logging page'
 
     emitted = []
