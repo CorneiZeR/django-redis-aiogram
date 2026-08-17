@@ -531,16 +531,19 @@ class EventRecorder:
     def _deliver(self, batch: list[Event]) -> None:
         """Write a batch if this process keeps the table, then publish it either way.
 
-        **The write goes first, and the publish is in a ``finally``.** Publishing
-        first handed receivers the same list and the same ``Event`` objects the ORM
-        was about to read — and a frozen dataclass does not freeze the ``detail``
-        dict inside it, so a receiver clearing the list or editing a ``detail``
-        could change what got persisted. Writing first makes that impossible rather
-        than asking receivers to be careful.
+        The order is the contract, and it is two claims rather than one. The write
+        is **attempted first**, so nothing a receiver does can change a row that was
+        written — which is why receivers get the real ``Event`` objects and not
+        copies. And the publish is in a ``finally``, so a write that *failed* still
+        reaches them: a database that is down or unmigrated is exactly when someone
+        is watching a dashboard, and the metrics have no reason to go with it. A
+        receiver seeing a batch is therefore not evidence that a row exists for it.
 
-        The ``finally`` is what keeps the other half of the promise: a database that
-        is down or unmigrated is exactly when someone is watching a dashboard, and
-        the metrics have no reason to go with it.
+        Publishing first was the original order, and it handed receivers the same
+        list and the same ``Event`` objects the ORM was about to read. A frozen
+        dataclass does not freeze the ``detail`` dict inside it, so a receiver
+        clearing the list or editing a ``detail`` changed what got persisted. This
+        way round makes that impossible instead of asking receivers to be careful.
         """
         try:
             if self.enabled:

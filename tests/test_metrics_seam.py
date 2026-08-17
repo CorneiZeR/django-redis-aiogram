@@ -408,3 +408,27 @@ def test_a_receiver_still_gets_the_detail_a_seam_measured_itself(redis_server, c
     assert kinds(collected) == ['outbound.dropped'], f'the receiver saw {kinds(collected)}'
     assert collected[0].detail == {'stage': 'queueing'}, 'the stage a receiver needs was withheld'
     assert collected[0].error_code == 'ConnectionError'
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'EVENT_LOG': True})
+def test_a_failed_write_still_reaches_a_receiver(redis_server, collected, monkeypatch, caplog):
+    """The whole reason the publish is in a `finally` rather than after the write.
+
+    A database that is down or unmigrated is exactly when someone is watching a
+    dashboard, so the metrics must not go down with it. Written the other way round
+    — publish after a successful write — a project would lose its numbers precisely
+    when it needed them, and the loss would look like the bot going quiet.
+    """
+
+    def refuse(batch):
+        message = 'no such table: django_redis_aiogram_telegramevent'
+        raise RuntimeError(message)
+
+    monkeypatch.setattr(recorder, '_write', refuse)
+
+    with caplog.at_level('ERROR', logger='django_redis_aiogram'):
+        TelegramBot().send_redis(chat_id=7, text='hi')
+        recorder.flush(timeout=5)
+
+    assert kinds(collected) == ['outbound.queued'], f'a failed write cost the receiver its batch: {kinds(collected)}'
+    assert 'could not write an event batch' in caplog.text, 'the failure was not reported'

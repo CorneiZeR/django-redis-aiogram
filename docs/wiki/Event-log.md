@@ -152,10 +152,15 @@ table's columns carry and are pinned as public API. A signal rather than a setti
 naming a dotted path, because there is then no path to get wrong, no check id for
 it, and no question about what happens when the import fails.
 
-The batch has already been written by the time a receiver sees it, so a receiver
-cannot affect the rows — which is why they get the real objects rather than copies.
-The `detail` dict inside one is an ordinary dict, shared with the other receivers,
-so treat it as read-only.
+The write is attempted before a receiver sees the batch, so nothing a receiver does
+can change a row that was written — which is why they get the real objects rather
+than copies. The `detail` dict inside one is an ordinary dict, shared with the other
+receivers, so treat it as read-only.
+
+*Attempted*, not guaranteed: a write that failed still publishes, because a database
+being down is exactly when someone is watching a dashboard. So a batch arriving is
+not evidence that a row exists for it — and with the log off there is no row by
+design.
 
 Four things about it are worth knowing before you rely on it, and three of them
 surprise people:
@@ -188,11 +193,14 @@ enough.
 
 ### Where it runs, and what that costs
 
-On the **event writer's own thread**, once per batch. So a slow receiver delays
-rows reaching the database and never delays a send — which is the whole reason
-this is not a settings hook calling into your code from the send path. Under
-`EVENT_LOG_SYNC` there is no writer thread and receivers run on the thread that
-recorded the event; that flag is for tests, and this is one more reason.
+On the **event writer's own thread**, and after that batch's own write has been
+attempted. So a slow receiver delays neither a send nor the rows it just saw — only
+later batches, and how long the writer takes to stop. Never delaying a send is the
+whole reason this is not a settings hook calling into your code from the send path.
+
+Under `EVENT_LOG_SYNC` there is no writer thread at all: receivers run on the
+thread that recorded the event, after its insert. That flag is for tests, and this
+is one more reason.
 
 A receiver that raises is logged as `an events_recorded receiver raised` and does
 not cost the other receivers their batch, or the database its rows —

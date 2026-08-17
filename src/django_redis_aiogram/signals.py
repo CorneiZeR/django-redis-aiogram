@@ -39,13 +39,18 @@ from django.dispatch import Signal
 #:   behind, and a deployment that filtered it out would read the hole as quiet
 #:   traffic. The table has always been exempt from the filter for that row, and
 #:   receivers are exempt with it.
-#: * **The batch has already been written when receivers see it.** They cannot
-#:   affect the rows, which is why they get real ``Event`` objects rather than
-#:   copies — but the ``detail`` dict inside one is an ordinary mutable dict shared
-#:   with the other receivers, so treat it as read-only.
+#: * **The write is attempted before receivers see the batch.** So nothing a
+#:   receiver does can change a row that was written, which is why they get real
+#:   ``Event`` objects rather than copies — the ``detail`` dict inside one is an
+#:   ordinary mutable dict shared with the other receivers, so treat it as
+#:   read-only. It is *attempted*, not guaranteed: a write that failed still
+#:   publishes, because a database being down is exactly when someone is watching a
+#:   dashboard. Receiving a batch is therefore not evidence that a row exists for
+#:   it, and with ``EVENT_LOG`` off there is no row by design.
 #:
-#: It runs on the writer thread, so a slow receiver delays rows reaching the
-#: database but never delays a send. Under ``EVENT_LOG_SYNC`` there is no writer
-#: thread and receivers run on the thread that recorded the event — that flag is
-#: for tests, and this is one more reason it is.
+#: It runs on the writer thread, once the batch's own write has been attempted, so a
+#: slow receiver delays neither a send nor that write — only later batches, and the
+#: writer's shutdown. Under ``EVENT_LOG_SYNC`` there is no writer thread at all and
+#: receivers run on the thread that recorded the event, after its insert: that flag
+#: is for tests, and this is one more reason it is.
 events_recorded = Signal()
