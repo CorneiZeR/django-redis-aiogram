@@ -68,7 +68,11 @@ ids, the rows and the routing are identical.
 `send_many` queues one message per chat, a chunk of them per round trip, and
 returns an id per message in the order the chats were given. `asend_many` is its
 loop-friendly twin, and the case for it is stronger than for `asend`: a fan-out
-writes once per chunk and serialises every payload, so it blocks longer.
+writes once per chunk and serialises every payload, so the synchronous one holds
+the calling thread that much longer. What `asend_many` moves off the way is the
+waiting, not the work — it still serialises each chunk on the loop's own thread
+between its awaits, so a broadcast big enough to notice belongs in a task rather
+than in a request.
 
 Two things it does **not** do. It does not speed up delivery — the rate limits
 still pace what leaves for Telegram, so fifty thousand chats is about half an hour
@@ -138,7 +142,7 @@ except TelegramBadRequest:
 
 Telegram rate-limit refusals are retried up to `MAX_RETRIES`; exhausting them
 logs an error and, with `RAISE_EXCEPTION`, re-raises — into the caller that was
-waiting, so the same qualification applies. See **[[Rate limits]]**
+waiting, so the same qualification applies. See **[[Rate-limits|Rate limits]]**
 for staying under the limits in the first place.
 
 ## From Celery

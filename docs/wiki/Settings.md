@@ -104,7 +104,7 @@ TELEGRAM_BOT = {
 }
 ```
 
-See **[[Rate limits]]**.
+See **[[Rate-limits|Rate limits]]**.
 
 ## Event log
 

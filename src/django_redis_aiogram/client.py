@@ -166,8 +166,11 @@ def queueing(function: str, messages: list[tuple[uuid.UUID, dict[str, Any]]]) ->
     The one step that cannot be shared between a synchronous producer and an
     asynchronous one is the ``await`` — the language will not allow it. Everything
     around it can be, and is: the serialisation, the key, and both event rows,
-    including the rule that a failure records a drop rather than letting silence
-    imply the message was queued.
+    including the rule that a message lost on the way to Redis records a drop
+    rather than letting silence imply it was queued. Resolving the serializer and
+    the key sits outside that guard on purpose — a misconfigured ``SERIALIZER``
+    fails identically for every send ever made, and the exception is where that
+    belongs, not a drop row per message for as long as it stays misconfigured.
 
     So each transport is the two lines that write, and nothing else. The consumer
     knows one payload shape and the event log has one definition of ``queued``;
@@ -176,13 +179,19 @@ def queueing(function: str, messages: list[tuple[uuid.UUID, dict[str, Any]]]) ->
     queued_at = time.time()
     serializer = get_serializer()
     key = str(conf['REDIS_MESSAGES_KEY'])
-    write = Queueing(
-        key=key,
-        payloads=[serializer.dumps(pack(function, kwargs, identifier, queued_at)) for identifier, kwargs in messages],
-        messages=messages,
-        queued_at=queued_at,
-    )
     try:
+        # inside the guard, not before it: a payload that cannot be serialised
+        # loses its message exactly as a refused write does, and for a chunk the
+        # ids go with the exception — so these rows are the only record of which
+        # messages were lost
+        write = Queueing(
+            key=key,
+            payloads=[
+                serializer.dumps(pack(function, kwargs, identifier, queued_at)) for identifier, kwargs in messages
+            ],
+            messages=messages,
+            queued_at=queued_at,
+        )
         yield write
     except Exception as error:
         for identifier, kwargs in messages:

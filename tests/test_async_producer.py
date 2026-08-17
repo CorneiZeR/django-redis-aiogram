@@ -10,6 +10,7 @@ rather than re-testing the queueing.
 import asyncio
 import threading
 import uuid
+from types import SimpleNamespace
 
 import pytest
 from django.test import override_settings
@@ -18,7 +19,7 @@ from django_redis_aiogram import TelegramBot
 from django_redis_aiogram.context import correlation_scope
 from django_redis_aiogram.envelope import unpack
 from django_redis_aiogram.redis import aget_redis, as_bytes
-from django_redis_aiogram.serializers import loads
+from django_redis_aiogram.serializers import SerializationError, loads
 
 QUEUE = 'TELEGRAM_BOT_MESSAGE'
 SETTINGS = {'REDIS_URL': 'redis://localhost:6379/0', 'RATE_LIMIT': None}
@@ -62,14 +63,26 @@ def test_the_loop_keeps_running_while_a_message_is_queued(redis_server, monkeypa
 
 
 @override_settings(TELEGRAM_BOT=SETTINGS)
-def test_the_correlation_id_is_taken_before_the_first_await(redis_server):
+def test_the_correlation_id_is_resolved_before_the_await(redis_server, monkeypatch):
     """A handler's replies inherit the id of the update that caused them.
 
-    Resolving after an await would read whatever context the loop had moved on
-    to, so the queued row would belong to a different conversation than the one
-    that asked for it — silently, and only under concurrency.
+    Asserting only that the queued row carries the caller's id proves nothing: the
+    scope stays active across the awaits, so a resolution moved after one would
+    read the same value. What is actually load-bearing is that `asend` hands a
+    concrete id *down* rather than passing `None` for something after the await to
+    resolve — because that later reader is on the far side of anything the awaited
+    code does to the context, and of `_hand_off`, whose callback runs in the loop's
+    own context where the variable is empty.
     """
     given = uuid.UUID('22222222-2222-2222-2222-222222222222')
+    handed = []
+    real = TelegramBot.asend_redis
+
+    async def spy(self, function='send_message', *, correlation_id=None, **kwargs):
+        handed.append(correlation_id)
+        return await real(self, function, correlation_id=correlation_id, **kwargs)
+
+    monkeypatch.setattr(TelegramBot, 'asend_redis', spy)
 
     async def inside_scope():
         with correlation_scope(given):
@@ -77,6 +90,7 @@ def test_the_correlation_id_is_taken_before_the_first_await(redis_server):
 
     returned = asyncio.run(inside_scope())
 
+    assert handed == [given], f'asend passed {handed} down instead of the resolved id'
     assert returned == given
     queued = unpack(loads(as_bytes(redis_server.lrange(QUEUE, 0, -1)[0])))
     assert queued.correlation_id == given
@@ -223,17 +237,31 @@ def test_send_off_a_loop_says_nothing(redis_server, caplog, monkeypatch):
     assert 'await asend()' not in caplog.text
 
 
-@override_settings(TELEGRAM_BOT={**SETTINGS, 'ENABLED': False})
+@override_settings(TELEGRAM_BOT={'RATE_LIMIT': None, 'ENABLED': False})
 @pytest.mark.parametrize('bulk', ['send_many', 'asend_many'])
-def test_a_disabled_process_queues_nothing_and_still_names_the_messages(redis_server, bulk):
+def test_a_disabled_process_queues_nothing_and_still_names_the_messages(redis_server, bulk, monkeypatch):
     """`ENABLED=0` means this process reaches neither Telegram nor Redis.
 
     The single-message path has always honoured that and still returned the id, so
     a caller can store ids beside its own rows whether or not this deployment
     sends. The bulk pair wrote anyway when it was first written — and the async one
-    built its client before deciding, which would raise on a disabled process that
-    has no `REDIS_URL` at all, turning "do nothing" into a crash.
+    built its client before deciding, which turns "do nothing" into a crash on a
+    disabled process with no `REDIS_URL` at all.
+
+    So the settings here carry no `REDIS_URL`, and both accessors are made to
+    refuse: the fixture hands out a fake whatever the configuration says, so
+    leaving them in place would let a client be built and prove nothing about the
+    deployment this is named after. The queue is read through the fixture's own
+    handle, which is not the accessor either path calls.
     """
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        message = 'a disabled process asked for a Redis client'
+        raise AssertionError(message)
+
+    monkeypatch.setattr('django_redis_aiogram.client.get_redis', refuse)
+    monkeypatch.setattr('django_redis_aiogram.redis.build_async_client', refuse)
+
     bot = TelegramBot()
     result = getattr(bot, bulk)([1, 2, 3], text='hi')
     identifiers = asyncio.run(result) if bulk.startswith('a') else result
@@ -263,6 +291,39 @@ def test_a_broadcast_records_one_row_per_message(redis_server, bulk, monkeypatch
     queued = [event for event in recorded if event.kind == 'outbound.queued']
     assert len(queued) == 25, f'{len(queued)} rows for 25 messages'
     assert [event.correlation_id for event in queued] == identifiers, 'the rows do not carry the returned ids'
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'EVENT_LOG': True, 'EVENT_LOG_SYNC': True})
+@pytest.mark.parametrize('bulk', ['send_many', 'asend_many'])
+def test_a_payload_that_cannot_be_serialised_is_recorded_as_lost(redis_server, bulk, monkeypatch):
+    """A message can be lost before the write as well as by it.
+
+    `send_many` promises a chunk that fails records a drop for its own messages,
+    and for a bulk call those rows are the only record of which ones: the ids go
+    with the exception. Serialising outside the guard made that promise false for
+    the one failure that happens before the socket is touched at all.
+    """
+    recorded = []
+    monkeypatch.setattr('django_redis_aiogram.client.recorder.record', recorded.append)
+
+    def refuse(payload):
+        msg = 'nothing here can be encoded'
+        raise SerializationError(msg)
+
+    monkeypatch.setattr('django_redis_aiogram.client.get_serializer', lambda: SimpleNamespace(dumps=refuse))
+    bot = TelegramBot()
+
+    def broadcast():
+        result = getattr(bot, bulk)(range(4), text='hi')
+        return asyncio.run(result) if bulk.startswith('a') else result
+
+    with pytest.raises(SerializationError):
+        broadcast()
+
+    dropped = [event for event in recorded if event.kind == 'outbound.dropped']
+    assert len(dropped) == 4, f'{len(dropped)} rows for four messages nothing could encode'
+    assert {event.detail['stage'] for event in dropped} == {'queueing'}
+    assert redis_server.llen(QUEUE) == 0
 
 
 def _count_writes(patch, writes, fail_on_call=None):

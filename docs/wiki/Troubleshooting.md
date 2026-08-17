@@ -31,6 +31,8 @@ why the package sets the deadline itself rather than relying on the client.
 ## Messages pile up in Redis
 
 ```python
+from django_redis_aiogram import bot
+
 bot.queue_depth()  # messages waiting for a worker
 bot.inflight_depth()  # what this worker is part-way through sending
 ```
@@ -120,8 +122,8 @@ the send path read it the same way.
 
 ## Sends are slow
 
-That is likely the pacing in **[[Rate limits]]** doing its job: one message per
-second to the same chat, 20 per minute to a group. Verify with `RATE_LIMIT`
+That is likely the pacing in **[[Rate-limits|Rate limits]]** doing its job: one
+message per second to the same chat, 20 per minute to a group. Verify with `RATE_LIMIT`
 set to `None`; if it speeds up, tune the numbers rather than removing them, or
 Telegram will start refusing.
 

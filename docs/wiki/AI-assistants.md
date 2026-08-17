@@ -20,9 +20,11 @@ Project uses django-redis-aiogram 3.x. Rules:
 - To send from anywhere (view, task, signal): `bot.send(chat_id=..., text=...)`.
 - From async code, await `bot.asend(...)` instead: `send()` writes to a socket on
   the thread the loop is running on. Same arguments, same returned id.
-- To reach many chats, `bot.send_many(chat_ids, text=...)` (or `asend_many`), which
-  queues a chunk per round trip and returns an id per message. It speeds up
-  queueing only — the rate limits still pace delivery.
+- To reach many chats, `bot.send_many(chat_ids, text=...)`, or from async code
+  `await bot.asend_many(chat_ids, text=...)` — un-awaited it only builds a
+  coroutine and queues nothing. Either queues a chunk per round trip and returns
+  an id per message. It speeds up queueing only — the rate limits still pace
+  delivery.
   It queues through Redis outside the bot container and calls Telegram directly
   inside it. Pass another method by name: bot.send('send_photo', chat_id=..., photo=...).
   Only Telegram API methods aiogram exposes are accepted.

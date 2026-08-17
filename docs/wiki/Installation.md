@@ -94,4 +94,4 @@ checks, so it reports nothing either way.
 ## Next
 
 * **[[Handlers]]** to answer messages
-* **[[Sending messages]]** to send them
+* **[[Sending-messages|Sending messages]]** to send them

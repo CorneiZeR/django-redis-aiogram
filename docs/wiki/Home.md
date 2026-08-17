@@ -19,7 +19,7 @@ bot.send(chat_id=CHAT_ID, text='hello')
 * **[[Installation]]** — install, configure, run
 * **[[Settings]]** — every setting, with defaults
 * **[[Handlers]]** — writing routers and using FSM
-* **[[Sending messages]]** — `send`, `asend`, `send_many`, `send_redis`, `send_raw`, keyboards, files
+* **[[Sending-messages|Sending messages]]** — `send`, `asend`, `send_many`, `send_redis`, `send_raw`, keyboards, files
 * **[[Testing]]** — running your suite without Redis, asserting what was queued
 * **[[API]]** — the instance, its internals, and what stays public
 
@@ -27,7 +27,7 @@ bot.send(chat_id=CHAT_ID, text='hello')
 
 * **[[Delivery]]** — how messages get from Redis to Telegram, and which mode to pick
 * **[[Webhook]]** — receiving updates over HTTP instead of polling for them
-* **[[Rate limits]]** — staying inside Telegram's published limits
+* **[[Rate-limits|Rate limits]]** — staying inside Telegram's published limits
 * **[[Deployment]]** — docker-compose recipes, disabling the bot per process
 * **[[Logging]]** — the logger and its structured fields
 * **[[Event-log|Event log]]** — recording what the bot did to a table

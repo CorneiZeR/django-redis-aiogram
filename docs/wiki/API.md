@@ -53,6 +53,20 @@ feeding the dispatcher, reusing the connection — and that keeps working;
 `function` must name a Telegram API method aiogram exposes; anything else raises
 `ValueError` before it reaches the queue. See **[[Sending-messages|Sending messages]]**.
 
+`send`, `send_redis` and `send_raw` return a **correlation id** — a `uuid.UUID`
+that ties every row about that message together, whichever process wrote it.
+`send_many` returns one per chat, in the order the chats were given. Store it
+beside your own model if you want to join your records to the feed later. Each of
+them also accepts one as a keyword argument, and a handler replying to an update
+inherits that update's id without passing anything:
+
+```python
+identifier = bot.send(chat_id=chat_id, text='hello')
+Receipt.objects.create(order=order, telegram_correlation_id=identifier)
+```
+
+Before 3.0 they returned `None`, so every existing call site still compiles.
+
 ### From code already on an event loop
 
 | | |
@@ -61,11 +75,18 @@ feeding the dispatcher, reusing the connection — and that keeps working;
 | `await bot.asend_redis(...)` | as `send_redis` |
 | `await bot.asend_many(...)` | as `send_many` |
 
-Same signatures, same ids, same rows — the difference is that the write does not
-happen on the thread the loop is running on, which under ASGI is the thread
-serving requests. Reach for these from an async view or an async task, and for
-the bulk one in particular: a fan-out writes once per chunk and serialises every
-payload, so it blocks longer and more often than a single send.
+Same signatures, same rows, and the same correlation id — resolved on the caller's
+context before the first `await`, so a handler's replies still inherit the id of
+the update that caused them.
+
+The difference is not *where* the write happens. `redis.asyncio` writes on the
+same thread the loop is running on; it just yields while waiting instead of
+holding that thread, so under ASGI the thread goes on serving other requests
+rather than sitting on a socket. Reach for these from an async view or an async
+task. Note that only the waiting yields: `asend_many` iterates the chats and
+serialises each chunk between its awaits, and that part is ordinary CPU work on
+the loop's thread. A fan-out large enough to matter belongs in a task, not in a
+request.
 
 Nothing to close. Each loop gets its own client, because `redis.asyncio`
 connections are loop-affine, and a loop that goes away takes its client with it —
@@ -78,25 +99,16 @@ shutdown, and **[[Deployment]]** says when that matters.
 | --- | --- |
 | `bot.queue_depth()` | messages waiting for a worker, one `LLEN` |
 | `bot.inflight_depth(worker=None)` | messages one worker is part-way through sending |
-| `await bot.aqueue_depth()` / `await bot.ainflight_depth(...)` | the same, off the loop's thread |
+| `await bot.aqueue_depth()` / `await bot.ainflight_depth(...)` | the same read, without holding the loop |
 
 `inflight_depth` defaults to this process's own worker identity; naming another is
 how a monitor reads a list left behind by a worker that is gone. The key scheme
 behind them is this package's business — an exporter should not have to reproduce
 `<REDIS_MESSAGES_KEY>:processing:<worker>` by hand.
 
-All three return a **correlation id** — a `uuid.UUID` that ties every row about
-that message together, whichever process wrote it. Store it beside your own
-model if you want to join your records to the feed later. All three also accept
-one as a keyword argument, and a handler replying to an update inherits that
-update's id without passing anything:
-
-```python
-identifier = bot.send(chat_id=chat_id, text='hello')
-Receipt.objects.create(order=order, telegram_correlation_id=identifier)
-```
-
-Before 3.0 they returned `None`, so every existing call site still compiles.
+Each returns an `int` — a length at the moment it was read, not a correlation id
+and not a reservation. A depth read and then acted on is already out of date, so
+these answer "is the backlog growing" rather than "how many will this worker send".
 
 ## Handlers
 

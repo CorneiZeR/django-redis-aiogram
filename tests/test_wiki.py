@@ -59,6 +59,17 @@ def test_piped_links_name_the_page_first(path):
     assert not reversed_links, f'{path.name} has label-first links: {reversed_links}'
 
 
+@pytest.mark.parametrize('path', PAGES, ids=lambda path: path.name)
+def test_a_multi_word_page_is_linked_by_its_file_name(path):
+    """`[[Sending messages]]` does resolve — GitHub normalises spaces to dashes,
+    which is why the check above accepts it — but it names no file, so a rename
+    breaks it in a way only a published wiki shows. Both forms were in use here
+    at once. Spell the page, let the label carry the spaces.
+    """
+    loose = [link for link in LINK.findall(path.read_text(encoding='utf-8')) if '|' not in link and ' ' in link.strip()]
+    assert not loose, f'{path.name} links to a page by its label: {loose}'
+
+
 README = ROOT / 'README.md'
 PYPROJECT = ROOT / 'pyproject.toml'
 # absolute, because the README is also the PyPI description and PyPI does not

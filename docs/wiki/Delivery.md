@@ -33,7 +33,7 @@ the value to use.
 
 The consumer takes each message once — `BLMOVE` and `BLPOP` are atomic. Running
 several bot containers is safe, though a single one handles a lot: the limits
-in **[[Rate limits]]** bind long before the consumer does.
+in **[[Rate-limits|Rate limits]]** bind long before the consumer does.
 
 ## Crash safety
 

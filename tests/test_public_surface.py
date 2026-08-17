@@ -288,8 +288,13 @@ def test_the_two_send_paths_agree_on_their_signature():
     Same for the bulk pair. Checked rather than asserted in prose, because the
     two are written apart and a keyword added to one is easy to forget in the
     other — and 4.0 renames the package with these signatures pinned.
+
+    Compared whole rather than by name: a keyword whose default moved, or one that
+    became positional, is a rewrite for the caller too, and a list of names says
+    nothing about either. The return annotation is in the comparison because
+    `async def` annotates the awaited value, so the two genuinely do agree on it.
     """
     for sync_name, async_name in (('send', 'asend'), ('send_many', 'asend_many')):
         sync = inspect.signature(getattr(TelegramBot, sync_name))
         asynchronous = inspect.signature(getattr(TelegramBot, async_name))
-        assert list(sync.parameters) == list(asynchronous.parameters), f'{sync_name} and {async_name} drifted'
+        assert sync == asynchronous, f'{sync_name}{sync} and {async_name}{asynchronous} drifted'
