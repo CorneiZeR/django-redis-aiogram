@@ -312,13 +312,16 @@ def test_a_server_without_lmove_is_refused_when_crash_safety_is_required(monkeyp
         'django_redis_aiogram.management.commands.start_tgbot.get_delivery',
         lambda handler: OldServer(started),
     )
-    monkeypatch.setattr(bot, 'start_polling', lambda: None)
+    # recorded too: asserting only on the consumer would let the probe move after
+    # start_polling and still pass, and a process polling updates with nothing
+    # draining the queue is the shape this refusal exists to prevent
+    monkeypatch.setattr(bot, 'start_polling', lambda: started.append('polling-started'))
     monkeypatch.setattr(bot, 'close', lambda: None)
 
     with pytest.raises(CommandError, match='LMOVE'):
         call_command('start_tgbot')
 
-    assert started == [], 'the consumer thread started anyway'
+    assert started == [], f'the refusal came too late: {started}'
 
 
 @override_settings(

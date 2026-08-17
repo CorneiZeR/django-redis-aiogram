@@ -42,10 +42,15 @@ simply be outpacing it, and `MAX_IN_FLIGHT` deliberately holds intake back while
 sends are outstanding. Check the heartbeat and the in-flight list below before
 concluding the worker is down — see above for one that genuinely is. Messages
 wait in the queue until a worker takes them. On Redis 6.2+ a taken message sits in
-`<key>:processing:<worker>` until the send has finished, and a
-restart with the same `WORKER_NAME` reclaims it: at-least-once, so a crash
-mid-send can duplicate a send. That holds for the worker `start_tgbot` runs; a
-handler of your own is only held that way if it takes an `on_complete` keyword.
+`<key>:processing:<worker>` until the send has finished, and a restart under the
+same **worker identity** reclaims it: at-least-once, so a crash mid-send can
+duplicate a send. That identity is `WORKER_NAME` when it is set and the hostname
+otherwise — so on a platform that gives each container a fresh hostname, a
+recreated worker looks like a different one and leaves the old list untouched.
+Set `WORKER_NAME` to something stable wherever hostnames change.
+
+All of that holds for the worker `start_tgbot` runs; a handler of your own is
+only held that way if it takes an `on_complete` keyword.
 
 That list is expected to be non-empty while sends are in flight, and an entry
 stays until its send finishes or shutdown cancels it. `MAX_IN_FLIGHT` bounds how
