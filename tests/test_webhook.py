@@ -20,7 +20,7 @@ from django.test import RequestFactory, override_settings
 
 from django_redis_aiogram import TelegramBot
 from django_redis_aiogram.checks import check_settings
-from django_redis_aiogram.client import Outbound
+from django_redis_aiogram.client import Outbound, loop_lock
 from django_redis_aiogram.exceptions import LoopThreadNotStartedError, ShuttingDownError
 from django_redis_aiogram.webhook import (
     SECRET_HEADER,
@@ -836,4 +836,37 @@ def test_a_loop_thread_that_dies_is_replaced(monkeypatch):
         assert len(attempts) == 2, 'no replacement thread was started'
     finally:
         monkeypatch.setattr(asyncio, 'set_event_loop', real_set_event_loop)
+        instance.close()
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_forgetting_an_update_waits_for_the_shutdown_snapshot():
+    """The set is added to and read under `loop_lock`; removal has to match.
+
+    `_stop_runner` takes `list()` over this set while holding that lock. A
+    `discard` from a request thread mid-iteration raises `RuntimeError: Set
+    changed size during iteration` **inside `close()`**, which aborts the
+    shutdown before anything is torn down — the loop, the session and the storage
+    all left open, from a request that merely finished at the wrong moment.
+    """
+    instance = TelegramBot()
+    instance._ensure_loop_runs()
+    loop = instance.loop
+    finished = object()
+    instance._updates.add(finished)  # type: ignore[arg-type] - a stand-in for a future
+    done = threading.Event()
+
+    try:
+        with loop_lock(loop):
+            threading.Thread(
+                target=lambda: (instance._forget_update(finished), done.set()),  # type: ignore[arg-type,func-returns-value]
+                daemon=True,
+            ).start()
+            # it must not get in while the snapshot could be running
+            held_off = not done.wait(0.3)
+
+        assert done.wait(5), 'the removal never completed once the lock was free'
+        assert held_off, 'the removal did not take the lock'
+        assert instance._updates == set()
+    finally:
         instance.close()

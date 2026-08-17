@@ -386,6 +386,21 @@ class TelegramBot:
             # waiting outside the lock, so the next request is not held up by ours
             future.result()
         finally:
+            self._forget_update(future)
+
+    def _forget_update(self, future: 'futures.Future[None]') -> None:
+        """Drop a finished update from the set the shutdown snapshot reads.
+
+        Under the same lock it was added under. `_stop_runner` takes `list()` over
+        this set while holding that lock, and a `discard` from a request thread
+        mid-iteration raises `RuntimeError: Set changed size during iteration`
+        inside `close()` — aborting the shutdown before anything is torn down.
+        """
+        loop = self._loop
+        if loop is None:
+            self._updates.discard(future)
+            return
+        with loop_lock(loop):
             self._updates.discard(future)
 
     def _ensure_loop_runs(self) -> bool:
