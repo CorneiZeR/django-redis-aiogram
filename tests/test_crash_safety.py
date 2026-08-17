@@ -579,6 +579,26 @@ def test_reclaim_dry_run_moves_nothing(redis_server):
 
 
 @override_settings(TELEGRAM_BOT={**SETTINGS, 'WORKER_NAME': 'alive'})
+def test_reclaim_dry_run_counts_through_the_limit(redis_server):
+    """A rehearsal has to promise what the real run does.
+
+    Reporting the whole list while `--limit` would move one of it is read as the
+    plan, and the difference turns up later as messages left behind that nobody
+    went looking for — from the command whose whole job is finding those.
+    """
+    redis_server.rpush(f'{QUEUE}:processing:gone', payload(1), payload(2), payload(3))
+    rehearsal, real = StringIO(), StringIO()
+
+    call_command('tgbot_reclaim', worker='gone', limit=1, dry_run=True, stdout=rehearsal)
+    call_command('tgbot_reclaim', worker='gone', limit=1, stdout=real)
+
+    assert 'would requeue 1 of them' in rehearsal.getvalue(), rehearsal.getvalue()
+    assert 'Requeued 1' in real.getvalue(), real.getvalue()
+    # what the rehearsal promised is what the run did
+    assert redis_server.llen(f'{QUEUE}:processing:gone') == 2
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'WORKER_NAME': 'alive'})
 def test_reclaim_stops_at_the_limit(redis_server):
     """`--limit` is what bounds one run's blast radius."""
     redis_server.rpush(f'{QUEUE}:processing:gone', payload(1), payload(2))

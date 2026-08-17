@@ -81,7 +81,16 @@ class Command(BaseCommand):
             self.stdout.write(f'Nothing in flight for {worker!r}.')
             return
         if options['dry_run']:
-            self.stdout.write(f'{waiting} message(s) in flight for {worker!r}; would requeue them.')
+            # through the same limit the real run applies. A rehearsal that
+            # promises to move two and then moves one is worse than none: it is
+            # read as the plan, and the difference shows up as messages left
+            # behind that nobody went looking for
+            would_move = min(waiting, limit) if limit else waiting
+            self.stdout.write(
+                f'{waiting} message(s) in flight for {worker!r}; would requeue {would_move} of them.'
+                if would_move != waiting
+                else f'{waiting} message(s) in flight for {worker!r}; would requeue them.'
+            )
             return
 
         moved = 0

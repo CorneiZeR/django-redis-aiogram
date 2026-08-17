@@ -103,10 +103,19 @@ services. Give each worker its own.
 
 `manage.py tgbot_reclaim --worker <name>` is the way back from a list that is
 already stranded. It is deliberately manual: naming a worker is a human saying it
-is gone, and nothing here probes for liveness, because a worker that is merely
-slow looks exactly like one that is dead and taking its message back sends it
-twice. `manage.py tgbot_healthcheck` reports how many messages sit under other
-worker names, so a stranded pile stops being invisible.
+is gone, and nothing here probes for liveness, because a slow worker looks
+exactly like a dead one and taking its message back sends it twice.
+
+Two flags exist because that judgement can be wrong. `--dry-run` reports what is
+there and moves nothing, so you can name a worker before committing to the claim
+that it is gone — it applies `--limit` to its report, so what it says it would
+move is what a real run moves. `--limit <n>` bounds a single run, which keeps the
+blast radius of a mistaken name to `n` messages rather than a whole list.
+
+`manage.py tgbot_healthcheck` reports how many messages sit under other worker
+names, so a stranded pile stops being invisible. That count is a floor, not a
+total: the sweep behind it is bounded, because `SCAN` walks the whole keyspace
+and the probe runs on a timer. It says so when it stopped early.
 
 Handler errors are not crashes: a message whose send *failed* is acknowledged
 and logged, not redelivered forever.

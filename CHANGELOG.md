@@ -118,16 +118,20 @@ them, so it is not one per message.
   which is what a redeploy does, stranded whatever the last one was sending where
   nothing would look again. The command is deliberately
   manual: naming a worker is a human saying it is gone, and one that is merely
-  slow looks exactly like one that is dead.
+  slow looks exactly like one that is dead. `--dry-run` reports without moving
+  anything, through the same `--limit` a real run applies, and `--limit` bounds
+  what one run can move.
 - Check `W010` reports the case it can detect: `WORKER_NAME` empty while the
   hostname is one Docker generated. Narrow on purpose — an unset `WORKER_NAME` is
   the documented default and correct almost everywhere, so warning about it as
   such would fire on every untouched installation and teach people to stop
   reading warnings.
-- `manage.py tgbot_healthcheck` says which guarantee is in force, and how many
-  messages sit in flight under other worker names, so a stranded pile stops being
-  invisible. It reports rather than acts: one of those may be a message another
-  worker is sending this second.
+- `manage.py tgbot_healthcheck` says which guarantee is in force — established
+  by asking, not assumed from a default — and how many messages sit in flight
+  under other worker names, so a stranded pile stops being invisible. It reports
+  rather than acts: one of those may be a message another worker is sending this
+  second. The count is a floor and says so when it is one: `SCAN` walks the whole
+  keyspace, and this runs on a healthcheck timer, so the sweep is bounded.
 - `MAX_IN_FLIGHT` bounds how many sends the consumer will leave outstanding
   before it stops taking messages, with `0` — the default — meaning no bound.
   Worth setting on a worker that sees large backlogs: acknowledging is an `LREM`,
