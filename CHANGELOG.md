@@ -35,8 +35,9 @@ them, so it is not one per message.
 - `close()` waits for the updates a webhook process is still answering before it
   stops that loop, and cancels what outlasts `DRAIN_TIMEOUT`. A request thread
   waits on its update with no deadline of its own, so stopping the loop under one
-  would hold that worker for the life of the process; cancelling turns it into an
-  error the request can answer with.
+  would hold that worker for the life of the process. A cancelled update is
+  answered 503, the same as one refused on arrival — nothing handled it either
+  way, so Telegram should redeliver it rather than be told to forget it.
 - **The webhook view answers 503 to an update it refused**, rather than 200. It
   answers 200 to a handler that raised, because retrying one that failed once is
   a loop — but an update refused mid-shutdown was never handled, so redelivery is

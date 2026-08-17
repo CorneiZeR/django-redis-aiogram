@@ -673,7 +673,7 @@ def test_send_raw_stops_waiting_once_the_loop_has_a_thread():
 
 
 @override_settings(TELEGRAM_BOT=SETTINGS)
-def test_close_does_not_strand_a_request_waiting_on_its_update(monkeypatch):
+def test_close_does_not_strand_a_request_waiting_on_its_update(monkeypatch, caplog):
     """`close()` stops the loop thread before its teardown, and a request thread
     is blocked on `future.result()` with no deadline.
 
@@ -704,11 +704,18 @@ def test_close_does_not_strand_a_request_waiting_on_its_update(monkeypatch):
     request.start()
     assert inside.wait(10), 'the handler never ran'
 
-    instance.close(drain_timeout=0.2)
+    with caplog.at_level('WARNING', logger='django_redis_aiogram'):
+        instance.close(drain_timeout=0.2)
     request.join(timeout=10)
 
     assert not request.is_alive(), 'the request thread is still waiting on a stopped loop'
-    assert answered, 'the request never returned'
+    # and the cancellation is answered as the refusal it is. Left as a
+    # cancellation it reads as a handler that failed, which answers 200 — telling
+    # Telegram to forget an update nothing handled, on the one path where losing
+    # it is guaranteed rather than possible
+    assert answered == [503], answered
+    assert 'webhook refused an update' in caplog.text
+    assert 'webhook handler failed' not in caplog.text
 
 
 @override_settings(TELEGRAM_BOT=SETTINGS)

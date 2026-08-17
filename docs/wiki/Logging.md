@@ -58,7 +58,7 @@ All prefixed with `tg_`, to avoid colliding with `LogRecord` attributes.
 | `dropping undecodable queued message` | ERROR | a payload could not be deserialized |
 | `blocking pop failed, retrying` | ERROR | lost the Redis connection; it retries |
 | `the delivery consumer did not stop in time` | WARNING | the consumer outlived its join at shutdown; a message it holds may be redelivered |
-| `cancelling updates still in flight` | WARNING | a webhook update outlasted the drain at shutdown; its request gets an error rather than a hung worker |
+| `cancelling updates still in flight` | WARNING | a webhook update outlasted the drain at shutdown; its request is answered 503, so Telegram redelivers it rather than a worker hanging on a stopped loop |
 | `webhook refused an update` | WARNING | an update arrived while the process was shutting down; answered 503 so Telegram redelivers it |
 | `the event loop thread did not start in time` | WARNING | a webhook process cannot hand updates to its loop; every request is refused with 503 until a thread starts |
 | `the event loop thread is gone; starting another` | WARNING | that thread died and was replaced; the update that lost it was refused |

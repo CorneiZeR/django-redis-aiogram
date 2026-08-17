@@ -385,6 +385,14 @@ class TelegramBot:
         try:
             # waiting outside the lock, so the next request is not held up by ours
             future.result()
+        except (futures.CancelledError, asyncio.CancelledError) as cancelled:
+            # `_stop_runner` cancelled this one: no handler finished, so it is the
+            # same refusal a request arriving mid-shutdown gets, and the view has
+            # to answer it the same way. Left as a cancellation it reads as a
+            # handler that failed — a 200 telling Telegram to forget an update
+            # nothing handled. Both classes: they are one object on some versions
+            # and, where they are not, only one of them is an `Exception`
+            raise ShuttingDownError from cancelled
         finally:
             self._forget_update(future)
 
