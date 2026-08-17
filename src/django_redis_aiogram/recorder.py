@@ -510,11 +510,17 @@ class EventRecorder:
         ``send_robust``, so one broken receiver neither loses the batch for the
         others nor stops the writer — Django returns the exception instead of
         raising it, and it is logged here because a receiver that fails silently is
-        a metric that reads as zero traffic.
+        a metric that reads as zero traffic. Django logs it too, on its own
+        ``django.dispatch`` logger; the line here is on the logger a project
+        configures for this package, which is where it will actually be seen.
+
+        A tuple rather than the list itself: receivers run one after another with
+        the same argument, so one of them sorting or clearing a list would decide
+        what the next one sees.
         """
         if not events_recorded.receivers:
             return
-        for receiver, outcome in events_recorded.send_robust(sender=self, events=batch):
+        for receiver, outcome in events_recorded.send_robust(sender=self, events=tuple(batch)):
             if isinstance(outcome, BaseException):
                 logger.error(
                     'an events_recorded receiver raised',
@@ -523,16 +529,25 @@ class EventRecorder:
                 )
 
     def _deliver(self, batch: list[Event]) -> None:
-        """Publish a batch, then write it if this process keeps the table.
+        """Write a batch if this process keeps the table, then publish it either way.
 
-        Publishing first, and outside the write's failure handling: a database that
+        **The write goes first, and the publish is in a ``finally``.** Publishing
+        first handed receivers the same list and the same ``Event`` objects the ORM
+        was about to read — and a frozen dataclass does not freeze the ``detail``
+        dict inside it, so a receiver clearing the list or editing a ``detail``
+        could change what got persisted. Writing first makes that impossible rather
+        than asking receivers to be careful.
+
+        The ``finally`` is what keeps the other half of the promise: a database that
         is down or unmigrated is exactly when someone is watching a dashboard, and
         the metrics have no reason to go with it.
         """
-        self._publish(batch)
-        if self.enabled:
-            self._touched_database = True
-            self._write(batch)
+        try:
+            if self.enabled:
+                self._touched_database = True
+                self._write(batch)
+        finally:
+            self._publish(batch)
 
     @staticmethod
     def _close_connections() -> None:

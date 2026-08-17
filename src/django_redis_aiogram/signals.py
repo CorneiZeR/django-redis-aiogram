@@ -16,21 +16,33 @@ from django.dispatch import Signal
 
 #: Fired once per batch of recorded events, from the event writer's own thread.
 #:
-#: Receivers get ``events``: a list of :class:`~django_redis_aiogram.recorder.Event`,
+#: Receivers get ``events``: a tuple of :class:`~django_redis_aiogram.recorder.Event`,
 #: whose field names are pinned by ``tests/test_public_surface.py`` and are
 #: therefore public API. ``sender`` is the recorder instance.
 #:
-#: Three things about it are load-bearing, and two of them are surprising:
+#: Four things about it are load-bearing, and three of them are surprising:
 #:
 #: * **It fires whether or not the event log is on.** The table and the metrics
 #:   are separate decisions: connect a receiver and the events flow, with
 #:   ``EVENT_LOG`` left off and no migration in sight.
-#: * **``detail`` is only filled when the event log is on.** Summarising a
-#:   payload means redacting and bounding it, which is the expensive part of
-#:   recording and no part of counting. A receiver that needs message bodies
-#:   needs the log on as well.
-#: * **``EVENT_LOG_KINDS`` filters this too.** It is one answer to "which events
-#:   does this deployment care about", not two.
+#: * **Payload summaries are the only part of ``detail`` the log gates.** With the
+#:   log off, ``detail`` still carries what the recording seam measured itself —
+#:   a send's ``duration_ms``, a retry's ``retry_after``, a queueing failure's
+#:   ``stage``, a gap's ``dropped`` count. What is missing is the summarised
+#:   arguments, because redacting and bounding a payload is the expensive part of
+#:   recording and no part of counting. A receiver that needs message bodies needs
+#:   the log on as well, and then ``EVENT_LOG_PAYLOAD`` decides what is in there.
+#: * **``EVENT_LOG_KINDS`` filters this too, with one exemption.** It is one answer
+#:   to "which events does this deployment care about", not two — so a receiver
+#:   sees exactly the kinds the table would have kept. ``log.dropped`` is the
+#:   exception, in both directions: it is the record that recording itself fell
+#:   behind, and a deployment that filtered it out would read the hole as quiet
+#:   traffic. The table has always been exempt from the filter for that row, and
+#:   receivers are exempt with it.
+#: * **The batch has already been written when receivers see it.** They cannot
+#:   affect the rows, which is why they get real ``Event`` objects rather than
+#:   copies — but the ``detail`` dict inside one is an ordinary mutable dict shared
+#:   with the other receivers, so treat it as read-only.
 #:
 #: It runs on the writer thread, so a slow receiver delays rows reaching the
 #: database but never delays a send. Under ``EVENT_LOG_SYNC`` there is no writer

@@ -147,10 +147,15 @@ def count(sender, events, **kwargs):
 events_recorded.connect(count, dispatch_uid='metrics.telegram')
 ```
 
-Receivers get `events`: a list of `Event`, whose field names are the same ones the
+Receivers get `events`: a tuple of `Event`, whose field names are the same ones the
 table's columns carry and are pinned as public API. A signal rather than a setting
 naming a dotted path, because there is then no path to get wrong, no check id for
 it, and no question about what happens when the import fails.
+
+The batch has already been written by the time a receiver sees it, so a receiver
+cannot affect the rows — which is why they get the real objects rather than copies.
+The `detail` dict inside one is an ordinary dict, shared with the other receivers,
+so treat it as read-only.
 
 Four things about it are worth knowing before you rely on it, and three of them
 surprise people:
@@ -159,15 +164,21 @@ surprise people:
 decisions. Connect a receiver, leave the log off, run no migration for it: the
 events still arrive. Turn the log on as well and both happen.
 
-**`detail` is empty unless the log is on.** Summarising a payload means redacting
-credentials out of it, walking it and bounding it — tens of microseconds, and the
-expensive half of recording. A counter keyed on `kind` and `function` needs none of
-it. If your receiver needs message bodies, it needs the log on too, and then
+**Payload summaries are the only part of `detail` the log gates.** With the log
+off, `detail` still carries whatever the recording seam measured itself: a send's
+`duration_ms`, a retry's `retry_after`, a queueing failure's `stage`, a gap's
+`dropped` count. What is missing is the *summarised arguments* — redacting
+credentials out of a payload, walking it and bounding it costs tens of
+microseconds, and a counter keyed on `kind` and `function` needs none of it. If
+your receiver needs message bodies, it needs the log on too, and then
 `EVENT_LOG_PAYLOAD` decides what is in there.
 
-**`EVENT_LOG_KINDS` filters this as well.** It is one answer to "which events does
-this deployment care about", not two — so a receiver sees exactly the kinds the
-table would have kept.
+**`EVENT_LOG_KINDS` filters this as well, with one exemption.** It is one answer to
+"which events does this deployment care about", not two — so a receiver sees
+exactly the kinds the table would have kept. `log.dropped` is exempt in both
+directions: it is the record that recording itself fell behind, and a deployment
+that filtered it out would read the hole as quiet traffic rather than as a gap.
+The table has always been exempt for that row; receivers are exempt with it.
 
 **Connect during app loading.** The update middleware and the FSM storage wrapper
 are built once, and whether to build them is decided then. A receiver connected

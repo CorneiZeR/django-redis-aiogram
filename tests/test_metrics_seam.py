@@ -308,3 +308,103 @@ def test_a_writer_that_wrote_still_closes_its_connection(redis_server, collected
 
     assert recorder.enabled, 'this test is meaningless with the log off'
     assert closed == [True], 'the writer left its own connection open'
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'EVENT_LOG': True})
+def test_a_receiver_cannot_change_what_was_written(redis_server, collected, monkeypatch):
+    """Receivers are project code, and containing their exceptions is half a job.
+
+    They used to be handed the same list and the same `Event` objects the ORM was
+    about to read — and a frozen dataclass does not freeze the `detail` dict inside
+    it, so clearing the list or editing a `detail` changed what got persisted. The
+    write goes first now, so the question cannot arise.
+    """
+    # a snapshot of the contents at the moment of the write, not the objects: the
+    # real `write_batch` builds model instances and returns, after which nothing a
+    # receiver does can reach the rows. Holding the `Event` objects instead would
+    # show the mutation and prove nothing about ordering
+    written: list[list[dict]] = []
+    monkeypatch.setattr(recorder, '_write', lambda batch: written.append([dict(e.detail or {}) for e in batch]))
+
+    def vandal(sender, events, **kwargs):
+        for event in events:
+            if event.detail is not None:
+                event.detail.clear()
+                event.detail['vandalised'] = True
+
+    events_recorded.connect(vandal, weak=False, dispatch_uid='tests.metrics.vandal')
+    try:
+        TelegramBot().send_redis(chat_id=7, text='hi')
+        recorder.flush(timeout=5)
+    finally:
+        events_recorded.disconnect(dispatch_uid='tests.metrics.vandal')
+
+    assert written, 'nothing was written, so nothing is being tested'
+    persisted = written[0][0]
+    assert persisted, 'the log is on, so this row should have carried a summary'
+    assert 'vandalised' not in persisted, 'a receiver rewrote a row before it was persisted'
+    assert kinds(collected) == ['outbound.queued'], 'the fixture receiver saw nothing to compare against'
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_a_receiver_cannot_take_the_batch_from_the_next_one(redis_server, collected):
+    """`send_robust` hands every receiver the same argument, one after another.
+
+    So a list would let the first receiver decide what the second one sees. A tuple
+    costs nothing and removes the question.
+    """
+    shapes = []
+
+    def inspect(sender, events, **kwargs):
+        shapes.append(type(events).__name__)
+
+    events_recorded.connect(inspect, weak=False, dispatch_uid='tests.metrics.inspect')
+    try:
+        TelegramBot().send_redis(chat_id=7, text='hi')
+        recorder.flush(timeout=5)
+    finally:
+        events_recorded.disconnect(dispatch_uid='tests.metrics.inspect')
+
+    assert shapes == ['tuple'], f'receivers were handed a {shapes}'
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'EVENT_LOG_KINDS': ['outbound.sent']})
+def test_the_gap_row_reaches_a_receiver_even_when_the_kinds_exclude_it(redis_server, collected, monkeypatch):
+    """`log.dropped` is exempt from `EVENT_LOG_KINDS`, and has to be.
+
+    It is the record that recording itself fell behind. A deployment that filtered
+    it out would read the hole as quiet traffic — which is the exact failure
+    `_record_gap` exists to prevent, and the reason the table has always been exempt
+    for this row too. Receivers are exempt with it, so the two stay one answer.
+    """
+    monkeypatch.setattr(recorder, '_write', lambda batch: None)
+    recorder._dropped = 3
+    recorder._record_gap(3)
+
+    assert kinds(collected) == ['log.dropped'], f'the receiver saw {kinds(collected)}'
+    assert collected[0].detail == {'dropped': 3}
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_a_receiver_still_gets_the_detail_a_seam_measured_itself(redis_server, collected, monkeypatch):
+    """Only the *summarised arguments* are gated on the log, not all of `detail`.
+
+    Claimed the other way round at first, and it was false: a send's `duration_ms`,
+    a queueing failure's `stage` and a gap's `dropped` count are all measured by the
+    recording seam rather than summarised from a payload, and all reach a receiver
+    with the log off. Pinned so the documentation cannot drift back.
+    """
+
+    def refuse(*args, **kwargs):
+        message = 'redis is gone'
+        raise ConnectionError(message)
+
+    monkeypatch.setattr('django_redis_aiogram.client.get_redis', refuse)
+
+    with pytest.raises(ConnectionError):
+        TelegramBot().send_redis(chat_id=7, text='hi')
+    recorder.flush(timeout=5)
+
+    assert kinds(collected) == ['outbound.dropped'], f'the receiver saw {kinds(collected)}'
+    assert collected[0].detail == {'stage': 'queueing'}, 'the stage a receiver needs was withheld'
+    assert collected[0].error_code == 'ConnectionError'
