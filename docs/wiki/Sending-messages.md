@@ -30,13 +30,24 @@ bot.send('send_chat_action', chat_id=CHAT_ID, action='typing')
 `send_raw` from a web process builds its own event loop and HTTP session. That
 works, but it does not share the bot's rate-limit budget. Prefer `send()`.
 
-Whether it *waits* depends on where it is called from, and the difference matters
-in webhook mode. From ordinary request code it drives the loop and waits. From
-inside a **handler** — which runs on that loop — it can only schedule, so the
-request returns before Telegram has been called and a failure appears in the log
-rather than in the response. Until 3.1.0 that scheduled send was not even
-stepped until the next update arrived, because a web process ran the loop only
-for the duration of one update; it now has a thread of its own.
+**Whether it waits changed in 3.1.0, in a web process that also serves the
+webhook.** A process serving the webhook gives the loop a thread of its own from
+the first update it handles, and `send_raw` hands work to a running loop rather
+than driving it. So from that point on it *schedules* and returns, where before
+it drove the loop and blocked until Telegram answered.
+
+What that costs is the exception: a send that fails after the retries used to
+raise into your view under `RAISE_EXCEPTION`, and now appears in the log instead.
+A process that never serves the webhook is unaffected — with no thread running
+the loop, `send_raw` still drives it and waits.
+
+From inside a **handler** it could never wait — a handler already runs on that
+loop, so it can only schedule. What 3.1.0 changes there is that the scheduled
+send now *runs*: before, nothing stepped it until the next update arrived, or
+`close()`, or never.
+
+If you need the answer, `await` the aiogram call yourself, or send from a process
+that does not serve the webhook.
 
 ## Keyboards
 

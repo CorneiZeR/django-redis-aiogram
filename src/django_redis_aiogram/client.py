@@ -227,6 +227,9 @@ class TelegramBot:
         self._closing = False
         #: the thread a web process gives the loop, so updates do not serialize
         self._runner: threading.Thread | None = None
+        #: set once that thread is actually running the loop. Every caller waits
+        #: on it, not only the one that started the thread
+        self._runner_ready = threading.Event()
         # only true while close() is flushing the loop, so the refusal below can tell
         # a hand-off queued before shutdown from one queued during it
         self._draining = False
@@ -377,27 +380,32 @@ class TelegramBot:
         Not started in the polling process: `start_polling` runs the loop itself,
         and `loop.is_running()` below is what says so.
         """
-        if self._closing or self._runner is not None:
+        if self._closing:
             return
-        with self._build_guard:
-            if self._closing or self._runner is not None:
-                return
-            loop = self.loop
-            if loop.is_running():
-                return
-            ready = threading.Event()
+        if self._runner is None:
+            with self._build_guard:
+                if not self._closing and self._runner is None:
+                    loop = self.loop
+                    if loop.is_running():
+                        # polling drives it; there is nothing to start
+                        return
+                    self._runner_ready.clear()
 
-            def run() -> None:
-                asyncio.set_event_loop(loop)
-                loop.call_soon(ready.set)
-                loop.run_forever()
+                    def run() -> None:
+                        asyncio.set_event_loop(loop)
+                        loop.call_soon(self._runner_ready.set)
+                        loop.run_forever()
 
-            runner = threading.Thread(target=run, name=LOOP_THREAD, daemon=True)
-            self._runner = runner
-            runner.start()
-        if not ready.wait(RUNNER_TIMEOUT):
-            # it will still be running by the time the update is handed over, or
-            # the branch above drives the update here; either way nothing is lost
+                    self._runner = threading.Thread(target=run, name=LOOP_THREAD, daemon=True)
+                    self._runner.start()
+        # every caller waits, not only the one that started the thread: a second
+        # request that returned as soon as the thread existed would find
+        # `is_running()` still false below and drive the update with
+        # `run_until_complete`, while the thread it saw called `run_forever` on
+        # the same loop. That kills the thread, leaves `_runner` pointing at a
+        # dead one, and quietly returns the process to handling updates one at a
+        # time — the thing this method exists to stop
+        if self._runner is not None and not self._runner_ready.wait(RUNNER_TIMEOUT):
             logger.warning('the event loop thread did not start in time', extra={'tg_timeout': RUNNER_TIMEOUT})
 
     def _stop_runner(self) -> None:
@@ -407,6 +415,7 @@ class TelegramBot:
         loop, so a bot that started a runner could never be closed.
         """
         runner, self._runner = self._runner, None
+        self._runner_ready.clear()
         if runner is None:
             return
         loop = self._loop
@@ -675,12 +684,14 @@ class TelegramBot:
 
         loop = self.loop
         if running is loop:
-            if not self._polling:
-                # a handler on a loop this process merely runs, rather than polls
-                # on: the send is scheduled and will run, but nothing here waits
-                # for it, so a failure surfaces only in the log
+            if not self._polling and self._runner is None:
+                # nothing in this process drives this loop — not polling, and no
+                # runner — so the task is created and never stepped. With a
+                # runner it *is* stepped, which is the normal webhook path and
+                # must not warn: a warning on the healthy path is how people
+                # learn to stop reading them
                 logger.warning(
-                    'scheduling a send from a handler outside the polling process',
+                    'scheduling a send on a loop nothing in this process runs',
                     extra={'tg_function': outbound.function, 'tg_correlation_id': str(outbound.correlation_id)},
                 )
             self._register(self._start(coroutine, loop, outbound), outbound, on_complete)

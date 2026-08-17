@@ -8,6 +8,7 @@ import asyncio
 import json
 import threading
 import time
+import uuid
 from datetime import datetime, timezone
 from io import StringIO
 
@@ -19,6 +20,7 @@ from django.test import RequestFactory, override_settings
 
 from django_redis_aiogram import TelegramBot
 from django_redis_aiogram.checks import check_settings
+from django_redis_aiogram.client import LOOP_THREAD, Outbound
 from django_redis_aiogram.webhook import (
     SECRET_HEADER,
     current_mode,
@@ -537,3 +539,127 @@ def test_updates_in_one_process_are_handled_concurrently(monkeypatch):
         assert broken == [], 'the handlers never overlapped, so the barrier timed out'
     finally:
         instance.close()
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_a_second_request_waits_for_the_loop_to_be_running(monkeypatch):
+    """Returning as soon as the *thread exists* is not the same as running.
+
+    A second request that returned there would find `is_running()` still false
+    and drive its update with `run_until_complete`, while the thread it saw
+    called `run_forever` on the same loop — which kills that thread, leaves the
+    bot pointing at a dead one, and quietly returns the process to handling
+    updates one at a time. Silently: the requests still answer 200.
+    """
+    instance = TelegramBot()
+    gate = threading.Event()
+    real_start = threading.Thread.start
+
+    def gated_start(thread):
+        # the runner is created and registered, but does not run until released:
+        # exactly the window a second caller used to slip through
+        if thread.name == LOOP_THREAD:
+            threading.Thread(target=lambda: (gate.wait(10), real_start(thread)), daemon=True).start()
+            return None
+        return real_start(thread)
+
+    monkeypatch.setattr(threading.Thread, 'start', gated_start)
+    first = threading.Thread(target=instance._ensure_loop_runs, daemon=True)
+    real_start(first)
+    for _ in range(500):
+        if instance._runner is not None:
+            break
+        time.sleep(0.01)
+    assert instance._runner is not None, 'the runner was never registered'
+
+    seen = []
+
+    def second():
+        instance._ensure_loop_runs()
+        seen.append(instance.loop.is_running())
+
+    later = threading.Thread(target=second, daemon=True)
+    real_start(later)
+    time.sleep(0.05)  # let the second caller reach the point it used to return at
+    gate.set()
+    later.join(timeout=10)
+    first.join(timeout=10)
+
+    try:
+        assert seen == [True], 'a caller was let past before the loop was running'
+        assert instance._runner.is_alive(), 'the loop thread died'
+    finally:
+        monkeypatch.setattr(threading.Thread, 'start', real_start)
+        instance.close()
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_a_handlers_send_does_not_warn_on_the_normal_path(monkeypatch, caplog):
+    """Webhook mode runs handlers on a loop this process drives, so a send from
+    one is ordinary. Warning about it would put a WARNING in the log for every
+    message a bot sends, which is how people learn to stop reading them."""
+    instance = TelegramBot()
+    sent = []
+
+    @instance.message(F.text)
+    async def reply(message: types.Message) -> None:
+        instance._schedule(asyncio.sleep(0), Outbound(uuid.uuid4(), 'send_message', {}))
+        sent.append(message.text)
+
+    monkeypatch.setattr('django_redis_aiogram.webhook.bot', instance)
+
+    try:
+        with caplog.at_level('WARNING', logger='django_redis_aiogram'):
+            assert post(an_update('/quiet')).status_code == 200
+        assert sent == ['/quiet'], sent
+        assert 'nothing in this process runs' not in caplog.text, caplog.text
+    finally:
+        instance.close()
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_send_raw_stops_waiting_once_the_loop_has_a_thread():
+    """The documented cost of giving the loop a thread, pinned.
+
+    `send_raw` hands work to a running loop rather than driving one, so in a web
+    process that serves the webhook it schedules and returns from the first
+    update onwards, where before it blocked until Telegram answered. That is a
+    real change for a caller relying on `RAISE_EXCEPTION` to reach their view,
+    so it is written down on **Sending-messages** — and written down is worth
+    nothing without something that fails when it stops being true.
+    """
+
+    class Slow:
+        def __init__(self, called):
+            self.called = called
+
+        async def send_message(self, **kwargs):
+            await asyncio.sleep(0.3)
+            self.called.append(True)
+
+        class session:
+            @staticmethod
+            async def close():
+                pass
+
+    def measure(*, with_runner):
+        instance = TelegramBot()
+        called = []
+        instance._bot = Slow(called)
+        try:
+            if with_runner:
+                instance._ensure_loop_runs()
+            began = time.monotonic()
+            instance.send_raw('send_message', chat_id=1, text='x')
+            return time.monotonic() - began, bool(called)
+        finally:
+            instance._bot = None
+            instance.close()
+
+    drove, drove_called = measure(with_runner=False)
+    handed, handed_called = measure(with_runner=True)
+
+    assert drove_called is True, 'without a thread it must drive the send to completion'
+    assert drove >= 0.25, f'it returned in {drove:.2f}s, so it did not wait'
+    assert handed_called is False, 'with a thread it must hand off, not wait'
+    assert handed < 0.1, f'it took {handed:.2f}s, so it waited after all'

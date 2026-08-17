@@ -18,6 +18,15 @@ them, so it is not one per message.
   the loop running. It also means a send scheduled from inside a handler now runs
   when it is scheduled — before, nothing stepped it until the next update
   arrived, or `close()`, or never.
+- **`send_raw` no longer waits in a web process that serves the webhook.** It
+  hands work to a running loop rather than driving one, and from the first update
+  such a process handles there is a loop running. Measured: 0.30 s and Telegram
+  called before it returns, against 0.00 s and Telegram not called yet. The
+  practical difference is the exception — a send that fails after its retries
+  raised into the view under `RAISE_EXCEPTION` and is now logged instead.
+  A process that never serves the webhook is unaffected, and `send()`, which
+  queues, never had this behaviour. **[[Sending-messages]]** says what to do when
+  you need the answer.
 - In webhook mode `start_tgbot` runs the loop instead of blocking on an event, so
   a send the consumer schedules runs when it is scheduled rather than waiting for
   whatever happens next. Both modes now start the consumer from the loop, which
