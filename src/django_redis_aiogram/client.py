@@ -407,34 +407,36 @@ class TelegramBot:
         """
         if self._closing:
             return False
-        runner = self._runner
-        if runner is not None and not runner.is_alive():
-            # a thread that died before it ran the loop would otherwise be kept
-            # for the life of the process: every later update would wait out the
-            # timeout, log the warning and be refused, and no redelivery can
-            # recover a condition that never clears. One replacement is cheap;
-            # a permanently 503 process is not
-            logger.warning('the event loop thread is gone; starting another')
-            with self._build_guard:
-                if self._runner is runner:
-                    self._runner = None
-                    self._runner_ready.clear()
-        if self._runner is None:
-            with self._build_guard:
-                if not self._closing and self._runner is None:
-                    loop = self.loop
-                    if loop.is_running():
-                        # polling drives it; there is nothing to start
-                        return False
-                    self._runner_ready.clear()
+        # judged under the guard the thread is also created under. `is_alive()` is
+        # false *before* `start()` too, so a check outside it can read a runner
+        # registered a moment ago as dead and start a second one — two threads on
+        # one loop, which is the collision this method exists to prevent
+        with self._build_guard:
+            if self._closing:
+                return False
+            runner = self._runner
+            if runner is not None and not runner.is_alive():
+                # a thread that died before it ran the loop would otherwise be
+                # kept for the life of the process: every later update would wait
+                # out the timeout, log the warning and be refused, and no
+                # redelivery can recover a condition that never clears
+                logger.warning('the event loop thread is gone; starting another')
+                self._runner = runner = None
+                self._runner_ready.clear()
+            if runner is None:
+                loop = self.loop
+                if loop.is_running():
+                    # polling drives it; there is nothing to start
+                    return False
+                self._runner_ready.clear()
 
-                    def run() -> None:
-                        asyncio.set_event_loop(loop)
-                        loop.call_soon(self._runner_ready.set)
-                        loop.run_forever()
+                def run() -> None:
+                    asyncio.set_event_loop(loop)
+                    loop.call_soon(self._runner_ready.set)
+                    loop.run_forever()
 
-                    self._runner = threading.Thread(target=run, name=LOOP_THREAD, daemon=True)
-                    self._runner.start()
+                self._runner = threading.Thread(target=run, name=LOOP_THREAD, daemon=True)
+                self._runner.start()
         # every caller waits, not only the one that started the thread: a second
         # request that returned as soon as the thread existed would find
         # `is_running()` still false below and drive the update with

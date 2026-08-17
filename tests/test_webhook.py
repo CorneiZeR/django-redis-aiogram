@@ -20,7 +20,7 @@ from django.test import RequestFactory, override_settings
 
 from django_redis_aiogram import TelegramBot
 from django_redis_aiogram.checks import check_settings
-from django_redis_aiogram.client import LOOP_THREAD, Outbound
+from django_redis_aiogram.client import Outbound
 from django_redis_aiogram.exceptions import LoopThreadNotStartedError, ShuttingDownError
 from django_redis_aiogram.webhook import (
     SECRET_HEADER,
@@ -551,27 +551,30 @@ def test_a_second_request_waits_for_the_loop_to_be_running(monkeypatch):
     called `run_forever` on the same loop — which kills that thread, leaves the
     bot pointing at a dead one, and quietly returns the process to handling
     updates one at a time. Silently: the requests still answer 200.
+
+    The thread here is alive throughout and merely slow to arrive. A harness that
+    left it *unstarted* would look dead to the replacement logic and get a second
+    thread on the same loop — which is what this test is about, so it must not be
+    how the test produces its window.
     """
     instance = TelegramBot()
-    gate = threading.Event()
-    real_start = threading.Thread.start
+    arrive = threading.Event()
+    real_set_event_loop = asyncio.set_event_loop
 
-    def gated_start(thread):
-        # the runner is created and registered, but does not run until released:
-        # exactly the window a second caller used to slip through
-        if thread.name == LOOP_THREAD:
-            threading.Thread(target=lambda: (gate.wait(10), real_start(thread)), daemon=True).start()
-            return None
-        return real_start(thread)
+    def wait_then_set(loop):
+        arrive.wait(10)
+        return real_set_event_loop(loop)
 
-    monkeypatch.setattr(threading.Thread, 'start', gated_start)
+    monkeypatch.setattr(asyncio, 'set_event_loop', wait_then_set)
     first = threading.Thread(target=instance._ensure_loop_runs, daemon=True)
-    real_start(first)
+    first.start()
     for _ in range(500):
-        if instance._runner is not None:
+        if instance._runner is not None and instance._runner.is_alive():
             break
         time.sleep(0.01)
     assert instance._runner is not None, 'the runner was never registered'
+    assert instance._runner.is_alive(), 'the runner was not started'
+    running_at_the_time = instance.loop.is_running()
 
     seen = []
 
@@ -580,17 +583,18 @@ def test_a_second_request_waits_for_the_loop_to_be_running(monkeypatch):
         seen.append(instance.loop.is_running())
 
     later = threading.Thread(target=second, daemon=True)
-    real_start(later)
+    later.start()
     time.sleep(0.05)  # let the second caller reach the point it used to return at
-    gate.set()
+    arrive.set()
     later.join(timeout=10)
     first.join(timeout=10)
 
     try:
+        assert running_at_the_time is False, 'the window this test needs did not exist'
         assert seen == [True], 'a caller was let past before the loop was running'
         assert instance._runner.is_alive(), 'the loop thread died'
     finally:
-        monkeypatch.setattr(threading.Thread, 'start', real_start)
+        monkeypatch.setattr(asyncio, 'set_event_loop', real_set_event_loop)
         instance.close()
 
 
