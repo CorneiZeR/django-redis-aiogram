@@ -85,16 +85,21 @@ The in-flight list is **per worker**: `<REDIS_MESSAGES_KEY>:processing:<name>`,
 where `<name>` is `WORKER_NAME` when it is set and the hostname (`HOSTNAME`, or
 what the host reports) otherwise.
 
-**The name has to survive a restart.** That is what lets a worker reclaim its own
-interrupted messages, and never pull one out from under a worker that is still
-sending it. A container started without `hostname:` does *not* keep its name —
-Docker invents a fresh twelve-character one every time — so every restart strands
-whatever the last one was sending, in a list nothing will look at again. Set
+**The name has to survive the container.** That is what lets a worker reclaim its
+own interrupted messages, and never pull one out from under a worker still
+sending. A container started without `hostname:` does *not* keep its name —
+Docker invents a fresh twelve-character one for each container it creates — so
+whenever one is replaced rather than restarted in place, whatever the last one
+was sending is stranded in a list nothing will look at again. `docker compose up`
+after a change, a rescheduled pod, a redeploy: each is a new container. Set
 `WORKER_NAME`, or give the container a fixed `hostname:`; check `W010` reports
 the case it can detect.
 
-If several workers share a host, give each its own `WORKER_NAME` — otherwise they
-share a list and can duplicate each other's sends.
+The list is keyed on the resolved name, so the other half is the collision: two
+workers that resolve to the *same* name share one in-flight list, and each will
+reclaim what the other is still sending. Sharing a host is the common way to
+arrive there, but so is copying a `WORKER_NAME` or a fixed `hostname:` between
+services. Give each worker its own.
 
 `manage.py tgbot_reclaim --worker <name>` is the way back from a list that is
 already stranded. It is deliberately manual: naming a worker is a human saying it

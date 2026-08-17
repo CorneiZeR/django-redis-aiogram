@@ -119,10 +119,14 @@ Two behaviours make the mixed case work:
 - **Reads sniff the format per message.** A queue holding both formats drains
   without being stopped, so switching `SERIALIZER` needs no downtime.
 - **A refused pickle stays in flight**, rather than being acknowledged — *on
-  Redis 6.2 and newer*. It is the only case where `dispatch()` returns `False`,
-  which is what withholds the acknowledgement; see **[[Delivery]]**. Turning `ALLOW_PICKLE` off while a producer is still
-  writing pickled payloads leaves them in the worker's processing list with a
-  log line saying so; set it back, restart the worker (under the same `WORKER_NAME`, or the backlog is in a list the new one will not look at — see **[[Delivery]]**), and they are delivered.
+  Redis 6.2 and newer*. It is one of the cases where `dispatch()` returns
+  `False`, which is what withholds the acknowledgement; see **[[Delivery]]**.
+  Turning `ALLOW_PICKLE` off while a producer is still writing pickled payloads
+  leaves them in the worker's processing list with a log line saying so; set it
+  back and restart the worker under the same worker identity — `WORKER_NAME`, or
+  the fixed `hostname:` it falls back to — and they are delivered. Start it under
+  a different one and the backlog sits in a list the new worker never opens; see
+  **[[Delivery]]**.
 
 > **Turning `ALLOW_PICKLE` off is only recoverable where `LMOVE` exists.**
 > Without it there is no in-flight list — the consumer has already popped the

@@ -309,7 +309,9 @@ def test_a_scan_that_fails_does_not_make_the_container_unhealthy(redis_server, m
     def refuse(*args, **kwargs):
         raise RedisError('NOPERM')
 
-    monkeypatch.setattr(redis_server, 'scan_iter', refuse)
+    # the method the sweep actually calls: patching scan_iter left the handler
+    # below unexercised while the test went on passing
+    monkeypatch.setattr(redis_server, 'scan', refuse)
     out = StringIO()
 
     call_command('tgbot_healthcheck', stdout=out)
