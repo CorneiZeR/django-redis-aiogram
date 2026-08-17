@@ -26,6 +26,7 @@ src/django_redis_aiogram/
     models.py       TelegramEvent, the append-only feed; migrations/ beside it
     events.py       the event-kind registry and the correlation id
     recorder.py     the bounded queue and the writer thread; no django.db here
+    signals.py      events_recorded, the metrics seam; imports only django.dispatch
     eventlog.py     the only module that touches the ORM
     dbrouter.py     optional routing of the log to its own database
     admin.py        the read-only changelist; registered from ready(), not on import
@@ -112,7 +113,11 @@ Packaging-only work does not need the Redis suite, and vice versa.
 - **`recorder.py` imports no `django.db`.** Only `eventlog.py` does, and the
   writer thread imports it on its first flush. That is what makes a disabled log
   cost nothing and what makes `record()` legal from a coroutine — `put_nowait`
-  touches no I/O, so there is no `SynchronousOnlyOperation` to avoid.
+  touches no I/O, so there is no `SynchronousOnlyOperation` to avoid. Since 3.1.0
+  a process may run the writer with the log *off*, for `events_recorded` receivers
+  alone, so the writer closes a connection only if it ever opened one — otherwise
+  the import comes back through the exit path. `tests/test_metrics_seam.py` pins
+  both directions.
 - **The feed is append-only.** No updates, no foreign keys, no
   `Meta.constraints`, no index on the JSON column. Fast pruning, shardability
   and two processes writing one message's history without coordination all rest

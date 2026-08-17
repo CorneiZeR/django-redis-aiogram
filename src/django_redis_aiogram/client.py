@@ -226,10 +226,13 @@ def queueing(function: str, messages: list[tuple[uuid.UUID, dict[str, Any]]]) ->
     except Exception as error:
         dropped('queueing', error)
         raise
-    if not recorder.enabled:
-        # guarded: describing the arguments is the one part of this that costs
-        # something when nobody is recording
+    if not recorder.active:
+        # nothing keeps the table and nothing listens, so there is no event to make
         return
+    # two gates, not one: whether to record at all is a different question from
+    # whether to summarise the arguments, and describing them is the expensive
+    # half. A metrics receiver counts sends; it does not read message bodies
+    described = recorder.wants_payload
     for identifier, kwargs in messages:
         recorder.record(
             Event(
@@ -238,7 +241,7 @@ def queueing(function: str, messages: list[tuple[uuid.UUID, dict[str, Any]]]) ->
                 created_at=queued_at,
                 function=function,
                 chat_id=as_identifier(kwargs.get('chat_id')),
-                detail=describe(kwargs),
+                detail=describe(kwargs) if described else None,
             )
         )
 
@@ -873,7 +876,11 @@ class TelegramBot:
         knows the outcome: _schedule returns once the task is *created*, so the
         consumer acknowledges the message before Telegram has seen it.
         """
-        if not recorder.enabled:
+        # `active`, not `enabled`: this one guard gates every `outbound.sent`,
+        # `failed`, `retried` and `dropped` row there is — the whole of what a
+        # metrics receiver was connected for. Reading the table flag here is how
+        # the advertised set comes out empty for anyone who left the table off
+        if not recorder.active:
             return
         error = fields.pop('error', None)
         detail = fields.pop('detail', None) or {}

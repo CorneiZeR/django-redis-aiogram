@@ -272,3 +272,47 @@ def test_the_version_is_the_one_the_changelog_announces():
     announced = heading.group(1).split(' - ')[0].strip()
     assert re.fullmatch(r'\d+\.\d+\.\d+', announced), f'the top changelog heading is not a version: {heading.group(1)}'
     assert django_redis_aiogram.__version__ == announced
+
+
+def test_connecting_a_metrics_receiver_pulls_neither_aiogram_nor_the_orm():
+    """`django_redis_aiogram.signals` must be importable from settings-time code.
+
+    A metrics module is imported early, and importing this package's client half
+    loads aiogram — the ~900ms this whole file exists about. So the seam is its own
+    module: connect a receiver without paying for a bot you may never build, and
+    without the ORM, so it can be done before `django.setup()` has finished.
+
+    Measured on top of a process that has already imported Django, which every
+    Django process has by the time settings are read: **0.356 ms**, of which
+    `django.dispatch` is 0.150 ms. From a *bare* interpreter it is 109 ms — but that
+    is Django's own import, not ours, and it is the reason this asserts the shape of
+    what gets pulled rather than a number. `django` and `asgiref` are allowed
+    through: `django.dispatch` imports `asgiref.sync` for async receivers, and both
+    are already loaded in the process this runs in.
+    """
+    script = textwrap.dedent("""
+        import sys
+
+        before = set(sys.modules)
+        from django_redis_aiogram.signals import events_recorded
+        pulled = {name.split('.')[0] for name in set(sys.modules) - before}
+        pulled -= sys.stdlib_module_names | {'django_redis_aiogram', 'django', 'asgiref'}
+
+        assert not pulled, f'importing the signal pulled {sorted(pulled)}'
+        assert 'aiogram' not in sys.modules, 'the metrics seam loaded aiogram'
+        assert 'django.db.models' not in sys.modules, 'the metrics seam loaded the ORM'
+        assert 'redis' not in sys.modules, 'the metrics seam loaded the Redis client'
+
+        events_recorded.connect(lambda sender, **kwargs: None, weak=False)
+        print('cheap seam ok')
+    """)
+    result = subprocess.run(  # noqa: S603 - our own interpreter, and a script written right above
+        [sys.executable, '-c', script],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=SUBPROCESS_TIMEOUT,
+        env={**os.environ, 'DJANGO_SETTINGS_MODULE': 'tests.settings'},
+    )
+    assert result.returncode == 0, result.stderr
+    assert 'cheap seam ok' in result.stdout

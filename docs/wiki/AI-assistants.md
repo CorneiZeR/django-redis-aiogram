@@ -60,6 +60,11 @@ Project uses django-redis-aiogram 3.x. Rules:
   created whether or not you turn the event log on.
 - bot.send() returns a correlation id. Store it next to your own model if you
   want to join your records to the event log later.
+- For metrics, connect a receiver to `events_recorded` from
+  `django_redis_aiogram.signals` in an AppConfig.ready(). Do not invent a settings
+  hook: there is none. It fires with EVENT_LOG off, so metrics need no table and no
+  migration, and the exporter must run in the start_tgbot container because that is
+  where send outcomes are recorded.
 - The event log is off by default (TELEGRAM_BOT['EVENT_LOG']). Turning it on
   needs a retention job — `manage.py tgbot_prune_events` — or the table grows
   without bound. Message bodies are not stored unless EVENT_LOG_PAYLOAD='full',

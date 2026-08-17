@@ -224,6 +224,32 @@ them, so it is not one per message.
   the server has moved the message to the in-flight list, and every later reclaim
   trips over the same message for ever. No restart recovers from it, which is why
   this is an error and not a warning.
+- **A metrics seam that is not the event log.** `django_redis_aiogram.signals`
+  carries `events_recorded`, a `django.dispatch.Signal` fired once per batch on the
+  event writer's own thread with the `Event` objects that batch holds. A signal
+  rather than a setting naming a dotted path: no path to get wrong, no check id for
+  it, no lazy import cache, and no question about what a failing import means.
+  `send_robust`, so a receiver that raises costs neither the other receivers their
+  batch nor the database its rows, and is logged as
+  `an events_recorded receiver raised`.
+
+  It fires with `EVENT_LOG` **off** — the table and the metrics are separate
+  decisions, and gating them together is how an advertised metric comes out
+  silently empty. So the one gate became three: `enabled` still means "this process
+  writes rows", `active` means "the table or a receiver is reading" and is what
+  every producing seam now sits behind, and `wants_payload` guards only the
+  summarising, which is the expensive part and no part of counting — a receiver
+  gets rows with `detail` empty unless the log is on too. `EVENT_LOG_KINDS` filters
+  receivers as well, because it is one answer to "which events does this deployment
+  care about" and not two.
+
+  `Event`'s field names are pinned in `tests/test_public_surface.py`, which makes
+  them public API. Importing the seam pulls neither aiogram nor the ORM: 0.356 ms
+  on top of a process that has already imported Django, of which `django.dispatch`
+  is 0.150 ms. And a process that has receivers but no table no longer imports
+  `eventlog` — and so `django.db` — to close a connection it never opened.
+  **Event log** has the recipe, including the two honest notes about
+  `prometheus_client` and about which container has to run the exporter.
 
 ### Changed
 

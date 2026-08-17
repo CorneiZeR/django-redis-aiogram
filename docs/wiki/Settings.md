@@ -115,7 +115,7 @@ table, which needs `manage.py migrate` and a retention job — see
 | Setting | Default | Description |
 | ------- | ------- | ----------- |
 | `EVENT_LOG` | `False` | Record events at all. Gates both the writing and the admin |
-| `EVENT_LOG_KINDS` | `()` | Which kinds to keep; empty means every kind this version knows. Naming any also opts out of the kinds a later release adds |
+| `EVENT_LOG_KINDS` | `()` | Which kinds to keep; empty means every kind this version knows. Naming any also opts out of the kinds a later release adds, and filters `events_recorded` receivers as well as rows |
 | `EVENT_LOG_PAYLOAD` | `'summary'` | `'none'`, `'summary'` (argument names and sizes) or `'full'` (message bodies) |
 | `EVENT_LOG_MAX_PAYLOAD_BYTES` | `8192` | Cap on the JSON column; `0` stores no payload at all |
 | `EVENT_LOG_REDACT_KEYS` | see `defaults.py` | Payload keys whose values are blanked before a row is written |

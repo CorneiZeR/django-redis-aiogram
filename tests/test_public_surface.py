@@ -64,6 +64,26 @@ THREE_ONE_INTROSPECTION = ('queue_depth', 'inflight_depth')
 
 MODULE_EXPORTS = ('TelegramBot', 'bot', 'conf', 'redis_conn', 'get_redis', '__version__')
 
+#: 3.1.0 makes the metrics seam public, and with it the shape of what receivers get.
+#: Written out rather than read off the dataclass, which is the point: a field
+#: renamed here breaks every receiver a project wrote, and nothing else would say so
+EVENT_FIELDS = (
+    'kind',
+    'correlation_id',
+    'created_at',
+    'function',
+    'chat_id',
+    'user_id',
+    'message_id',
+    'update_id',
+    'worker',
+    'attempt',
+    'duration_ms',
+    'error_code',
+    'error',
+    'detail',
+)
+
 SETTINGS = {'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost:6379/0', 'FSM_STORAGE': 'memory'}
 
 
@@ -298,3 +318,43 @@ def test_the_two_send_paths_agree_on_their_signature():
         sync = inspect.signature(getattr(TelegramBot, sync_name))
         asynchronous = inspect.signature(getattr(TelegramBot, async_name))
         assert sync == asynchronous, f'{sync_name}{sync} and {async_name}{asynchronous} drifted'
+
+
+def test_the_metrics_signal_is_importable_where_a_project_expects_it():
+    """`django_redis_aiogram.signals.events_recorded`, and nothing heavier.
+
+    The module path is the API: a project connects a receiver from its own metrics
+    module or an `AppConfig.ready`, and moving this would break every one of them
+    silently — a receiver connected to a signal nobody fires raises nothing.
+    """
+    from django.dispatch import Signal
+
+    from django_redis_aiogram.signals import events_recorded
+
+    assert isinstance(events_recorded, Signal)
+
+
+def test_the_event_fields_a_receiver_reads_are_all_there():
+    """Receivers get `Event` objects, so its field names are public API now."""
+    import dataclasses
+
+    from django_redis_aiogram.recorder import Event
+
+    present = tuple(field.name for field in dataclasses.fields(Event))
+    assert present == EVENT_FIELDS, f'the Event shape changed: {present}'
+
+
+def test_every_event_field_has_a_column_to_land_in():
+    """The feed and the table have to agree, and `detail` is the only free field.
+
+    A field added to `Event` and not to the model is written nowhere and read by
+    nobody — the row would carry it in neither the column nor the JSON.
+    """
+    import dataclasses
+
+    from django_redis_aiogram.models import TelegramEvent
+    from django_redis_aiogram.recorder import Event
+
+    columns = {field.name for field in TelegramEvent._meta.get_fields()}
+    missing = [field.name for field in dataclasses.fields(Event) if field.name not in columns]
+    assert not missing, f'Event fields with nowhere to go: {missing}'

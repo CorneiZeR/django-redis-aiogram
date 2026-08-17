@@ -37,6 +37,7 @@ from django_redis_aiogram.defaults import DEFAULTS
 from django_redis_aiogram.enums import EventKind
 from django_redis_aiogram.events import known_kinds, new_correlation_id, worker_identity
 from django_redis_aiogram.settings import SETTINGS_NAME, coerce_bool, conf
+from django_redis_aiogram.signals import events_recorded
 
 logger = logging.getLogger('django_redis_aiogram')
 
@@ -141,6 +142,9 @@ class EventRecorder:
         self._owner_pid = os.getpid()
         self._fork_hook = False
         self._dropped = 0
+        # whether this process has ever handed a batch to the ORM, and so whether
+        # there is a connection to close on the way out
+        self._touched_database = False
         # its own lock, not _guard: _guard is held across starting a thread, and
         # the counter is touched from inside paths that must not wait on that
         self._counter = threading.Lock()
@@ -156,6 +160,37 @@ class EventRecorder:
         if enabled is None:
             enabled = self._enabled = self._read_flag()
         return enabled
+
+    @property
+    def active(self) -> bool:
+        """Whether anything at all is reading events: the table, a receiver, or both.
+
+        This is the gate every seam that *produces* an event belongs behind, and
+        :attr:`enabled` is not — a project that connects a receiver and leaves the
+        table off must still get its events, and gating on the table alone is how
+        an advertised metric comes out silently empty.
+
+        ``bool(receivers)`` rather than ``has_listeners()``: 7ns against 172ns
+        measured, and this is read once per event. The difference is a receiver
+        whose weak reference has died but whose entry has not been cleaned up yet,
+        which makes this answer yes while nothing listens — so an event is recorded
+        that nobody reads, and ``send_robust`` short-circuits on it. Wasted work,
+        never a wrong row. ``tests/test_metrics_seam.py`` pins the attribute, since
+        it is Django's to rename.
+        """
+        return self.enabled or bool(events_recorded.receivers)
+
+    @property
+    def wants_payload(self) -> bool:
+        """Whether anything will read a payload summary, which is the costly part.
+
+        Only the table does. ``describe()`` redacts credentials, walks the
+        structure and bounds the result — measured in tens of microseconds, against
+        nothing for a counter keyed on ``kind`` and ``function``. So a receiver gets
+        rows with ``detail`` left empty unless the log is on too, and the seam says
+        so where a project reads about it.
+        """
+        return self.enabled
 
     @property
     def worker(self) -> str:
@@ -186,7 +221,7 @@ class EventRecorder:
 
     def record(self, event: Event) -> None:
         """Hand one event over. Never blocks, never raises, never touches the ORM."""
-        if not self.enabled:
+        if not self.active:
             return
         try:
             if not self.wants(event.kind):
@@ -196,7 +231,7 @@ class EventRecorder:
                 # consumer knew its own name before
                 event = replace(event, worker=self.worker)
             if self._write_here():
-                self._write([event])
+                self._deliver([event])
                 return
             buffer = self._buffer()
             buffer.put_nowait(event)
@@ -236,14 +271,21 @@ class EventRecorder:
                     continue
                 self._drop(1)
 
-    @staticmethod
-    def _write_here() -> bool:
+    def _write_here(self) -> bool:
         """Whether to write on this thread instead of handing it to the writer.
 
         Only when asked to, and never from inside a running loop: the ORM is
         @async_unsafe there, so the seam that records an update would raise
         SynchronousOnlyOperation instead of recording anything.
+
+        Requires the log as well as the flag. ``EVENT_LOG_SYNC`` is about *where the
+        insert happens*, so with nothing being inserted it has nothing to say — and
+        answering yes would have a process that only has receivers run them on the
+        thread that recorded the event, which is the one thing this design exists
+        to avoid.
         """
+        if not self.enabled:
+            return False
         if not coerce_bool(conf['EVENT_LOG_SYNC'], f"{SETTINGS_NAME}['EVENT_LOG_SYNC']"):
             return False
         try:
@@ -317,6 +359,7 @@ class EventRecorder:
         self._queue = None
         self._thread = None
         self._owner_pid = os.getpid()
+        self._touched_database = False
         self._dropped = 0
         self._reported_at = -DROP_REPORT_INTERVAL
 
@@ -356,7 +399,11 @@ class EventRecorder:
             # again: without this, everything still in it disappears with no row
             # and no counter, and the gap reads as quiet traffic
             self._abandon(buffer)
-            self._close_connections()
+            if self._touched_database:
+                # a process that only has receivers never opened one, and importing
+                # `eventlog` to close it would pull in `django.db` — the one import
+                # this module exists to keep out of a process that does not need it
+                self._close_connections()
 
     @staticmethod
     def _empty(buffer: 'queue.Queue[Event | Wake]') -> tuple[list[Event], list[Wake]]:
@@ -380,7 +427,7 @@ class EventRecorder:
         if not leftover:
             return
         with contextlib.suppress(Exception):
-            self._write(leftover)
+            self._deliver(leftover)
             return
         # counted, not silent: the next flush that succeeds turns this into a
         # log.dropped row, which is the only place the gap becomes visible
@@ -408,10 +455,16 @@ class EventRecorder:
         return batch, wakes
 
     def _flush(self, batch: list[Event], *, failures: int) -> tuple[int, float]:
-        """Write one batch, containing whatever it raises."""
+        """Publish one batch and write it, containing whatever the write raises.
+
+        The publish is inside :meth:`_deliver` and ahead of the write, so a failing
+        database costs rows and not metrics. It is inside the ``try`` all the same:
+        :meth:`_publish` contains its own receivers, so anything reaching here came
+        from the write.
+        """
         dropped_before = self._dropped
         try:
-            self._write(batch)
+            self._deliver(batch)
         except Exception:
             failures += 1
             self._dropped += len(batch)
@@ -442,7 +495,7 @@ class EventRecorder:
         with self._counter:
             self._dropped -= dropped
         with contextlib.suppress(Exception):
-            self._write([Event(kind=EventKind.LOG_DROPPED.value, detail={'dropped': dropped})])
+            self._deliver([Event(kind=EventKind.LOG_DROPPED.value, detail={'dropped': dropped})])
 
     @staticmethod
     def _write(batch: list[Event]) -> None:
@@ -450,6 +503,36 @@ class EventRecorder:
         from django_redis_aiogram.eventlog import write_batch  # noqa: PLC0415 - the point: no django.db above
 
         write_batch(batch)
+
+    def _publish(self, batch: list[Event]) -> None:
+        """Hand a batch to whoever connected to :data:`events_recorded`.
+
+        ``send_robust``, so one broken receiver neither loses the batch for the
+        others nor stops the writer — Django returns the exception instead of
+        raising it, and it is logged here because a receiver that fails silently is
+        a metric that reads as zero traffic.
+        """
+        if not events_recorded.receivers:
+            return
+        for receiver, outcome in events_recorded.send_robust(sender=self, events=batch):
+            if isinstance(outcome, BaseException):
+                logger.error(
+                    'an events_recorded receiver raised',
+                    exc_info=outcome,
+                    extra={'tg_receiver': getattr(receiver, '__qualname__', repr(receiver)), 'tg_count': len(batch)},
+                )
+
+    def _deliver(self, batch: list[Event]) -> None:
+        """Publish a batch, then write it if this process keeps the table.
+
+        Publishing first, and outside the write's failure handling: a database that
+        is down or unmigrated is exactly when someone is watching a dashboard, and
+        the metrics have no reason to go with it.
+        """
+        self._publish(batch)
+        if self.enabled:
+            self._touched_database = True
+            self._write(batch)
 
     @staticmethod
     def _close_connections() -> None:

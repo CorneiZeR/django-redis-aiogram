@@ -125,6 +125,79 @@ plus up to 200 rows. A clean `SIGTERM` loses nothing. This is an event feed, not
 a ledger — if you need durability across a kill, the thing that already gives it
 to you is the Redis queue.
 
+## Metrics, without the table
+
+The same events reach a `django.dispatch.Signal`, so a project can count what the
+bot does without keeping a row for any of it:
+
+```python
+# metrics.py, imported from your AppConfig.ready()
+from prometheus_client import Counter
+
+from django_redis_aiogram.signals import events_recorded
+
+SENDS = Counter('telegram_events', 'django-redis-aiogram events', ['kind', 'function'])
+
+
+def count(sender, events, **kwargs):
+    for event in events:
+        SENDS.labels(kind=event.kind, function=event.function or 'none').inc()
+
+
+events_recorded.connect(count, dispatch_uid='metrics.telegram')
+```
+
+Receivers get `events`: a list of `Event`, whose field names are the same ones the
+table's columns carry and are pinned as public API. A signal rather than a setting
+naming a dotted path, because there is then no path to get wrong, no check id for
+it, and no question about what happens when the import fails.
+
+Four things about it are worth knowing before you rely on it, and three of them
+surprise people:
+
+**It fires with `EVENT_LOG` off.** The table and the metrics are separate
+decisions. Connect a receiver, leave the log off, run no migration for it: the
+events still arrive. Turn the log on as well and both happen.
+
+**`detail` is empty unless the log is on.** Summarising a payload means redacting
+credentials out of it, walking it and bounding it — tens of microseconds, and the
+expensive half of recording. A counter keyed on `kind` and `function` needs none of
+it. If your receiver needs message bodies, it needs the log on too, and then
+`EVENT_LOG_PAYLOAD` decides what is in there.
+
+**`EVENT_LOG_KINDS` filters this as well.** It is one answer to "which events does
+this deployment care about", not two — so a receiver sees exactly the kinds the
+table would have kept.
+
+**Connect during app loading.** The update middleware and the FSM storage wrapper
+are built once, and whether to build them is decided then. A receiver connected
+after the first update arrives will not see updates in that process. An
+`AppConfig.ready()` is where Django says signal receivers belong, and it is early
+enough.
+
+### Where it runs, and what that costs
+
+On the **event writer's own thread**, once per batch. So a slow receiver delays
+rows reaching the database and never delays a send — which is the whole reason
+this is not a settings hook calling into your code from the send path. Under
+`EVENT_LOG_SYNC` there is no writer thread and receivers run on the thread that
+recorded the event; that flag is for tests, and this is one more reason.
+
+A receiver that raises is logged as `an events_recorded receiver raised` and does
+not cost the other receivers their batch, or the database its rows —
+`send_robust`, so Django hands the exception back rather than letting it end the
+writer.
+
+Two honest notes about `prometheus_client` in particular. Its `labels()` and
+`inc()` both take locks, and in multiprocess mode an increment is an mmap write —
+cheap, but not free, and it happens once per event in the batch. And `outbound.sent`
+is recorded inside the `start_tgbot` worker, which serves no HTTP at all: the
+exporter has to be stood up **in that container**, or the numbers you scrape from
+the web tier will only ever cover queueing.
+
+No new dependency comes with this. `django.dispatch` is Django, and nothing here
+imports `prometheus_client` or knows it exists.
+
 ## Message bodies are not stored by default
 
 `EVENT_LOG_PAYLOAD` is `'summary'`: argument names and text lengths, not the
