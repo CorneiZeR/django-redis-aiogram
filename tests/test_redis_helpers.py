@@ -4,6 +4,8 @@ A URL with `decode_responses=True` makes every read a str, which is why nothing
 downstream may call `.decode()` unconditionally.
 """
 
+import asyncio
+
 import fakeredis
 import pytest
 from django.test import override_settings
@@ -13,6 +15,8 @@ from django_redis_aiogram import TelegramBot
 from django_redis_aiogram.delivery import BlpopDelivery
 from django_redis_aiogram.envelope import unpack
 from django_redis_aiogram.redis import (
+    aclose_redis,
+    aget_redis,
     as_bytes,
     connection_kwargs,
     get_redis,
@@ -293,3 +297,76 @@ def test_the_shared_client_does_not_retry_commands():
 )
 def test_url_decodes_responses(url, expected):
     assert url_decodes_responses(url) is expected
+
+
+@override_settings(TELEGRAM_BOT={'REDIS_URL': 'redis://localhost:6379/0'})
+def test_each_loop_gets_its_own_async_client(redis_server):
+    """`redis.asyncio` connections belong to the loop that created them.
+
+    Sharing one the way the synchronous client is shared would have two loops
+    interleaving reads on a single socket — the failure the registry exists to
+    prevent, and one that shows up only when two of them are busy.
+
+    Both loops are alive at once on purpose. Taking a client, closing it, and
+    taking another proves nothing: the registry is empty by the second turn, so
+    even a single-client implementation hands out a fresh one.
+    """
+    first, second = asyncio.new_event_loop(), asyncio.new_event_loop()
+    try:
+        mine = first.run_until_complete(aget_redis())
+        theirs = second.run_until_complete(aget_redis())
+
+        assert mine is not theirs, 'two live loops shared one async client'
+        # and it is a cache, not a factory: the same loop gets the same client
+        assert first.run_until_complete(aget_redis()) is mine
+
+        first.run_until_complete(aclose_redis())
+        second.run_until_complete(aclose_redis())
+    finally:
+        first.close()
+        second.close()
+
+
+@override_settings(TELEGRAM_BOT={'REDIS_URL': 'redis://localhost:6379/0'})
+def test_a_setting_change_replaces_the_async_client_on_its_own_loop(redis_server):
+    """Invalidation cannot close: `setting_changed` is synchronous, `aclose()` is
+    a coroutine, and closing a client that belongs to another loop from another
+    thread is what these connections forbid. So the receiver marks, and the next
+    caller on that loop does the closing."""
+    closed = []
+
+    async def before_and_after():
+        first = await aget_redis()
+        original = first.aclose
+
+        async def recording(*args, **kwargs):
+            closed.append(first)
+            return await original(*args, **kwargs)
+
+        first.aclose = recording
+        with override_settings(TELEGRAM_BOT={'REDIS_URL': 'redis://localhost:6379/1'}):
+            second = await aget_redis()
+        assert second is not first, 'the stale client was handed out again'
+        assert closed == [first], 'the stale client was dropped without being closed'
+        await aclose_redis()
+
+    asyncio.run(before_and_after())
+
+
+@override_settings(TELEGRAM_BOT={'REDIS_URL': 'redis://localhost:6379/0'})
+def test_asking_for_the_async_client_off_a_loop_says_what_to_call(redis_server):
+    """The refusal names the alternative, because a client built off a loop could
+    not be used from one.
+
+    Reaching it takes stepping the coroutine by hand: awaited the ordinary way
+    there is always a running loop, so this is a guard on the boundary rather
+    than a path a caller falls down. It is here because the message is what
+    someone reads when they do get there, and because the loop-affinity rule is
+    worth stating at the point that depends on it.
+    """
+    coroutine = aget_redis()
+    try:
+        with pytest.raises(RuntimeError, match='call get_redis'):
+            coroutine.send(None)
+    finally:
+        coroutine.close()

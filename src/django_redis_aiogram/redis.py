@@ -6,13 +6,16 @@ them are running. The connection is built on first use rather than at import,
 because Django settings are not readable while the app registry is loading.
 """
 
+import asyncio
 import threading
+import weakref
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from django.core.exceptions import ImproperlyConfigured
 from django.core.signals import setting_changed
 from redis import Redis
+from redis.asyncio import Redis as AsyncRedis
 from redis.connection import parse_url as _parse_url
 
 from django_redis_aiogram.settings import SETTINGS_NAME, conf
@@ -66,6 +69,24 @@ def build_client() -> Redis:
         msg = f"{SETTINGS_NAME}['REDIS_URL'] is required to talk to Redis."
         raise ImproperlyConfigured(msg)
     return Redis.from_url(url, **connection_kwargs())
+
+
+def build_async_client() -> AsyncRedis:
+    """Build the same client for a caller that is already on an event loop.
+
+    Same URL, same deadlines from :func:`connection_kwargs`, same deliberate lack
+    of retries — everything :func:`build_client` says applies here too, and
+    ``redis.asyncio`` ships inside redis-py, so this needs no extra dependency.
+
+    What differs is ownership: these connections are **loop-affine**, so one
+    client cannot be shared the way the synchronous one is. :func:`aget_redis`
+    keeps one per loop.
+    """
+    url = conf['REDIS_URL']
+    if not url:
+        msg = f"{SETTINGS_NAME}['REDIS_URL'] is required to talk to Redis."
+        raise ImproperlyConfigured(msg)
+    return AsyncRedis.from_url(url, **connection_kwargs())
 
 
 def url_decodes_responses(url: str) -> bool:
@@ -126,6 +147,85 @@ class _SharedConnection:
             client.close()
 
 
+class _LoopConnections:
+    """One async client per event loop, and the generation that invalidates them.
+
+    ``redis.asyncio`` connections belong to the loop that created them, so the
+    single shared client the rest of this module keeps would be wrong here: two
+    loops sharing one would interleave reads on the same socket. Keyed weakly, so
+    a loop that goes away takes its entry with it.
+
+    Invalidation cannot close: ``setting_changed`` is synchronous, ``aclose()`` is
+    a coroutine, and closing a client belonging to another loop from another
+    thread is exactly what these connections forbid. So a reset only bumps a
+    counter, and the next caller *on that loop* awaits the close itself.
+    """
+
+    def __init__(self) -> None:
+        """Start empty, at generation zero."""
+        self._guard = threading.Lock()
+        self._clients: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, tuple[int, AsyncRedis]]
+        self._clients = weakref.WeakKeyDictionary()
+        self._generation = 0
+
+    async def get(self) -> AsyncRedis:
+        """Return this loop's client, building or replacing it as needed."""
+        loop = _running_loop()
+        # no await inside the lock, so a coroutine cannot be suspended holding it
+        # and another thread's loop is only ever held off for a dict lookup
+        with self._guard:
+            entry = self._clients.get(loop)
+            if entry is not None and entry[0] == self._generation:
+                return entry[1]
+            stale = None if entry is None else entry[1]
+            client = build_async_client()
+            self._clients[loop] = (self._generation, client)
+        if stale is not None:
+            # on its own loop, which is the only place it may be closed
+            await stale.aclose()
+        return client
+
+    async def close(self) -> None:
+        """Close and forget this loop's client, if it has one."""
+        loop = _running_loop()
+        with self._guard:
+            entry = self._clients.pop(loop, None)
+        if entry is not None:
+            await entry[1].aclose()
+
+    def invalidate(self) -> None:
+        """Mark every client stale without touching any of them."""
+        with self._guard:
+            self._generation += 1
+
+
+def _running_loop() -> asyncio.AbstractEventLoop:
+    """Return the loop the caller is on, or refuse with what to call instead."""
+    try:
+        return asyncio.get_running_loop()
+    except RuntimeError as error:
+        msg = (
+            'aget_redis() needs a running event loop; call get_redis() from '
+            'synchronous code instead. The async client exists for callers that '
+            'are already on a loop — an ASGI view, say — and a client built off '
+            'one could not be used from it.'
+        )
+        raise RuntimeError(msg) from error
+
+
+_loops = _LoopConnections()
+
+
+async def aget_redis() -> AsyncRedis:
+    """Return the async client for the loop this coroutine is running on."""
+    return await _loops.get()
+
+
+async def aclose_redis() -> None:
+    """Close this loop's async client. Django has no hook that does it for you."""
+    await _loops.close()
+
+
 _shared = _SharedConnection()
 
 
@@ -174,6 +274,10 @@ def _reset_on_setting_change(setting: str, **_kwargs: object) -> None:
     """Reconnect after the settings change, since REDIS_URL may have moved."""
     if setting == SETTINGS_NAME:
         reset_redis()
+        # marked, not closed: this runs on whatever thread changed the setting,
+        # and an async client may belong to a loop on another one. The next
+        # caller on that loop closes the stale client itself
+        _loops.invalidate()
 
 
 setting_changed.connect(_reset_on_setting_change, dispatch_uid='django_redis_aiogram.redis')
