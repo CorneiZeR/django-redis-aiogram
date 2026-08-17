@@ -489,8 +489,17 @@ class TelegramBot:
         Cancelling before the loop stops is what turns that into an exception the
         request can answer with.
         """
-        runner, self._runner = self._runner, None
-        self._runner_ready.clear()
+        # under the guard `_ensure_loop_runs` registers a thread beneath, and
+        # released before `loop_lock` below rather than held across it: a send
+        # driven under `loop_lock` reaches the `bot` property, which takes this
+        # guard, so guard-inside-lock is the order that already exists.
+        #
+        # Without it a request that passed the `_closing` check could register a
+        # runner *after* this snapshot read None, and that thread would call
+        # `run_forever` on the loop the teardown below is closing
+        with self._build_guard:
+            runner, self._runner = self._runner, None
+            self._runner_ready.clear()
         if runner is None:
             return
         loop = self._loop

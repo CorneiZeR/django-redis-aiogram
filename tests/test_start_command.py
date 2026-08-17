@@ -363,3 +363,29 @@ def test_an_unreachable_redis_does_not_read_as_an_old_server(monkeypatch, caplog
     assert 'polling-started' in events, events
     # and the operator is told the guarantee went unproven rather than passed
     assert 'could not verify crash-safe delivery' in caplog.text
+
+
+@override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost:6379/0', 'MODE': 'webhook'})
+def test_the_consumer_is_not_started_by_the_shutdown_itself(monkeypatch, caplog):
+    """The consumer start is deferred onto the loop, and `close()` runs one turn.
+
+    So a callback still queued when the command reaches its `finally` would start
+    the consumer *after* `delivery.stop()` and after the joins — a thread nobody
+    waits for, doing Redis work, whose first act is `reclaim()`. It happens
+    whenever the loop never got a turn: an immediate SIGTERM is enough.
+    """
+    events = []
+    monkeypatch.setattr(
+        'django_redis_aiogram.management.commands.start_tgbot.get_delivery',
+        lambda handler: RecordingDelivery(events),
+    )
+    # the loop never runs, so the queued start is still queued in the finally
+    monkeypatch.setattr(Command, '_idle_on_the_loop', lambda self: None)
+
+    with caplog.at_level('INFO', logger='django_redis_aiogram'):
+        call_command('start_tgbot')
+
+    assert 'stopped' in events, events
+    if 'consumer-started' in events:
+        assert events.index('consumer-started') < events.index('stopped'), events
+    assert 'not starting the consumer' in caplog.text

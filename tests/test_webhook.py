@@ -891,3 +891,47 @@ def test_forgetting_an_update_waits_for_the_shutdown_snapshot():
         assert instance._updates == set()
     finally:
         instance.close()
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_a_runner_registered_during_shutdown_is_not_missed():
+    """`_stop_runner` reads and clears `_runner`; `_ensure_loop_runs` writes it.
+
+    Both must hold `_build_guard`. Otherwise a request already inside that
+    critical section registers its thread *after* the snapshot read `None`, and
+    that thread calls `run_forever` on the loop the teardown is about to close —
+    ending in `RuntimeError: This event loop is already running` part-way through
+    the teardown, with the storage already closed, or `loop.close()` under a live
+    thread.
+
+    The guard is held by *another* thread here. Held by this one it would be
+    re-entered rather than waited on, and the test would pass either way.
+    """
+    instance = TelegramBot()
+    inside = threading.Event()
+    late = threading.Thread(target=lambda: None, name='late-runner', daemon=True)
+
+    def registering() -> None:
+        # stands in for a caller between the `_closing` check and the assignment
+        with instance._build_guard:
+            inside.set()
+            time.sleep(0.2)
+            instance._runner = late
+            late.start()
+
+    racer = threading.Thread(target=registering, daemon=True)
+    racer.start()
+    assert inside.wait(5), 'the racing caller never took the guard'
+
+    try:
+        instance._closing = True
+        instance._stop_runner(0.1)
+        # joined *after*, so the assertion cannot pass merely because the snapshot
+        # ran before the assignment: without the guard it does exactly that
+        racer.join(timeout=5)
+
+        # it waited for the guard, so it saw the thread registered under it
+        assert instance._runner is None, 'a runner was left behind by the snapshot'
+    finally:
+        instance._closing = False
+        instance.close()
