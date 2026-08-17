@@ -789,3 +789,47 @@ def test_the_view_asks_telegram_to_redeliver_a_refused_update(monkeypatch):
         instance.close()
 
     assert response.status_code == 503, response.status_code
+
+
+@pytest.mark.filterwarnings('ignore::pytest.PytestUnhandledThreadExceptionWarning')
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_a_loop_thread_that_dies_is_replaced(monkeypatch):
+    """A dead runner must not become a permanent 503.
+
+    `_runner` was set once and cleared only by `close()`, so a thread that ended
+    before it ran the loop was kept for the life of the process: every later
+    update waited out `RUNNER_TIMEOUT`, logged the startup warning and was
+    refused. Redelivery cannot recover a condition that never clears — the next
+    attempt hits the same dead thread — so the process serves 503 until someone
+    restarts it, five seconds at a time.
+    """
+    instance = TelegramBot()
+    monkeypatch.setattr('django_redis_aiogram.client.RUNNER_TIMEOUT', 0.05)
+    real_set_event_loop = asyncio.set_event_loop
+    attempts = []
+
+    def fail_the_first(loop):
+        attempts.append(loop)
+        if len(attempts) == 1:
+            msg = 'the thread ends here, before it can signal readiness'
+            raise RuntimeError(msg)
+        return real_set_event_loop(loop)
+
+    monkeypatch.setattr(asyncio, 'set_event_loop', fail_the_first)
+    monkeypatch.setattr('django_redis_aiogram.webhook.bot', instance)
+    handled = []
+
+    @instance.message(F.text)
+    async def note(message: types.Message) -> None:
+        handled.append(message.text)
+
+    try:
+        # the first update loses its thread and is refused, which is correct
+        assert post(an_update('/first')).status_code == 503
+        # the second must not inherit that corpse
+        assert post(an_update('/second', update_id=2)).status_code == 200
+        assert handled == ['/second'], handled
+        assert len(attempts) == 2, 'no replacement thread was started'
+    finally:
+        monkeypatch.setattr(asyncio, 'set_event_loop', real_set_event_loop)
+        instance.close()

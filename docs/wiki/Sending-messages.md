@@ -90,7 +90,10 @@ too — share a volume, or send bytes with `BufferedInputFile`.
 ## Errors
 
 Queued messages are delivered by the worker; failures are logged there, not
-raised in your view. For direct calls, `RAISE_EXCEPTION` propagates them:
+raised in your view. For direct calls, `RAISE_EXCEPTION` propagates them — but
+only where `send_raw` still waits for the answer, which in a process that serves
+the webhook it does not. See [Choosing the route yourself](#choosing-the-route-yourself)
+above: there the failure reaches the log rather than the `except` below.
 
 ```python
 from aiogram.exceptions import TelegramBadRequest
@@ -102,7 +105,8 @@ except TelegramBadRequest:
 ```
 
 Telegram rate-limit refusals are retried up to `MAX_RETRIES`; exhausting them
-logs an error and, with `RAISE_EXCEPTION`, re-raises. See **[[Rate limits]]**
+logs an error and, with `RAISE_EXCEPTION`, re-raises — into the caller that was
+waiting, so the same qualification applies. See **[[Rate limits]]**
 for staying under the limits in the first place.
 
 ## From Celery

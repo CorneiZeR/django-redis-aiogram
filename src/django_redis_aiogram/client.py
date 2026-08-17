@@ -407,6 +407,18 @@ class TelegramBot:
         """
         if self._closing:
             return False
+        runner = self._runner
+        if runner is not None and not runner.is_alive():
+            # a thread that died before it ran the loop would otherwise be kept
+            # for the life of the process: every later update would wait out the
+            # timeout, log the warning and be refused, and no redelivery can
+            # recover a condition that never clears. One replacement is cheap;
+            # a permanently 503 process is not
+            logger.warning('the event loop thread is gone; starting another')
+            with self._build_guard:
+                if self._runner is runner:
+                    self._runner = None
+                    self._runner_ready.clear()
         if self._runner is None:
             with self._build_guard:
                 if not self._closing and self._runner is None:

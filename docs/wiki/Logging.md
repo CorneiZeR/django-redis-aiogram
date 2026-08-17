@@ -60,6 +60,11 @@ All prefixed with `tg_`, to avoid colliding with `LogRecord` attributes.
 | `the delivery consumer did not stop in time` | WARNING | the consumer outlived its join at shutdown; a message it holds may be redelivered |
 | `cancelling updates still in flight` | WARNING | a webhook update outlasted the drain at shutdown; its request gets an error rather than a hung worker |
 | `webhook refused an update` | WARNING | an update arrived while the process was shutting down; answered 503 so Telegram redelivers it |
+| `the event loop thread did not start in time` | WARNING | a webhook process cannot hand updates to its loop; every request is refused with 503 until a thread starts |
+| `the event loop thread is gone; starting another` | WARNING | that thread died and was replaced; the update that lost it was refused |
+| `the event loop thread did not stop in time` | WARNING | it outlived its join at shutdown, so the teardown was skipped and `close()` can be retried |
+| `skipping close` | WARNING | the loop was still running, so nothing was torn down; stop polling or the loop thread and call it again |
+| `skipping drain` | WARNING | the same, for the drain alone: in-flight sends were left rather than waited for |
 | `rate limited by telegram` | WARNING | refused and backing off |
 | `delivery started` | INFO | the consumer is up |
 | `message sent` | INFO | one call succeeded |
