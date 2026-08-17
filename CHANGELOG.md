@@ -37,6 +37,11 @@ them, so it is not one per message.
   waits on its update with no deadline of its own, so stopping the loop under one
   would hold that worker for the life of the process; cancelling turns it into an
   error the request can answer with.
+- **The webhook view answers 503 to an update it refused**, rather than 200. It
+  answers 200 to a handler that raised, because retrying one that failed once is
+  a loop — but an update refused mid-shutdown was never handled, so redelivery is
+  the point. During a rolling restart that is the difference between the update
+  moving to the next instance and disappearing.
 
 - **The consumer acknowledged a message before Telegram had seen it.** In polling
   mode `send_raw` returns as soon as the coroutine is scheduled, and the consumer

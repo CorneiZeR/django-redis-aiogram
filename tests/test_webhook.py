@@ -21,6 +21,7 @@ from django.test import RequestFactory, override_settings
 from django_redis_aiogram import TelegramBot
 from django_redis_aiogram.checks import check_settings
 from django_redis_aiogram.client import LOOP_THREAD, Outbound
+from django_redis_aiogram.exceptions import LoopThreadNotStartedError, ShuttingDownError
 from django_redis_aiogram.webhook import (
     SECRET_HEADER,
     current_mode,
@@ -653,7 +654,9 @@ def test_send_raw_stops_waiting_once_the_loop_has_a_thread():
             instance.send_raw('send_message', chat_id=1, text='x')
             return time.monotonic() - began, bool(called)
         finally:
-            instance._bot = None
+            # closed with the stub still installed: the handed-off send has only
+            # been scheduled, and clearing it here would let the drain resolve
+            # `self.bot` and build a real one — a unit test reaching the network
             instance.close()
 
     drove, drove_called = measure(with_runner=False)
@@ -702,3 +705,87 @@ def test_close_does_not_strand_a_request_waiting_on_its_update(monkeypatch):
 
     assert not request.is_alive(), 'the request thread is still waiting on a stopped loop'
     assert answered, 'the request never returned'
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_a_slow_loop_thread_is_not_driven_by_the_request(monkeypatch):
+    """Slow to start is not the same as absent.
+
+    Waiting `RUNNER_TIMEOUT` and carrying on left `feed_update` free to drive the
+    update itself, while the thread it had already started called `run_forever`
+    on that same loop — two threads on one loop, the thread dies, and `_runner`
+    points at a corpse. It refuses now: the request fails rather than corrupting
+    the loop every later update depends on.
+    """
+    instance = TelegramBot()
+    monkeypatch.setattr('django_redis_aiogram.client.RUNNER_TIMEOUT', 0.05)
+    real_set_event_loop = asyncio.set_event_loop
+
+    def slow_set_event_loop(loop):
+        # the runner's first statement: the thread is started and alive, and has
+        # not reached `run_forever`, which is the window the wait used to give up
+        time.sleep(0.5)
+        return real_set_event_loop(loop)
+
+    monkeypatch.setattr(asyncio, 'set_event_loop', slow_set_event_loop)
+    monkeypatch.setattr('django_redis_aiogram.webhook.bot', instance)
+
+    try:
+        with pytest.raises(LoopThreadNotStartedError):
+            instance.feed_update(types.Update.model_validate(an_update('/slow-start')))
+    finally:
+        # let the late thread finish arriving before tearing down, or `close()`
+        # races the very loop this test delayed
+        monkeypatch.setattr(asyncio, 'set_event_loop', real_set_event_loop)
+        monkeypatch.setattr('django_redis_aiogram.client.RUNNER_TIMEOUT', 5.0)
+        instance._runner_ready.wait(5)
+        instance.close()
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_an_update_is_refused_once_the_shutdown_has_started(monkeypatch):
+    """A request that arrives mid-shutdown must be turned away, not queued.
+
+    `close()` snapshots the updates in flight and then stops the loop. One
+    submitted after that snapshot would be neither waited for nor cancelled, and
+    its request would wait for ever on a stopped loop — the stranded worker
+    again, through a narrower door. The refusal is decided under the same
+    `loop_lock` the snapshot is taken under, which is what leaves no window
+    between them; this pins the refusal itself.
+    """
+    instance = TelegramBot()
+    instance._ensure_loop_runs()
+    try:
+        # what a request sees while close() is between its snapshot and the stop.
+        # close() clears this again at the end, so it cannot be observed after
+        instance._closing = True
+
+        with pytest.raises(ShuttingDownError):
+            instance.feed_update(types.Update.model_validate(an_update('/too-late')))
+        assert instance._updates == set(), 'the update was submitted anyway'
+    finally:
+        instance._closing = False
+        instance.close()
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_the_view_asks_telegram_to_redeliver_a_refused_update(monkeypatch):
+    """A refusal and a handler failure must not answer the same way.
+
+    The view answers 200 when a handler raised, because retrying a handler that
+    fails once is a loop rather than a retry. But nothing ran here — the process
+    is shutting down — so the update is still Telegram's, and a 2xx would tell it
+    to forget one nobody handled. During a rolling restart that is the difference
+    between an update moving to the next instance and disappearing.
+    """
+    instance = TelegramBot()
+    instance._ensure_loop_runs()
+    monkeypatch.setattr('django_redis_aiogram.webhook.bot', instance)
+    try:
+        instance._closing = True
+        response = post(an_update('/mid-restart'))
+    finally:
+        instance._closing = False
+        instance.close()
+
+    assert response.status_code == 503, response.status_code

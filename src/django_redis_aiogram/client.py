@@ -36,6 +36,7 @@ from django_redis_aiogram.defaults import DEFAULTS
 from django_redis_aiogram.enums import EventKind, StorageKind
 from django_redis_aiogram.envelope import pack
 from django_redis_aiogram.events import new_correlation_id
+from django_redis_aiogram.exceptions import LoopThreadNotStartedError, ShuttingDownError
 from django_redis_aiogram.instrumentation import install_instrumentation, instrumented
 from django_redis_aiogram.payloads import describe
 from django_redis_aiogram.recorder import Event, as_identifier, recorder
@@ -353,12 +354,23 @@ class TelegramBot:
         or a failure would go unreported and the request would look successful.
         """
         self._attach_router()
-        self._ensure_loop_runs()
+        owned = self._ensure_loop_runs()
 
         coroutine = self.dispatcher.feed_update(self.bot, update)
         loop = self.loop
         with loop_lock(loop):
+            if self._closing:
+                # decided under the same lock the shutdown snapshot is taken
+                # under, or an update submitted just after it would be neither
+                # waited for nor cancelled, and its request would never return
+                coroutine.close()
+                raise ShuttingDownError
             if not loop.is_running():
+                if owned:
+                    # our own thread owns this loop and was slow to start.
+                    # Driving it here would put two threads on one loop
+                    coroutine.close()
+                    raise LoopThreadNotStartedError(RUNNER_TIMEOUT)
                 # nothing could be started to run it, so drive it here — which is
                 # what every update did before, one at a time under this lock
                 loop.run_until_complete(coroutine)
@@ -376,7 +388,7 @@ class TelegramBot:
         finally:
             self._updates.discard(future)
 
-    def _ensure_loop_runs(self) -> None:
+    def _ensure_loop_runs(self) -> bool:
         """Give this process's loop a thread of its own, once.
 
         A web process serving the webhook drives nothing: every `feed_update`
@@ -388,16 +400,20 @@ class TelegramBot:
 
         Not started in the polling process: `start_polling` runs the loop itself,
         and `loop.is_running()` below is what says so.
+
+        Returns whether a thread of ours owns this loop — ready or not. A caller
+        that owns it must never fall back to driving the loop itself, even when
+        the thread was slow to start: the two would be running the same loop.
         """
         if self._closing:
-            return
+            return False
         if self._runner is None:
             with self._build_guard:
                 if not self._closing and self._runner is None:
                     loop = self.loop
                     if loop.is_running():
                         # polling drives it; there is nothing to start
-                        return
+                        return False
                     self._runner_ready.clear()
 
                     def run() -> None:
@@ -414,8 +430,14 @@ class TelegramBot:
         # the same loop. That kills the thread, leaves `_runner` pointing at a
         # dead one, and quietly returns the process to handling updates one at a
         # time — the thing this method exists to stop
-        if self._runner is not None and not self._runner_ready.wait(RUNNER_TIMEOUT):
+        if self._runner is None:
+            return False
+        if not self._runner_ready.wait(RUNNER_TIMEOUT):
+            # slow, not absent. Saying so is the whole point of the return value:
+            # a caller that drove the update here would collide with the thread
+            # the moment it did start
             logger.warning('the event loop thread did not start in time', extra={'tg_timeout': RUNNER_TIMEOUT})
+        return True
 
     def _stop_runner(self, drain_timeout: float) -> None:
         """Stop the thread this process gave the loop, if it started one.
@@ -435,7 +457,15 @@ class TelegramBot:
         if runner is None:
             return
         loop = self._loop
-        pending = list(self._updates)
+        if loop is not None:
+            # under the lock `feed_update` submits beneath, so an update cannot
+            # slip in between this snapshot and the loop stopping. The waiting
+            # stays outside it: holding it would block nothing useful and delay
+            # the refusal above
+            with loop_lock(loop):
+                pending = list(self._updates)
+        else:
+            pending = list(self._updates)
         if pending:
             logger.info('waiting for updates in flight', extra={'tg_pending': len(pending)})
             futures.wait(pending, timeout=max(0.0, drain_timeout))

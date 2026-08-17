@@ -146,6 +146,11 @@ cannot.
 because a handler that failed once will fail the same way on redelivery — that
 is a loop, not a retry. Failures are logged; see **[[Logging]]**.
 
+It answers **503** for the other case: an update that was *refused* rather than
+handled, because the process is shutting down and nothing ran. There redelivery
+is the point — during a rolling restart it is the difference between the update
+moving to the next instance and disappearing into a 200 nobody acted on.
+
 **Updates are not queued through Redis.** They go straight from the request to
 the dispatcher. Redis carries outbound messages only, in both modes.
 

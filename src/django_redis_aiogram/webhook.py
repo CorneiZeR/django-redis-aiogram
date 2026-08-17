@@ -23,6 +23,7 @@ from pydantic import ValidationError
 
 from django_redis_aiogram import bot
 from django_redis_aiogram.enums import UpdateMode, choices
+from django_redis_aiogram.exceptions import LoopUnavailableError
 from django_redis_aiogram.settings import SETTINGS_NAME, conf
 
 logger = logging.getLogger('django_redis_aiogram')
@@ -60,7 +61,9 @@ def telegram_webhook(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911 - a
 
     Answers 200 for anything Telegram should not retry, including a handler that
     raised — a non-2xx makes Telegram redeliver the same update, and a handler
-    that fails once will fail again.
+    that fails once will fail again. A *refusal* is the other case: when nothing
+    ran at all, because this process is shutting down, redelivery is exactly
+    what should happen, so that answers 503.
     """
     if request.method != 'POST':
         return HttpResponseNotAllowed(['POST'])
@@ -104,6 +107,12 @@ def telegram_webhook(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911 - a
 
     try:
         bot.feed_update(update)
+    except LoopUnavailableError:
+        # nothing ran, so this update is still Telegram's to redeliver — which a
+        # 2xx would tell it not to. The shutdown window is not a handler that
+        # failed, and the two must not answer the same way
+        logger.warning('webhook refused an update', extra={'tg_update': update.update_id})
+        return HttpResponse(status=503)
     except Exception:
         logger.exception('webhook handler failed', extra={'tg_update': update.update_id})
 

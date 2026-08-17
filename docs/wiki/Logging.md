@@ -59,6 +59,7 @@ All prefixed with `tg_`, to avoid colliding with `LogRecord` attributes.
 | `blocking pop failed, retrying` | ERROR | lost the Redis connection; it retries |
 | `the delivery consumer did not stop in time` | WARNING | the consumer outlived its join at shutdown; a message it holds may be redelivered |
 | `cancelling updates still in flight` | WARNING | a webhook update outlasted the drain at shutdown; its request gets an error rather than a hung worker |
+| `webhook refused an update` | WARNING | an update arrived while the process was shutting down; answered 503 so Telegram redelivers it |
 | `rate limited by telegram` | WARNING | refused and backing off |
 | `delivery started` | INFO | the consumer is up |
 | `message sent` | INFO | one call succeeded |
