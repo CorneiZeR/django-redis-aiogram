@@ -178,7 +178,10 @@ def queueing(function: str, messages: list[tuple[uuid.UUID, dict[str, Any]]]) ->
     """
     queued_at = time.time()
     serializer = get_serializer()
-    key = str(conf['REDIS_MESSAGES_KEY'])
+    # through the helper, not the setting: the consumer, both depth reads and
+    # `tgbot_reclaim` all derive their keys from it, and a producer reading the
+    # setting itself is the one writer that would not follow it anywhere it goes
+    key = queue_key()
     try:
         # inside the guard, not before it: a payload that cannot be serialised
         # loses its message exactly as a refused write does, and for a chunk the

@@ -182,6 +182,31 @@ def test_the_depths_read_the_keys_this_package_owns(redis_server):
 
 
 @override_settings(TELEGRAM_BOT=SETTINGS)
+@pytest.mark.parametrize('producer', ['send_redis', 'asend_redis', 'send_many', 'asend_many'])
+def test_the_producer_writes_the_key_the_depth_reads(redis_server, monkeypatch, producer):
+    """One derivation of the queue key, not one per caller.
+
+    The test above writes to the key literally, so it cannot notice a producer
+    that resolves it some other way — and every other reader goes through
+    `queue_key()`: the consumer, both depth methods, `tgbot_reclaim`. A producer
+    reading `REDIS_MESSAGES_KEY` itself is the single writer that would not follow
+    the helper anywhere it goes, and 4.0 makes it go somewhere.
+
+    So the helper is made to answer something the setting does not, and both ends
+    are asked whether they agree.
+    """
+    monkeypatch.setattr('django_redis_aiogram.client.queue_key', lambda: f'{QUEUE}:elsewhere')
+    bot = TelegramBot()
+    call = getattr(bot, producer)
+    result = call([1], text='hi') if producer.endswith('_many') else call(chat_id=1, text='hi')
+    if producer.startswith('a'):
+        asyncio.run(result)
+
+    assert bot.queue_depth() == 1, 'the write and the depth read disagree about the key'
+    assert redis_server.llen(QUEUE) == 0, 'the producer resolved the key past the helper'
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
 @pytest.mark.parametrize('bulk', ['send_many', 'asend_many'])
 def test_the_ids_come_back_in_the_order_the_chats_were_given(redis_server, bulk):
     """Two pages say so, so something has to fail when it stops being true.
