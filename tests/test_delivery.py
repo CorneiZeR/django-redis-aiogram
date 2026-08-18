@@ -11,6 +11,7 @@ from django_redis_aiogram import TelegramBot
 from django_redis_aiogram.client import Outbound
 from django_redis_aiogram.delivery import BlpopDelivery, get_delivery
 from django_redis_aiogram.events import new_correlation_id
+from django_redis_aiogram.redis import processing_key
 from django_redis_aiogram.serializers import JsonSerializer, PickleSerializer
 
 
@@ -434,3 +435,55 @@ def test_the_consumer_pops_for_what_the_shared_ceiling_says(redis_server, monkey
 
     assert asked, 'the consumer never popped, so nothing is being tested'
     assert asked[0] == 4, f'popped for {asked[0]}s while the ceiling says 4'
+
+
+@override_settings(TELEGRAM_BOT={'DELIVERY': 'blpop', 'BLPOP_TIMEOUT': 1, 'WORKER_NAME': 'mine'})
+def test_a_subclass_can_still_name_its_own_in_flight_list(redis_server, monkeypatch):
+    """The keys are module-level functions, and the properties over them stay overridable.
+
+    Both halves matter and only one of them was pinned. `queue_key`, `processing_key`
+    and `heartbeat_key` live in `redis.py` so a producer, both depth reads and
+    `tgbot_reclaim` derive them from one place — but `Delivery` keeps properties over
+    those functions precisely so a subclass can answer differently, which
+    `tests/integration/test_delivery_against_redis.py` relies on to run two consumers
+    against one queue under different names. That reliance only ran with a real Redis.
+
+    Asserted on the key the consumer handed to Redis, not on the property. Reading the
+    property back proves only that the subclass defines it, and asserting the message
+    arrived proves only that *some* key worked: the first version of this test did both
+    and passed with `self.processing_key` replaced by the module function at all eight
+    call sites — which is exactly the regression it was written for.
+    """
+
+    class Named(BlpopDelivery):
+        """A consumer that keeps its in-flight list under a name of its own."""
+
+        @property
+        def processing_key(self) -> str:
+            """Answer with a name this class chose rather than the worker identity."""
+            return f'{self.queue_key}:processing:borrowed'
+
+    destinations: list[str] = []
+    original = redis_server.lmove
+
+    def recording_lmove(source, destination, *args, **kwargs):
+        destinations.append(destination)
+        return original(source, destination, *args, **kwargs)
+
+    monkeypatch.setattr(redis_server, 'lmove', recording_lmove)
+
+    handled: list[int] = []
+    delivery = Named(handler=lambda **kwargs: handled.append(kwargs['chat_id']))
+    redis_server.rpush(
+        'TELEGRAM_BOT_MESSAGE',
+        JsonSerializer().dumps({'function': 'send_message', 'chat_id': 7}),
+    )
+
+    delivery.consume_pending()
+
+    assert handled == [7], f'the override stopped the consumer working: {handled}'
+    assert destinations, 'nothing was moved, so nothing is being tested'
+    assert destinations[0] == 'TELEGRAM_BOT_MESSAGE:processing:borrowed', destinations[0]
+    # and the module function is untouched by the override, which is what makes the
+    # producer and `tgbot_reclaim` agree with each other rather than with a subclass
+    assert processing_key() == 'TELEGRAM_BOT_MESSAGE:processing:mine'
