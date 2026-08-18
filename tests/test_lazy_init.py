@@ -406,6 +406,33 @@ def test_the_healthcheck_probe_does_not_import_aiogram():
     assert 'cheap probe ok' in result.stdout
 
 
+def test_the_probe_with_no_settings_module_refuses_in_one_line():
+    """The mistake the new recipe invites, exercised for real rather than mocked.
+
+    `manage.py` sets `DJANGO_SETTINGS_MODULE` with `os.environ.setdefault` *inside its own
+    process*, so a container that runs it need never export the variable — and a
+    healthcheck is a different process. The unit test for this covers `main()`'s handler
+    with a raise of its own; only a subprocess can show that the real path arrives there,
+    which matters because anything that made the settings layer fall back to defaults
+    would answer `redis is unreachable` instead and never name the variable at fault.
+    """
+    environment = {key: value for key, value in os.environ.items() if key != 'DJANGO_SETTINGS_MODULE'}
+    probe = subprocess.run(
+        [sys.executable, '-m', 'django_redis_aiogram.healthcheck'],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=SUBPROCESS_TIMEOUT,
+        env=environment,
+    )
+
+    assert probe.returncode == 1, probe.stdout
+    assert probe.stdout == '', probe.stdout
+    assert probe.stderr.startswith('cannot read the settings: '), probe.stderr
+    assert 'DJANGO_SETTINGS_MODULE' in probe.stderr, probe.stderr
+    assert 'Traceback' not in probe.stderr, probe.stderr
+
+
 def test_the_healthcheck_probe_does_not_populate_the_app_registry(tmp_path):
     """It runs on a timer in a container, and `django.setup()` costs whatever the host
     project costs.

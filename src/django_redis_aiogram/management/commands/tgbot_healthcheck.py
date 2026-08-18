@@ -18,8 +18,7 @@ from typing import Any
 
 from django.core.management import BaseCommand, CommandError
 
-from django_redis_aiogram.healthcheck import check
-from django_redis_aiogram.settings import SETTINGS_NAME
+from django_redis_aiogram.healthcheck import add_limit_flags, check
 
 
 class Command(BaseCommand):
@@ -28,25 +27,12 @@ class Command(BaseCommand):
     help = 'Exit 0 when the bot container is healthy, non-zero with a reason otherwise'
 
     def add_arguments(self, parser: ArgumentParser) -> None:
-        """Declare the two limits, both of which default to a setting."""
-        parser.add_argument(
-            '--max-queue',
-            type=int,
-            default=None,
-            help=(
-                'fail when more than this many messages are waiting; defaults to '
-                f"{SETTINGS_NAME}['HEALTHCHECK_MAX_QUEUE'], where 0 disables the limit"
-            ),
-        )
-        parser.add_argument(
-            '--max-age',
-            type=int,
-            default=None,
-            help=(
-                'fail when the consumer has not reported for this many seconds; '
-                f"defaults to three {SETTINGS_NAME}['HEARTBEAT_INTERVAL']s"
-            ),
-        )
+        """Declare the two limits, both of which default to a setting.
+
+        Taken from the module that acts on them rather than restated here: a second copy
+        of a flag is how one form ends up with a default the other does not have.
+        """
+        add_limit_flags(parser)
 
     def handle(self, *args: Any, **options: Any) -> None:
         """Report the first thing that is wrong, or that everything is fine.

@@ -18,7 +18,8 @@ from django.test import override_settings
 from redis.exceptions import ConnectionError, RedisError, ResponseError  # noqa: A004 - the point is to shadow it
 
 from django_redis_aiogram.delivery import BlpopDelivery
-from django_redis_aiogram.healthcheck import check, main
+from django_redis_aiogram.healthcheck import build_parser, check, main
+from django_redis_aiogram.management.commands.tgbot_healthcheck import Command as TgbotHealthcheck
 
 QUEUE = 'TELEGRAM_BOT_MESSAGE'
 WORKER = 'tests'
@@ -346,6 +347,91 @@ def test_a_scan_that_fails_does_not_make_the_container_unhealthy(redis_server, m
     call_command('tgbot_healthcheck', stdout=out)
 
     assert 'healthy' in out.getvalue()
+    # nothing was scanned, so there is no floor to report and nothing to hedge about
+    assert 'in flight' not in out.getvalue(), out.getvalue()
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'WORKER_NAME': 'mine'})
+def test_a_sweep_that_stops_partway_reports_what_it_did_see(redis_server, monkeypatch):
+    """A count found before the failure is worth having, said as a floor.
+
+    The old command threw it away and printed the healthy line alone, which reads as
+    *no stranded messages* — the one conclusion a partial sweep cannot support. What it
+    must not do is claim the number is complete, so the wording says `at least`.
+    """
+    redis_server.set(f'{QUEUE}:heartbeat:mine', str(int(time.time())))
+    redis_server.rpush(f'{QUEUE}:processing:gone', b'{}', b'{}')
+    rounds = []
+    real_scan = redis_server.scan
+
+    def once_then_refuse(*args, **kwargs):
+        rounds.append(1)
+        if len(rounds) > 1:
+            raise RedisError('NOPERM')
+        # a non-zero cursor, so the sweep comes back for a second round it will not get
+        return 99, real_scan(*args, **kwargs)[1]
+
+    monkeypatch.setattr(redis_server, 'scan', once_then_refuse)
+    out = StringIO()
+
+    call_command('tgbot_healthcheck', stdout=out)
+
+    printed = out.getvalue()
+    assert 'healthy' in printed, printed
+    assert 'at least 2 message(s) are in flight' in printed, printed
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'REDIS_URL': 'localhost:6379/0'})
+def test_a_url_with_no_scheme_reads_as_an_unreachable_redis():
+    """The other half of the empty-URL case, and the one the narrowing missed.
+
+    `Redis.from_url` rejects a URL without a scheme with a plain `ValueError`, so
+    catching `RedisError` and `ImproperlyConfigured` still left this one as a traceback
+    from both entry points — while `except Exception` had always reported it as a line.
+    A non-numeric `REDIS_TIMEOUT` arrives the same way.
+    """
+    report = check()
+
+    assert not report.ok
+    assert report.message.startswith('redis is unreachable: '), report.message
+
+    with pytest.raises(CommandError, match='redis is unreachable'):
+        healthcheck()
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'REDIS_TIMEOUT': 'soon'})
+def test_an_unreadable_timeout_reads_as_an_unreachable_redis():
+    """`read_timeout()` coerces the setting while the client is being built."""
+    report = check()
+
+    assert not report.ok
+    assert report.message.startswith('redis is unreachable: '), report.message
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_a_heartbeat_that_cannot_be_decoded_is_reported(redis_server, monkeypatch):
+    """`decode_responses` in a shared URL makes redis-py decode this key for us.
+
+    The settings page says one Redis often serves the cache backend too, and that is how
+    `decode_responses` gets into the URL. The bytes under the heartbeat key are then
+    decoded by the client, and a `UnicodeDecodeError` is a `ValueError` — not a
+    `RedisError`, so narrowing the guard turned a readable refusal into a traceback.
+    """
+
+    class CannotDecode:
+        def ping(self):
+            return True
+
+        def get(self, *args, **kwargs):
+            b'\xff'.decode('utf-8')
+
+        def __getattr__(self, name):
+            return getattr(redis_server, name)
+
+    monkeypatch.setattr('django_redis_aiogram.healthcheck.get_redis', CannotDecode)
+
+    with pytest.raises(CommandError, match='could not read the heartbeat'):
+        healthcheck()
 
 
 @override_settings(TELEGRAM_BOT=SETTINGS)
@@ -376,9 +462,11 @@ def test_the_container_form_neither_scans_nor_writes(redis_server, monkeypatch):
     report = check()
 
     assert report.ok, report.message
-    assert report.message.startswith('healthy: heartbeat'), report.message
     assert calls == [], f'the container form paid for {sorted(set(calls))}'
-    assert 'once' not in report.message, f'the guarantee was probed and reported: {report.message}'
+    # the whole line, not `'once' not in report.message`: `_guarantee` answers `unknown`
+    # on a read-only replica, so that substring is absent from a probe that did run
+    assert report.message == 'healthy: heartbeat 0s old, 0 queued', report.message
+    assert report.warnings == (), report.warnings
 
 
 @override_settings(TELEGRAM_BOT=SETTINGS)
@@ -387,8 +475,11 @@ def test_the_management_command_still_scans_and_reports_the_guarantee(redis_serv
 
     Without this, moving the defaults to off would silently take the guarantee line and
     the stranded warning out of a command people read by hand — which is the sort of
-    quiet removal a changelog entry cannot make up for.
+    quiet removal a changelog entry cannot make up for. Both halves are asserted on the
+    output as well as on the calls, because a `SCAN` that is issued and then not reported
+    is the same loss to the person reading it.
     """
+    redis_server.rpush(f'{QUEUE}:processing:gone', b'{}')
     calls: list[str] = []
     for name in ('scan', 'lmove'):
         original = getattr(redis_server, name)
@@ -405,6 +496,7 @@ def test_the_management_command_still_scans_and_reports_the_guarantee(redis_serv
     call_command('tgbot_healthcheck', stdout=out)
 
     assert 'at-least-once' in out.getvalue(), out.getvalue()
+    assert '1 message(s) are in flight' in out.getvalue(), out.getvalue()
     assert 'scan' in calls, f'the command stopped scanning: {calls}'
     assert 'lmove' in calls, f'the command stopped probing the guarantee: {calls}'
 
@@ -454,6 +546,24 @@ def test_a_disabled_process_is_not_unhealthy_and_is_not_reported_as_healthy():
     assert '\x1b[' not in out.getvalue(), 'the disabled line was coloured as a success'
 
 
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_a_healthy_process_is_reported_in_success_green(redis_server):
+    """The other half of the distinction `Report.checked` exists to carry.
+
+    Without this the styling could be dropped from the command outright and the suite
+    would stay green — the disabled case asserts only that *its* line is plain, which is
+    also true of a command that has stopped colouring anything. Then `checked` becomes a
+    field nothing reads.
+    """
+    redis_server.set(HEARTBEAT, str(int(time.time())))
+    out = StringIO()
+
+    call_command('tgbot_healthcheck', stdout=out, force_color=True)
+
+    assert 'healthy: heartbeat' in out.getvalue(), out.getvalue()
+    assert '\x1b[' in out.getvalue(), 'the healthy line lost its success colour'
+
+
 @override_settings(TELEGRAM_BOT={**SETTINGS, 'HEARTBEAT_INTERVAL': 10})
 def test_the_missing_heartbeat_message_names_the_limit_it_judged_by(redis_server):
     """`--max-age 600` and a message saying "within 30s" send an operator to the wrong
@@ -492,3 +602,136 @@ def test_a_probe_with_no_settings_module_says_so_instead_of_raising(monkeypatch,
     assert captured.out == '', captured.out
     assert captured.err.startswith('cannot read the settings: '), captured.err
     assert 'DJANGO_SETTINGS_MODULE' in captured.err
+
+
+@pytest.mark.parametrize('flag', ['--max-queue', '--max-age'])
+def test_both_entry_points_declare_the_same_limits(flag):
+    """One form silently defaulting differently from the other is the drift to prevent.
+
+    Both take these from `add_limit_flags`, so this fails the moment either restates a
+    flag: a reader comparing `--help` of the two forms is entitled to the same answer,
+    and `check()` owns what the default means.
+    """
+    command = TgbotHealthcheck().create_parser('manage.py', 'tgbot_healthcheck')
+
+    module_action = next(a for a in build_parser()._actions if flag in a.option_strings)
+    command_action = next(a for a in command._actions if flag in a.option_strings)
+
+    assert module_action.default is command_action.default is None
+    assert module_action.type is command_action.type is int
+    assert module_action.help == command_action.help
+
+
+def test_a_probe_with_a_mistyped_settings_module_says_so_instead_of_raising(monkeypatch, capsys):
+    """The recipe asks an operator to write that module name by hand.
+
+    A typo is then at least as likely as a missing variable, and it arrives as
+    `ModuleNotFoundError` rather than `ImproperlyConfigured` — so guarding only the
+    latter left the likelier mistake answering with a traceback.
+    """
+
+    def mistyped(*args, **kwargs):
+        raise ModuleNotFoundError("No module named 'core.settingz'")
+
+    monkeypatch.setattr('django_redis_aiogram.healthcheck.check', mistyped)
+
+    code = main([])
+
+    assert code == 1
+    captured = capsys.readouterr()
+    assert captured.out == '', captured.out
+    assert captured.err == "cannot read the settings: No module named 'core.settingz'\n", captured.err
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'WORKER_NAME': 'mine'})
+def test_the_verdict_is_flushed_before_anything_qualifies_it(redis_server, monkeypatch):
+    """`docker inspect` merges the two streams, and stdout is the buffered one.
+
+    Written to a pipe, stdout is block-buffered while stderr is not, so an unflushed
+    verdict arrives *after* the warning about it — the qualifier reaching the operator
+    ahead of the thing it qualifies.
+    """
+    redis_server.set(f'{QUEUE}:heartbeat:mine', str(int(time.time())))
+    redis_server.rpush(f'{QUEUE}:processing:gone', b'{}')
+    events = []
+
+    class Recording:
+        def __init__(self, name):
+            self.name = name
+
+        def write(self, text):
+            events.append((self.name, 'write'))
+
+        def flush(self):
+            events.append((self.name, 'flush'))
+
+    monkeypatch.setattr('sys.stdout', Recording('out'))
+    monkeypatch.setattr('sys.stderr', Recording('err'))
+
+    assert main(['--stranded']) == 0
+
+    assert events[0] == ('out', 'write'), events
+    assert ('err', 'write') in events, events
+    assert events.index(('out', 'flush')) < events.index(('err', 'write')), events
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'HEARTBEAT_INTERVAL': 'abc'})
+def test_an_unreadable_interval_is_refused_in_a_line():
+    """This entry point is the one where `manage.py check` never ran.
+
+    `E023` and `E024` catch these values — under `django.setup()`, which the container
+    form skips by design. A value like `os.environ.get('HB', '')` written straight into
+    the settings dict therefore reaches `int()` with nothing in between, and a traceback
+    from a probe is a container that says unhealthy without saying why.
+    """
+    report = check()
+
+    assert not report.ok
+    assert report.message == "TELEGRAM_BOT['HEARTBEAT_INTERVAL'] is not a number: 'abc'", report.message
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'HEALTHCHECK_MAX_QUEUE': 'lots'})
+def test_an_unreadable_queue_limit_is_refused_in_a_line():
+    """The other one read before Redis is touched. A flag still overrides it."""
+    report = check()
+
+    assert not report.ok
+    assert 'HEALTHCHECK_MAX_QUEUE' in report.message, report.message
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'HEARTBEAT_INTERVAL': 10})
+def test_a_limit_over_the_keys_ttl_says_it_cannot_be_observed(redis_server):
+    """`--max-age 60` against a key that expires at 30s can never see a stale heartbeat.
+
+    The Deployment page published exactly that recipe. Raising the limit past the TTL does
+    nothing at all unless `HEARTBEAT_INTERVAL` goes up too, and the refusal is the only
+    place an operator is looking when they find out.
+    """
+    over = check(max_age=60)
+    within = check(max_age=20)
+
+    assert not over.ok, over.message
+    assert not within.ok, within.message
+    assert 'cannot be observed anyway' in over.message, over.message
+    assert "raise TELEGRAM_BOT['HEARTBEAT_INTERVAL'] instead" in over.message, over.message
+    assert 'cannot be observed' not in within.message, within.message
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'WORKER_NAME': 'mine'})
+def test_the_sweep_matches_the_keys_workers_actually_write(redis_server):
+    """Derived from `processing_key`, not spelled out a second time.
+
+    A probe holding its own copy of the scheme keeps scanning the old one after a rename:
+    every failing test would be one that hardcodes the literal, so updating those is how
+    the rename gets done — and the probe reports no stranded messages for ever, green.
+    """
+    from django_redis_aiogram.redis import processing_key
+
+    redis_server.set(f'{QUEUE}:heartbeat:mine', str(int(time.time())))
+    redis_server.rpush(processing_key('gone'), b'{}')
+
+    report = check(stranded=True)
+
+    assert report.ok, report.message
+    assert len(report.warnings) == 1, report.warnings
+    assert '1 message(s) are in flight' in report.warnings[0], report.warnings

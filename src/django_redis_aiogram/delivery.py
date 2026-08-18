@@ -40,7 +40,15 @@ from django_redis_aiogram.enums import DeliveryKind, EventKind
 from django_redis_aiogram.envelope import Envelope, UnknownEnvelopeVersionError, unpack
 from django_redis_aiogram.events import new_correlation_id, worker_identity
 from django_redis_aiogram.recorder import Event, as_identifier, recorder
-from django_redis_aiogram.redis import as_bytes, get_redis, heartbeat_key, processing_key, queue_key
+from django_redis_aiogram.redis import (
+    as_bytes,
+    get_redis,
+    heartbeat_interval,
+    heartbeat_key,
+    heartbeat_ttl,
+    processing_key,
+    queue_key,
+)
 from django_redis_aiogram.serializers import PickleReadRefusedError, SerializationError, loads
 from django_redis_aiogram.settings import blpop_ceiling, conf
 
@@ -192,17 +200,17 @@ class Delivery(ABC):
     def heartbeat(self) -> None:
         """Say the loop is still turning, at most once per HEARTBEAT_INTERVAL.
 
-        A container cannot see a thread in another process. This key is what
-        ``tgbot_healthcheck`` reads, and refreshing it per message would be a
-        write per message, so it is paced.
+        A container cannot see a thread in another process. This key is what the
+        healthcheck reads — ``python -m django_redis_aiogram.healthcheck`` in a container,
+        ``tgbot_healthcheck`` by hand — and refreshing it per message would be a write per
+        message, so it is paced.
         """
-        interval = max(1, int(conf['HEARTBEAT_INTERVAL']))
         now = time.monotonic()
-        if now - self._beat_at < interval:
+        if now - self._beat_at < heartbeat_interval():
             return
         self._beat_at = now
         try:
-            get_redis().set(self.heartbeat_key, str(int(time.time())), ex=interval * 3)
+            get_redis().set(self.heartbeat_key, str(int(time.time())), ex=heartbeat_ttl())
         except Exception:
             # the loop must keep consuming even when it cannot say so
             logger.exception('could not write the heartbeat', extra={'tg_key': self.heartbeat_key})
@@ -252,7 +260,7 @@ class Delivery(ABC):
 
         The wait keeps writing the heartbeat, for the same reason ``run()`` caps
         the blocking pop at ``HEARTBEAT_INTERVAL``: a worker at its limit is busy,
-        not dead. Held silently past the key's ``interval * 3`` TTL it would be
+        not dead. Held silently past the key's :func:`heartbeat_ttl` it would be
         restarted while healthy, and the messages it was still sending reclaimed
         and sent again.
         """

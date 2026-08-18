@@ -96,6 +96,36 @@ never export it.
 See **[[Deployment]]**. Raising `timeout:` also stops the killing and leaves your whole
 Django app being imported twice a minute to read two keys.
 
+## What the healthcheck's refusals mean
+
+Every line below is what the probe writes to stderr before exiting 1, from either form.
+Grepping one out of `docker inspect` should land here.
+
+| The line | What it is telling you |
+| --- | --- |
+| `redis is unreachable: …` | The client could not be built or could not `PING`. Covers a missing or malformed `REDIS_URL` and an unreadable `REDIS_TIMEOUT` as well as a Redis that is genuinely down — the probe cannot tell a server it cannot reach from one it cannot address |
+| `TELEGRAM_BOT['…'] is not a number: …` | `HEARTBEAT_INTERVAL` or `HEALTHCHECK_MAX_QUEUE` holds something `int()` refuses. `manage.py check` reports these as `E023`/`E024`, but the container form never runs it — that is the point of it — so it says so itself |
+| `cannot read the settings: …` | `DJANGO_SETTINGS_MODULE` is missing from the container's environment, or names a module that does not import. See the section above |
+| `no heartbeat at …: the consumer has not written one within Ns, or it never started` | The key is absent: the consumer never ran, died before its first beat, or has been silent longer than the key's TTL. If the line adds that a limit over the TTL cannot be observed, `--max-age` is set above `3 × HEARTBEAT_INTERVAL` and is doing nothing |
+| `the consumer last reported Ns ago, over the Ns limit` | The key is there and stale. The consumer thread is stuck or gone while the process lives — the failure this probe exists for |
+| `the heartbeat at … is not a timestamp` | Something else writes to that key. Give the worker its own `REDIS_MESSAGES_KEY`, or its own database |
+| `could not read the heartbeat: …` | `PING` answered and the next command did not: a failover in between, a replica that cannot serve the key, or `decode_responses` in a URL shared with a cache backend meeting bytes it cannot decode |
+| `could not read the queue length: …` | The same, one command later |
+| `N messages are queued, over the limit of N` | Work is backing up. `HEALTHCHECK_MAX_QUEUE` or `--max-queue` is what set that number; see **Messages pile up in Redis** above |
+
+Two lines are not refusals and do not change the exit code:
+
+| The line | What it is telling you |
+| --- | --- |
+| `N message(s) are in flight under other worker names …` | Written to stderr while still exiting 0, and only with `--stranded`. Another worker may be sending them this second; if it is gone, `manage.py tgbot_reclaim --worker <name>` requeues them. `at least N` means the bounded sweep stopped early, so the count is a floor |
+| `disabled in this process; nothing to check` | `ENABLED` is off here, so nothing is meant to be running and nothing is wrong. Exit 0, and deliberately not coloured as a success |
+
+Two more reach the log rather than the output — both mean the probe declined to answer
+that part rather than fail the container over it:
+
+- `could not scan for stranded in-flight lists`
+- `could not establish which delivery guarantee is in force`
+
 ## Handlers never fire
 
 ```python

@@ -61,9 +61,37 @@ def processing_key(worker: str | None = None) -> str:
     return f'{queue_key()}:processing:{worker or worker_identity()}'
 
 
+def processing_pattern() -> str:
+    """Match every worker's in-flight list, this one included.
+
+    Derived from :func:`processing_key` rather than spelled out again: the healthcheck
+    scans for these, and a probe that re-wrote the scheme by hand would keep scanning the
+    old one after a rename — silently reporting no stranded messages for ever, with the
+    suite green because the tests that hold the literal would have been updated.
+    """
+    return processing_key('*')
+
+
 def heartbeat_key(worker: str | None = None) -> str:
     """Where one worker says it is still turning. Per worker, like the list above."""
     return f'{queue_key()}:heartbeat:{worker or worker_identity()}'
+
+
+def heartbeat_interval() -> int:
+    """How often the consumer refreshes that key, never below a second."""
+    return max(1, int(conf['HEARTBEAT_INTERVAL']))
+
+
+def heartbeat_ttl(interval: int | None = None) -> int:
+    """How long the key survives without a refresh: three intervals.
+
+    One place, because it is also a ceiling on what any reader can observe. A probe given
+    `--max-age` above this can never see a stale heartbeat — the key is simply gone — so
+    the two numbers have to be derived from each other rather than agreed on by hand in
+    the writer, the probe and three pages of the wiki. Takes an interval so a caller that
+    has already read and vetted the setting does not read it twice.
+    """
+    return (heartbeat_interval() if interval is None else interval) * 3
 
 
 def build_client() -> Redis:

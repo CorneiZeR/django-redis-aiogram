@@ -83,7 +83,7 @@ which carries outbound messages in both modes — see **[[Webhook]]**.
 | `MAX_IN_FLIGHT` | `0` | Sends the consumer leaves in flight before it stops taking messages; `0` is no bound |
 | `REQUIRE_CRASH_SAFE` | `False` | Refuse to start where a message cannot survive the worker being killed mid-send |
 | `REDIS_TIMEOUT` | `10` | Seconds a single Redis call may take before the server counts as gone |
-| `HEARTBEAT_INTERVAL` | `10` | Seconds between the consumer's reports; the key lives three times as long |
+| `HEARTBEAT_INTERVAL` | `10` | Seconds between the consumer's reports; the key lives three times as long, which is also the most `--max-age` can observe |
 | `HEALTHCHECK_MAX_QUEUE` | `0` | Longest queue still considered healthy; the check fails only above it, and `0` disables it |
 | `SERIALIZER` | `'json'` | `'json'` or `'pickle'` — see **[[Serialization]]** |
 | `ALLOW_PICKLE` | `False` | Let the reader accept pickled payloads. Needed to *read* them at all, and needed alongside `SERIALIZER: 'pickle'` to write them. Unpickling queue data is code execution, so only on a queue nothing untrusted can write to |

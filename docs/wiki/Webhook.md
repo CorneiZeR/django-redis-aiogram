@@ -156,7 +156,9 @@ the dispatcher. Redis carries outbound messages only, in both modes.
 
 ## Health
 
-`tgbot_healthcheck` reads the consumer's heartbeat, so in webhook mode it
-answers for the `start_tgbot` worker rather than for the web process — the
-worker still runs the queue consumer, it just does not poll. See
-**[[Deployment]]**.
+The healthcheck reads the consumer's heartbeat — `python -m
+django_redis_aiogram.healthcheck` in a container, `manage.py tgbot_healthcheck`
+by hand — so in webhook mode it answers for the `start_tgbot` worker rather than
+for the web process: the worker still runs the queue consumer, it just does not
+poll. Do not point it at the web service, which writes no heartbeat and would
+read unhealthy for ever. See **[[Deployment]]**.

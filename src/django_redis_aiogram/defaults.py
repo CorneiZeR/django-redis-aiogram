@@ -56,8 +56,9 @@ DEFAULTS: dict[str, Any] = {
     # mid-send, rather than running at-most-once without saying so
     'REQUIRE_CRASH_SAFE': False,
     'REDIS_TIMEOUT': 10,
-    # how often the consumer refreshes the key `tgbot_healthcheck` reads. The key
-    # lives three times as long, so one missed refresh is not a failure
+    # how often the consumer refreshes the key the healthcheck reads. The key lives
+    # three times as long, so one missed refresh is not a failure — and that TTL is
+    # also the most `--max-age` can ever observe
     'HEARTBEAT_INTERVAL': 10,
     # a queue longer than this fails the healthcheck; 0 turns the check off
     'HEALTHCHECK_MAX_QUEUE': 0,

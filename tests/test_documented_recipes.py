@@ -295,3 +295,60 @@ def test_the_deployment_healthcheck_recipe_names_a_runnable_module():
     # `python -m` needs the guard, not just the function
     source = pathlib.Path(module.__file__).read_text(encoding='utf-8')
     assert "if __name__ == '__main__':" in source, 'the module cannot be run with python -m'
+
+
+@pytest.mark.parametrize('page_name', ['Deployment', 'Troubleshooting'])
+def test_every_published_healthcheck_carries_the_settings_module(page_name):
+    """A recipe that omits `DJANGO_SETTINGS_MODULE` reads unhealthy forever.
+
+    The probe is a separate process and the conventional `manage.py` sets that variable
+    with `os.environ.setdefault(...)` inside its own, so a container that runs `manage.py`
+    need never export it. Omitting it from a compose snippet costs the reader their whole
+    healthcheck, in the one place they have no reason to doubt. Pinned per page, because
+    the pages are copied from independently.
+    """
+    page = (pathlib.Path(__file__).resolve().parent.parent / 'docs' / 'wiki' / f'{page_name}.md').read_text(
+        encoding='utf-8'
+    )
+
+    blocks = [block for block in page.split('```') if 'django_redis_aiogram.healthcheck' in block]
+    assert blocks, f'{page_name} publishes no healthcheck recipe any more'
+    for block in blocks:
+        assert 'DJANGO_SETTINGS_MODULE' in block, (
+            f'a healthcheck recipe on {page_name} omits the one variable the probe cannot run without'
+        )
+
+
+#: fragments of what the probe writes, stable across the interpolated parts. Held here as
+#: well as in the source and on the page on purpose: rewording a refusal has to touch all
+#: three, which is the only thing that keeps the catalogue on Troubleshooting true
+PROBE_REFUSALS = (
+    'redis is unreachable',
+    'is not a number',
+    'cannot read the settings',
+    'the consumer has not written one within',
+    'is not a timestamp',
+    'could not read the heartbeat',
+    'could not read the queue length',
+    'messages are queued, over the limit of',
+    'message(s) are in flight under',
+    'disabled in this process; nothing to check',
+    'could not scan for stranded in-flight lists',
+    'could not establish which delivery guarantee is in force',
+)
+
+
+@pytest.mark.parametrize('fragment', PROBE_REFUSALS)
+def test_every_line_the_probe_prints_is_catalogued(fragment):
+    """An operator greps the line out of `docker inspect`; the page has to have it.
+
+    Eleven of these were documented nowhere. Asserted in both directions — the fragment
+    has to be in the source *and* on the page — so a reworded message cannot leave the
+    catalogue quietly describing a line the probe no longer prints.
+    """
+    root = pathlib.Path(__file__).resolve().parent.parent
+    source = (root / 'src' / 'django_redis_aiogram' / 'healthcheck.py').read_text(encoding='utf-8')
+    page = (root / 'docs' / 'wiki' / 'Troubleshooting.md').read_text(encoding='utf-8')
+
+    assert fragment in source, 'the probe no longer says this; the page and this list still do'
+    assert fragment in page, 'Troubleshooting does not catalogue a line the probe prints'
