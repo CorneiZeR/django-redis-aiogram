@@ -31,6 +31,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 
+from django.core.exceptions import ImproperlyConfigured
 from redis import Redis
 from redis.exceptions import RedisError, ResponseError
 
@@ -56,6 +57,10 @@ class Report:
     ok: bool
     message: str
     warnings: tuple[str, ...] = field(default_factory=tuple)
+    #: whether anything was actually examined. False only when this process is
+    #: disabled, which is not a verdict about the bot — and is why the management
+    #: command reports that one plainly rather than in success green, as it always has
+    checked: bool = True
 
 
 class _UnhealthyError(Exception):
@@ -70,11 +75,20 @@ class _UnhealthyError(Exception):
 
 
 def _connected() -> Redis:
-    """Return the shared connection, having proved it answers."""
+    """Return the shared connection, having proved it answers.
+
+    ``ImproperlyConfigured`` is caught beside ``RedisError`` because an empty
+    ``REDIS_URL`` is what :func:`~django_redis_aiogram.redis.build_client` raises on,
+    and from a probe's point of view a connection it cannot build is a Redis it cannot
+    reach — which is what this command has always said about it. Narrowing to
+    ``RedisError`` alone turned that readable line into a traceback and, in the
+    management command, into an ``ImproperlyConfigured`` where a ``CommandError``
+    belongs.
+    """
     try:
         connection = get_redis()
         connection.ping()
-    except RedisError as error:
+    except (RedisError, ImproperlyConfigured) as error:
         msg = f'redis is unreachable: {error}'
         raise _UnhealthyError(msg) from error
     return connection
@@ -143,7 +157,7 @@ def check(
     """
     if not coerce_bool(conf['ENABLED'], f"{SETTINGS_NAME}['ENABLED']"):
         # nothing is meant to be running here, so nothing is wrong
-        return Report(ok=True, message='disabled in this process; nothing to check')
+        return Report(ok=True, message='disabled in this process; nothing to check', checked=False)
 
     interval = max(1, int(conf['HEARTBEAT_INTERVAL']))
     age_limit = interval * 3 if max_age is None else max_age

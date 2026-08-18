@@ -195,9 +195,9 @@ them, so it is not one per message.
 
   `ping`, `GET` and `LLEN` are now guarded by `except RedisError` rather than
   `except Exception`, which is what the two later stages already used. That narrowing
-  showed the suite's own fakes were raising Python's builtin `ConnectionError` — which
+  showed the suite's own fakes were raising Python's built-in `ConnectionError` — which
   no real client produces, since redis-py's subclasses `RedisError` and not the
-  builtin.
+  built-in one.
 
 ### Added
 

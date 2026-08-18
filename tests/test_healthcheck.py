@@ -11,9 +11,9 @@ import pytest
 from django.core.management import CommandError, call_command
 from django.test import override_settings
 
-# redis-py's own ConnectionError, not the builtin: it subclasses `RedisError` and the
-# builtin does not, so a fake raising the builtin was pretending to be a failure no
-# real client produces — which `except Exception` in the probe used to hide
+# redis-py's own ConnectionError, not the built-in one: it subclasses `RedisError` and
+# the built-in does not, so a fake raising the built-in was pretending to be a failure
+# no real client produces — which `except Exception` in the probe used to hide
 from redis.exceptions import ConnectionError, RedisError, ResponseError  # noqa: A004 - the point is to shadow it
 
 from django_redis_aiogram.delivery import BlpopDelivery
@@ -365,6 +365,7 @@ def test_the_container_form_neither_scans_nor_writes(redis_server, monkeypatch):
         original = getattr(redis_server, name)
 
         def recording(*args, _name=name, _original=original, **kwargs):
+            """Note that this command was issued, then let it through."""
             calls.append(_name)
             return _original(*args, **kwargs)
 
@@ -392,6 +393,7 @@ def test_the_management_command_still_scans_and_reports_the_guarantee(redis_serv
         original = getattr(redis_server, name)
 
         def recording(*args, _name=name, _original=original, **kwargs):
+            """Note that this command was issued, then let it through."""
             calls.append(_name)
             return _original(*args, **kwargs)
 
@@ -404,3 +406,48 @@ def test_the_management_command_still_scans_and_reports_the_guarantee(redis_serv
     assert 'at-least-once' in out.getvalue(), out.getvalue()
     assert 'scan' in calls, f'the command stopped scanning: {calls}'
     assert 'lmove' in calls, f'the command stopped probing the guarantee: {calls}'
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'REDIS_URL': ''})
+def test_a_missing_redis_url_reads_as_an_unreachable_redis():
+    """A connection that cannot be built is a Redis this probe cannot reach.
+
+    `build_client` raises `ImproperlyConfigured` on an empty `REDIS_URL`, which is not a
+    `RedisError` — so narrowing the guard from `except Exception` turned a readable line
+    into a traceback, and turned the command's `CommandError` into an
+    `ImproperlyConfigured`. The old wording is what this asserts, because it is what a
+    consumer's compose logs have shown for three releases.
+    """
+    report = check()
+
+    assert not report.ok
+    assert report.message.startswith('redis is unreachable: '), report.message
+    assert 'REDIS_URL' in report.message
+
+    with pytest.raises(CommandError, match='redis is unreachable'):
+        healthcheck()
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'ENABLED': False})
+def test_a_disabled_process_is_not_unhealthy_and_is_not_reported_as_healthy():
+    """Documented on the Deployment page and, until now, tested nowhere.
+
+    Two things about it. It exits 0, because nothing is meant to be running here — and
+    it says so *plainly*: the message goes through `self.style.SUCCESS` for a healthy
+    bot and must not for this one, which examined nothing. `Report.checked` carries that
+    distinction rather than the wrapper sniffing the string.
+    """
+    report = check()
+
+    assert report.ok, report.message
+    assert report.checked is False, 'a disabled process examined nothing, so it cannot claim to have'
+    assert report.message == 'disabled in this process; nothing to check'
+
+    out = StringIO()
+    # force_color, not no_color=False: `self.style` is a no-op when the stream is not a
+    # tty, so a StringIO cannot tell a styled write from a plain one otherwise — which
+    # is how the first version of this test passed with the styling put back
+    call_command('tgbot_healthcheck', stdout=out, force_color=True)
+
+    assert out.getvalue().strip() == report.message, repr(out.getvalue())
+    assert '\x1b[' not in out.getvalue(), 'the disabled line was coloured as a success'

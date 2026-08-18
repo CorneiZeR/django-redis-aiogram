@@ -64,6 +64,8 @@ class Command(BaseCommand):
         )
         if not report.ok:
             raise CommandError(report.message)
-        self.stdout.write(self.style.SUCCESS(report.message))
+        # plain when nothing was examined: a disabled process is not a healthy bot, and
+        # this command has never coloured that line green
+        self.stdout.write(self.style.SUCCESS(report.message) if report.checked else report.message)
         for warning in report.warnings:
             self.stdout.write(self.style.WARNING(warning))

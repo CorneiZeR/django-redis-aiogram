@@ -354,6 +354,7 @@ def test_threads_racing_for_the_bot_all_get_the_same_one(monkeypatch):
     errors: list[BaseException] = []
 
     def grab():
+        """Wait at the barrier with the others, then take the shared bot."""
         try:
             gate.wait(timeout=10)
             seen.append(django_redis_aiogram.bot)
