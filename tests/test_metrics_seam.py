@@ -60,11 +60,19 @@ def collected():
         seen.extend(events)
 
     events_recorded.connect(receiver, weak=False, dispatch_uid='tests.metrics')
+    # several of these tests drive a failing write on purpose, which leaves a real
+    # drop counted — and the next successful flush then records a `log.dropped` row,
+    # correctly, in whichever test happens to run next. Cleared at both ends so each
+    # one starts from zero rather than from its predecessor's failures
+    with recorder._counter:
+        recorder._dropped = 0
     try:
         yield seen
     finally:
         events_recorded.disconnect(dispatch_uid='tests.metrics')
         recorder.stop(timeout=5)
+        with recorder._counter:
+            recorder._dropped = 0
 
 
 def kinds(events):
@@ -512,3 +520,29 @@ def test_the_last_events_before_shutdown_still_reach_a_receiver(redis_server, co
     assert kinds(collected) == ['outbound.queued'], f'the abandoned batch was lost: {kinds(collected)}'
     assert on_thread == [threading.current_thread().name], f'it ran on {on_thread}, not the calling thread'
     assert WRITER_THREAD not in on_thread, 'the writer was gone, so it cannot have run there'
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'EVENT_LOG_SYNC': True})
+def test_the_synchronous_flag_does_nothing_for_a_receiver_only_process(redis_server, collected):
+    """`EVENT_LOG_SYNC` is about *where the insert happens*, so with nothing being
+    inserted it has nothing to say.
+
+    Left checking only its own flag, a process with receivers and no table would run
+    them on the thread that recorded the event — inside the send path, which is the
+    one thing this design exists to avoid. So the flag requires the log as well, and
+    receivers still arrive on the writer's thread here.
+    """
+    on_thread = []
+    events_recorded.connect(
+        lambda sender, events, **kwargs: on_thread.append(threading.current_thread().name),
+        weak=False,
+        dispatch_uid='tests.metrics.syncthread',
+    )
+    try:
+        TelegramBot().send_redis(chat_id=7, text='hi')
+        recorder.flush(timeout=5)
+    finally:
+        events_recorded.disconnect(dispatch_uid='tests.metrics.syncthread')
+
+    assert kinds(collected) == ['outbound.queued'], f'the receiver saw {kinds(collected)}'
+    assert on_thread == [WRITER_THREAD], f'ran on {on_thread} rather than the writer thread'

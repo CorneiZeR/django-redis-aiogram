@@ -235,8 +235,10 @@ TelegramEvent.objects.filter(chat_id=chat_id).order_by('-id')[:50]
 
 `events_recorded` is the metrics seam: a `django.dispatch.Signal` fired once per
 batch with the `Event` objects in it, from the event writer's own thread — except
-under `EVENT_LOG_SYNC` and at shutdown, where there is no writer thread to run on
-and receivers run on the thread that recorded the event or called `close()`. It fires whether or not `EVENT_LOG` is on, which is
+under `EVENT_LOG_SYNC` and at shutdown, where there is no writer thread to run on:
+there they run on the thread that recorded the event, or the one that called
+`recorder.stop()` — which is not `bot.close()`, documented above, but the event
+writer's own shutdown. It fires whether or not `EVENT_LOG` is on, which is
 the point: counting what the bot does and keeping a row for it are separate
 decisions. `Event`'s field names are pinned by `tests/test_public_surface.py` and
 are therefore API.

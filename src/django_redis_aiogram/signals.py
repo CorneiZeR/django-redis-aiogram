@@ -57,7 +57,9 @@ from django.dispatch import Signal
 #: Two cases run somewhere else, both because there is no writer thread to run on:
 #:
 #: * under ``EVENT_LOG_SYNC``, on the thread that recorded the event, after its
-#:   insert — that flag is for tests, and this is one more reason it is
+#:   write attempt. That flag only takes effect with the log on — there is nothing
+#:   to insert synchronously otherwise — so there the write is always attempted, and
+#:   may still fail. It is for tests, and this is one more reason it is
 #: * at shutdown, on whichever thread called ``stop()``, for whatever the writer had
 #:   not drained. Those events are published rather than dropped because they are the
 #:   last ones before the process goes, and there is by then no writer left to hand

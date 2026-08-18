@@ -249,8 +249,9 @@ them, so it is not one per message.
   recording itself fell behind and is exempt in both directions, since a deployment
   that filtered it out would read the hole as quiet traffic.
 
-  Receivers see the batch **after** it has been written, and get it as a tuple. Both
-  are containment rather than convenience: they were handed the same list and the
+  Receivers see the batch **after** its write has been attempted — and only attempted:
+  with the log off there is nothing to write, and a failed write publishes anyway. They
+  get it as a tuple. Both are containment rather than convenience: they were handed the same list and the
   same `Event` objects the ORM was about to read, and a frozen dataclass does not
   freeze the `detail` dict inside it — so a receiver clearing the list or editing a
   `detail` could change what got persisted, and one receiver could decide what the
