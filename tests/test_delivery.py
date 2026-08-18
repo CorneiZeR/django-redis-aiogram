@@ -403,3 +403,34 @@ def test_concurrent_first_sends_share_one_event_loop(monkeypatch):
     assert len({id(loop) for loop in seen}) == 1
     for loop in created:
         loop.close()
+
+
+@override_settings(
+    TELEGRAM_BOT={'DELIVERY': 'blpop', 'BLPOP_TIMEOUT': 30, 'HEARTBEAT_INTERVAL': 4, 'REDIS_TIMEOUT': 60}
+)
+def test_the_consumer_pops_for_what_the_shared_ceiling_says(redis_server, monkeypatch):
+    """W004 describes a cap; this is what makes the description true.
+
+    The check tests prove `check_settings()` reports the right number. They cannot
+    prove `run()` uses it — reverted to arithmetic of its own, every one of them still
+    passes while the warning and the consumer disagree, which is the exact defect the
+    shared helper was introduced to remove.
+
+    Asked of the call: `blmove` records the timeout it was given. Four here rather
+    than thirty, because the heartbeat binds.
+    """
+    asked: list[int] = []
+
+    def record_and_stop(source, destination, timeout, *args, **kwargs):
+        asked.append(timeout)
+        delivery.stop()
+
+    # on the instance, not the type: patching the class leaves `self` as the first
+    # positional, and the timeout would be read out of the wrong argument
+    monkeypatch.setattr(redis_server, 'blmove', record_and_stop, raising=False)
+    delivery = BlpopDelivery(handler=lambda **kwargs: None)
+    thread = delivery.start_thread()
+    thread.join(timeout=5)
+
+    assert asked, 'the consumer never popped, so nothing is being tested'
+    assert asked[0] == 4, f'popped for {asked[0]}s while the ceiling says 4'

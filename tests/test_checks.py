@@ -404,6 +404,33 @@ def test_a_pop_capped_by_the_read_deadline_names_that_instead():
         'REDIS_URL': 'redis://x',
     }
 )
+@override_settings(
+    TELEGRAM_BOT={
+        'BLPOP_TIMEOUT': 30,
+        'HEARTBEAT_INTERVAL': 9,
+        'REDIS_TIMEOUT': 10,
+        'TOKEN': '1:x',
+        'REDIS_URL': 'redis://x',
+    }
+)
+def test_a_tie_between_the_two_limits_names_both():
+    """A hint that names one of two tied limits sends the operator on a round trip.
+
+    `HEARTBEAT_INTERVAL` at 9 and `REDIS_TIMEOUT` at 10 both produce a ceiling of 9.
+    Raise the heartbeat alone and `REDIS_TIMEOUT - 1` still caps at 9, so the warning
+    comes back unchanged — which is the same defect this whole rule was fixed for, one
+    level down.
+    """
+    reported = [message for message in check_settings() if str(message.id).endswith('W004')]
+
+    assert reported, 'a tied cap was not reported at all'
+    assert 'caps at 9' in reported[0].msg, reported[0].msg
+    hint = reported[0].hint or ''
+    assert 'HEARTBEAT_INTERVAL' in hint, hint
+    assert 'REDIS_TIMEOUT' in hint, hint
+    assert 'both have to move' in hint, hint
+
+
 def test_a_pop_exactly_at_the_cap_is_not_reported():
     """Equal is not over. The consumer runs it at ten, which is what was asked for, so
     warning here would be the "fires on a working install" defect in miniature."""

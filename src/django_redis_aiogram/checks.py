@@ -423,10 +423,12 @@ def _a_pop_inside_the_deadline(key: str) -> list[Problem]:
         return []  # E014, E023 and E030 own the type complaints
     if asked <= ceiling.seconds:
         return []
+    named = ' and '.join(f"{SETTINGS_NAME}['{key}']" for key in ceiling.bound_by)
+    binds = 'which is what binds it' if len(ceiling.bound_by) == 1 else 'which both bind it, so both have to move'
     return [
         Problem(
             f'is {asked}, which the consumer caps at {ceiling.seconds}.',
-            hint=f"Raise {SETTINGS_NAME}['{ceiling.bound_by}'], which is what binds it, or lower this.",
+            hint=f'Raise {named}, {binds}, or lower this.',
         )
     ]
 

@@ -152,10 +152,15 @@ conf = Settings()
 
 @dataclass(frozen=True)
 class PopCeiling:
-    """How long a blocking pop may actually wait, and which setting decided that."""
+    """How long a blocking pop may actually wait, and which settings decided that.
+
+    ``bound_by`` is a tuple because the limits can tie: ``HEARTBEAT_INTERVAL`` at 9
+    beside ``REDIS_TIMEOUT`` at 10 both produce 9, and naming one of them sends an
+    operator to raise it and meet the same warning again, unchanged.
+    """
 
     seconds: int
-    bound_by: str
+    bound_by: tuple[str, ...]
 
 
 def blpop_ceiling() -> PopCeiling:
@@ -172,13 +177,17 @@ def blpop_ceiling() -> PopCeiling:
     costs nothing.
 
     ``bound_by`` is what makes a hint actionable: told only that the pop is capped, an
-    operator raises ``REDIS_TIMEOUT`` when it was the heartbeat that bound it.
+    operator raises ``REDIS_TIMEOUT`` when it was the heartbeat that bound it — and
+    when the two tie, raising either one alone changes nothing at all.
     """
-    interval = max(1, int(conf['HEARTBEAT_INTERVAL']))
-    deadline = max(1, int(conf['REDIS_TIMEOUT'])) - 1
-    if interval <= deadline:
-        return PopCeiling(seconds=max(1, interval), bound_by='HEARTBEAT_INTERVAL')
-    return PopCeiling(seconds=max(1, deadline), bound_by='REDIS_TIMEOUT')
+    limits = {
+        'HEARTBEAT_INTERVAL': max(1, int(conf['HEARTBEAT_INTERVAL'])),
+        'REDIS_TIMEOUT': max(1, max(1, int(conf['REDIS_TIMEOUT'])) - 1),
+    }
+    seconds = min(limits.values())
+    # every setting sitting at the minimum, not the first one found: a tie means both
+    # have to move, and a hint naming one of them is a round trip that achieves nothing
+    return PopCeiling(seconds=seconds, bound_by=tuple(key for key, value in limits.items() if value == seconds))
 
 
 def _reset_on_setting_change(

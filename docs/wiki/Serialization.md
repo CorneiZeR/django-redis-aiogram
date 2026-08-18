@@ -87,24 +87,43 @@ Class lookup is limited to `aiogram.types` members that subclass
 ## Why not a faster JSON library
 
 Asked often enough to be worth answering with a number rather than a preference.
-Measured on a realistic queued send — a `send_message` with a chat id and a
-thirty-character body, 193 bytes encoded:
+
+**The bench.** One realistic queued send — `send_message` with a chat id and a
+thirty-character body — packed into an envelope with a fixed correlation id and
+timestamp, so the payload is byte-stable between runs:
+
+```python
+payload = pack(
+    'send_message',
+    {'chat_id': 12345, 'text': 'hello there, a realistic message'},
+    uuid.UUID('11111111-1111-1111-1111-111111111111'),
+    1700000000.0,
+)
+```
+
+`timeit`, 200 000 calls, per-call mean, CPython 3.13.14 on arm64 macOS. The encoded
+payload is 202 bytes.
 
 | | |
 | --- | --- |
-| this package's `dumps`, end to end | **0.91 µs** |
-| `json.dumps` alone on the same payload | 1.01 µs |
+| `get_serializer().dumps(payload)` | **0.90 µs** |
+| `json.dumps(payload)` — same output, default separators | 0.81 µs |
+| `json.dumps(payload, separators=(',', ':'))` — 190 bytes, different output | 1.03 µs |
 
-The encoder is already *below* the cost of a bare `json.dumps` call, because it
-encodes in one pass through a prepared `JSONEncoder` rather than rebuilding the
-structure and then encoding the copy. So the whole of what a faster library could
-win is about a microsecond — against a Redis round trip measured at 14 µs and a
-Telegram HTTPS call measured in tens of milliseconds.
+So the tagging encoder costs about **0.09 µs** over a bare `json.dumps` producing the
+same bytes: that is the price of `default` being available to encode aiogram models,
+and it is the whole of what a faster library has to beat *plus* the 0.81 µs underneath
+it. Against a Redis round trip measured at 14 µs and a Telegram call in tens of
+milliseconds, a microsecond per message is not the thing to spend a dependency on —
+and `orjson` would also change what is representable, since it has its own rules about
+`dict` keys and subclasses while the tagging here depends on `default` being called
+for exactly the types it registers.
 
-`orjson` would also change what is representable: it has its own opinions about
-`dict` keys and subclasses, and this package's tagging depends on `default` being
-called for exactly the types it registers. A dependency, a compiled wheel on every
-platform, and a new failure mode, for a microsecond a queue write does not notice.
+The third row is worth knowing for a different reason: this package encodes with
+Python's **default** separators, so a payload carries about 6% more bytes than it
+needs to. Cheap to change and deliberately not changed here — it would rewrite every
+queued payload's bytes, which is a decision for a release that is thinking about
+storage rather than one closing out its checks.
 
 ## Pickle, the escape hatch
 

@@ -352,12 +352,15 @@ them, so it is not one per message.
   outside Django, where `django.setup()` has not already paid for both modules —
   inside one the figure is 0.088 ms either way. The guarantee the lock used to give is
   pinned by eight threads on a barrier asserting they get one instance.
-- **`orjson` is not coming, and here is the number.** This package's `dumps` measures
-  0.91 µs end to end on a realistic 193-byte send, against 1.01 µs for a bare
-  `json.dumps` on the same payload — the encoder is already below that, because it
-  encodes in one pass rather than rebuilding the structure first. A faster library
-  could win about a microsecond, against a 14 µs Redis round trip. Recorded on the
-  Serialization page so the question stops being reopened.
+- **`orjson` is not coming, and here is the number.** On a fixed 202-byte send,
+  `timeit` over 200 000 calls on CPython 3.13.14: this package's `dumps` is **0.90 µs**
+  and a bare `json.dumps` producing the same bytes is **0.81 µs**. So the tagging
+  encoder costs about 0.09 µs, and a faster library has to beat that plus the 0.81 µs
+  underneath it — roughly a microsecond in total, against a 14 µs Redis round trip and
+  a Telegram call in tens of milliseconds. `orjson` would also change what is
+  representable, since the tagging depends on `default` being called for exactly the
+  types it registers. The bench, the payload and the platform are on the Serialization
+  page so the question stops being reopened.
 
 ### Infrastructure
 

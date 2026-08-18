@@ -157,16 +157,25 @@ def test_importing_the_package_pulls_nothing_third_party():
     A delta rather than an absolute set: a `.pth` file in site-packages can import
     anything it likes before this script runs, so what was already loaded says nothing
     about what the package is responsible for.
+
+    The stdlib is subtracted from that delta, which is right for third parties and
+    blind to two modules that mattered: `typing` and `threading` were 1.270 ms of the
+    1.420 ms this import used to cost, and re-adding either would have passed here
+    unnoticed. They are named explicitly below, out of the raw delta.
     """
     script = textwrap.dedent("""
         import sys
 
         before = set(sys.modules)
         import django_redis_aiogram
-        pulled = {name.split('.')[0] for name in set(sys.modules) - before}
+        delta = set(sys.modules) - before
+        pulled = {name.split('.')[0] for name in delta}
         pulled -= sys.stdlib_module_names | {'django_redis_aiogram'}
 
         assert not pulled, f'importing the package pulled {sorted(pulled)}'
+        # out of the raw delta, so the stdlib subtraction above cannot hide them
+        assert 'typing' not in delta, 'the package imported typing again'
+        assert 'threading' not in delta, 'the package imported threading again'
         assert django_redis_aiogram.__version__
 
         _ = django_redis_aiogram.bot
@@ -319,7 +328,7 @@ def test_connecting_a_metrics_receiver_pulls_neither_aiogram_nor_the_orm():
     assert 'cheap seam ok' in result.stdout
 
 
-def test_threads_racing_for_the_bot_all_get_the_same_one():
+def test_threads_racing_for_the_bot_all_get_the_same_one(monkeypatch):
     """The guarantee that replaced an explicit lock, so it needs holding down.
 
     Two instances mean two event loops and two HTTP sessions, and `loop_lock` — which
@@ -334,9 +343,11 @@ def test_threads_racing_for_the_bot_all_get_the_same_one():
     import django_redis_aiogram
 
     # forget both the cached attribute and the module whose body builds it, so this
-    # really is a first access rather than a read of what an earlier test left
-    django_redis_aiogram.__dict__.pop('bot', None)
-    sys.modules.pop('django_redis_aiogram._singleton', None)
+    # really is a first access rather than a read of what an earlier test left — and
+    # through monkeypatch, so the next test does not inherit the instance built here
+    # while every test before it holds the original
+    monkeypatch.delattr(django_redis_aiogram, 'bot', raising=False)
+    monkeypatch.delitem(sys.modules, 'django_redis_aiogram._singleton', raising=False)
 
     gate = threading.Barrier(8)
     seen: list[object] = []
