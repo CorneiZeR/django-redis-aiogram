@@ -627,12 +627,16 @@ def test_a_probe_with_a_mistyped_settings_module_says_so_instead_of_raising(monk
 
     A typo is then at least as likely as a missing variable, and it arrives as
     `ModuleNotFoundError` rather than `ImproperlyConfigured` — so guarding only the
-    latter left the likelier mistake answering with a traceback.
+    latter left the likelier mistake answering with a traceback. Raised with `name=`,
+    which is what the import machinery sets and what tells this apart from the case
+    below; the first version of this test left it unset and so asserted on a shape no
+    real failure has.
     """
 
     def mistyped(*args, **kwargs):
-        raise ModuleNotFoundError("No module named 'core.settingz'")
+        raise ModuleNotFoundError("No module named 'core.settingz'", name='core.settingz')
 
+    monkeypatch.setenv('DJANGO_SETTINGS_MODULE', 'core.settingz')
     monkeypatch.setattr('django_redis_aiogram.healthcheck.check', mistyped)
 
     code = main([])
@@ -641,6 +645,60 @@ def test_a_probe_with_a_mistyped_settings_module_says_so_instead_of_raising(monk
     captured = capsys.readouterr()
     assert captured.out == '', captured.out
     assert captured.err == "cannot read the settings: No module named 'core.settingz'\n", captured.err
+
+
+def test_a_dependency_the_settings_module_imports_keeps_its_traceback(monkeypatch):
+    """Our own failure is ours to summarise into one line. This one is not.
+
+    A settings module that imports something uninstalled raises `ModuleNotFoundError`
+    too, and flattening it would report `cannot read the settings: No module named 'yaml'`
+    with no hint of where the import was — for a fault that is not the healthcheck's and
+    is not fixed by anything on the Deployment page.
+    """
+
+    def missing_dependency(*args, **kwargs):
+        raise ModuleNotFoundError("No module named 'yaml'", name='yaml')
+
+    monkeypatch.setenv('DJANGO_SETTINGS_MODULE', 'core.settings')
+    monkeypatch.setattr('django_redis_aiogram.healthcheck.check', missing_dependency)
+
+    with pytest.raises(ModuleNotFoundError, match='yaml'):
+        main([])
+
+
+def test_a_settings_module_whose_parent_package_is_missing_is_still_ours(monkeypatch, capsys):
+    """`DJANGO_SETTINGS_MODULE=coree.settings` reports the missing *parent*.
+
+    So comparing the name for equality alone would send the commonest typo of all — one
+    in the package part — out as a traceback.
+    """
+
+    def missing_parent(*args, **kwargs):
+        raise ModuleNotFoundError("No module named 'coree'", name='coree')
+
+    monkeypatch.setenv('DJANGO_SETTINGS_MODULE', 'coree.settings')
+    monkeypatch.setattr('django_redis_aiogram.healthcheck.check', missing_parent)
+
+    assert main([]) == 1
+    assert capsys.readouterr().err == "cannot read the settings: No module named 'coree'\n"
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'WORKER_NAME': 'mine'})
+def test_a_key_that_cannot_be_decoded_does_not_abort_the_sweep(redis_server, caplog):
+    """The sweep is the one part that must never fail the container over what it found.
+
+    A foreign key on a Redis shared with a cache backend can match this pattern and hold
+    bytes that are not UTF-8. Decoding it raised straight out of `check()` — a traceback
+    and an unhealthy container, from an optional warning nobody acts on.
+    """
+    redis_server.set(f'{QUEUE}:heartbeat:mine', str(int(time.time())))
+    redis_server.rpush(f'{QUEUE}:processing:'.encode() + b'\xff\xfe', b'{}')
+
+    report = check(stranded=True)
+
+    assert report.ok, report.message
+    assert 'healthy' in report.message, report.message
+    assert 'could not scan for stranded in-flight lists' in caplog.text
 
 
 @override_settings(TELEGRAM_BOT={**SETTINGS, 'WORKER_NAME': 'mine'})

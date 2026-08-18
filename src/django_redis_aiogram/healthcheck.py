@@ -27,6 +27,7 @@ unpopulated after ``main()`` returns.
 
 import argparse
 import logging
+import os
 import sys
 import time
 from dataclasses import dataclass
@@ -292,7 +293,10 @@ def _stranded(connection: Redis) -> tuple[int, bool]:
                 total += int(connection.llen(name) or 0)
             if cursor == 0:
                 return total, True
-    except RedisError:
+    except (RedisError, UnicodeDecodeError):
+        # the decode too: a foreign key on a shared Redis can match this pattern and hold
+        # bytes that are not UTF-8, and aborting the whole probe over a warning nobody
+        # acts on is the opposite of what this sweep is for
         logger.warning('could not scan for stranded in-flight lists', extra={'tg_key': pattern})
         return total, False
     return total, False
@@ -343,6 +347,26 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _names_the_settings_module(error: ImportError) -> bool:
+    """Whether what failed to import is the configured settings module itself.
+
+    ``ModuleNotFoundError`` carries the dotted name it could not find, and a missing
+    parent package reports the parent — so ``core.settings`` with no ``core`` on the path
+    is recognised too.
+    """
+    missing = getattr(error, 'name', None)
+    configured = os.environ.get('DJANGO_SETTINGS_MODULE')
+    if not missing or not configured:
+        return False
+    return configured == missing or configured.startswith(f'{missing}.')
+
+
+def _cannot_read(error: Exception) -> int:
+    """Write the one-line refusal and give the exit code that goes with it."""
+    sys.stderr.write(f'cannot read the settings: {error}\n')
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the check and print its report. Returns the exit code.
 
@@ -358,17 +382,21 @@ def main(argv: list[str] | None = None) -> int:
             stranded=options.stranded,
             guarantee=options.guarantee,
         )
-    except (ImproperlyConfigured, ImportError) as error:
-        # the failures this form meets that the management command cannot: `manage.py`
-        # sets DJANGO_SETTINGS_MODULE inside its own process, so a container running it
-        # does not necessarily export the variable — and a healthcheck is a separate
-        # process. Since the recipe asks an operator to write that name by hand, a
-        # mistyped one (ImportError) is at least as likely as a missing one. A traceback
-        # here would say "unhealthy" without saying why, from a probe whose whole job is
-        # to say why. Anything the settings module itself raises still gets its
-        # traceback: that failure is not ours to summarise into one line
-        sys.stderr.write(f'cannot read the settings: {error}\n')
-        return 1
+    except ImproperlyConfigured as error:
+        # the failure this form meets that the management command cannot: `manage.py` sets
+        # DJANGO_SETTINGS_MODULE inside its own process, so a container running it does not
+        # necessarily export the variable — and a healthcheck is a separate process. A
+        # traceback here would say "unhealthy" without saying why, from a probe whose whole
+        # job is to say why
+        return _cannot_read(error)
+    except ImportError as error:
+        # the recipe asks an operator to write that module name by hand, so a mistyped one
+        # is at least as likely as a missing variable, and it deserves the same line. Only
+        # that one: an import the settings module itself fails at is not ours to flatten,
+        # and its traceback is where the answer is
+        if not _names_the_settings_module(error):
+            raise
+        return _cannot_read(error)
     stream = sys.stdout if report.ok else sys.stderr
     stream.write(f'{report.message}\n')
     # stdout is block-buffered when it is not a tty and stderr is not buffered at all, so

@@ -213,8 +213,11 @@ them, so it is not one per message.
   them out as tracebacks: an empty `REDIS_URL` (`ImproperlyConfigured`), a `REDIS_URL`
   with no scheme or an unreadable `REDIS_TIMEOUT` (`ValueError`), and a heartbeat that
   cannot be decoded, which `decode_responses` in a URL shared with a cache backend makes
-  possible (`UnicodeDecodeError`). A mistyped `DJANGO_SETTINGS_MODULE` is answered the
-  same way as a missing one.
+  possible (`UnicodeDecodeError`) — that one can also come off a foreign key the stranded
+  sweep matches, where it now leaves a warning instead of aborting the probe. A mistyped
+  `DJANGO_SETTINGS_MODULE` is answered the same way as a missing one; an import the
+  settings module itself fails at keeps its traceback, because that fault is not this
+  package's to flatten into a line.
 
 ### Added
 
