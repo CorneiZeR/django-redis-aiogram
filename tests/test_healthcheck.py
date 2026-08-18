@@ -8,6 +8,7 @@ import time
 from io import StringIO
 
 import pytest
+from django.core.exceptions import ImproperlyConfigured
 from django.core.management import CommandError, call_command
 from django.test import override_settings
 
@@ -17,7 +18,7 @@ from django.test import override_settings
 from redis.exceptions import ConnectionError, RedisError, ResponseError  # noqa: A004 - the point is to shadow it
 
 from django_redis_aiogram.delivery import BlpopDelivery
-from django_redis_aiogram.healthcheck import check
+from django_redis_aiogram.healthcheck import check, main
 
 QUEUE = 'TELEGRAM_BOT_MESSAGE'
 WORKER = 'tests'
@@ -451,3 +452,43 @@ def test_a_disabled_process_is_not_unhealthy_and_is_not_reported_as_healthy():
 
     assert out.getvalue().strip() == report.message, repr(out.getvalue())
     assert '\x1b[' not in out.getvalue(), 'the disabled line was coloured as a success'
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'HEARTBEAT_INTERVAL': 10})
+def test_the_missing_heartbeat_message_names_the_limit_it_judged_by(redis_server):
+    """`--max-age 600` and a message saying "within 30s" send an operator to the wrong
+    number — and the one it named was a default the flag had already overridden."""
+    report = check(max_age=600)
+
+    assert not report.ok
+    assert 'within 600s' in report.message, report.message
+    assert 'within 30s' not in report.message, report.message
+
+
+def test_a_probe_with_no_settings_module_says_so_instead_of_raising(monkeypatch, capsys):
+    """The one failure this form meets that the management command cannot.
+
+    `manage.py` sets `DJANGO_SETTINGS_MODULE` with `os.environ.setdefault` *inside its
+    own process*, and a healthcheck is a different process — so a container that runs
+    `manage.py` may never export it, and the recipe on the Deployment page has to put it
+    in `environment:`. Without it the probe used to answer with a traceback: exit 1, so
+    Docker read unhealthy, from a probe whose whole job is to say *why*.
+    """
+
+    def unreadable(*args, **kwargs):
+        message = (
+            'Requested setting TELEGRAM_BOT, but settings are not configured. You must '
+            'either define the environment variable DJANGO_SETTINGS_MODULE or call '
+            'settings.configure() before accessing settings.'
+        )
+        raise ImproperlyConfigured(message)
+
+    monkeypatch.setattr('django_redis_aiogram.healthcheck.check', unreadable)
+
+    code = main([])
+
+    assert code == 1
+    captured = capsys.readouterr()
+    assert captured.out == '', captured.out
+    assert captured.err.startswith('cannot read the settings: '), captured.err
+    assert 'DJANGO_SETTINGS_MODULE' in captured.err

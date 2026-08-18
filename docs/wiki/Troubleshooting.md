@@ -82,9 +82,16 @@ every `AppConfig.ready()`, before the first Redis call. In one project that was 
 seconds. Use the form that does not:
 
 ```yaml
+    environment:
+      DJANGO_SETTINGS_MODULE: core.settings   # a healthcheck is a separate process
+    healthcheck:
       test: ['CMD', 'python', '-m', 'django_redis_aiogram.healthcheck']
       timeout: 5s
 ```
+
+If the probe answers `cannot read the settings: …` instead, that variable is the thing
+missing: `manage.py` sets it inside its own process, so a container running it may
+never export it.
 
 See **[[Deployment]]**. Raising `timeout:` also stops the killing and leaves your whole
 Django app being imported twice a minute to read two keys.

@@ -94,7 +94,7 @@ def _connected() -> Redis:
     return connection
 
 
-def _heartbeat_age(connection: Redis, *, interval: int, limit: int) -> int:
+def _heartbeat_age(connection: Redis, *, limit: int) -> int:
     """How long ago the consumer last said it was turning."""
     try:
         raw = connection.get(heartbeat_key())
@@ -104,9 +104,10 @@ def _heartbeat_age(connection: Redis, *, interval: int, limit: int) -> int:
         msg = f'could not read the heartbeat: {error}'
         raise _UnhealthyError(msg) from error
     if raw is None:
+        # the applied limit, not `interval * 3`: with `--max-age 600` the old wording
+        # said "within 30s", which contradicts the number the probe is judging by
         msg = (
-            f'no heartbeat at {heartbeat_key()}: the consumer has not written one '
-            f'within {interval * 3}s, or it never started'
+            f'no heartbeat at {heartbeat_key()}: the consumer has not written one within {limit}s, or it never started'
         )
         raise _UnhealthyError(msg)
     try:
@@ -165,7 +166,7 @@ def check(
 
     try:
         connection = _connected()
-        age = _heartbeat_age(connection, interval=interval, limit=age_limit)
+        age = _heartbeat_age(connection, limit=age_limit)
         queued = _queue_depth(connection, limit=queue_limit)
     except _UnhealthyError as refusal:
         return Report(ok=False, message=str(refusal))
@@ -294,12 +295,21 @@ def main(argv: list[str] | None = None) -> int:
     ``manage.py`` already has it.
     """
     options = build_parser().parse_args(argv)
-    report = check(
-        max_queue=options.max_queue,
-        max_age=options.max_age,
-        stranded=options.stranded,
-        guarantee=options.guarantee,
-    )
+    try:
+        report = check(
+            max_queue=options.max_queue,
+            max_age=options.max_age,
+            stranded=options.stranded,
+            guarantee=options.guarantee,
+        )
+    except ImproperlyConfigured as error:
+        # the one this form meets that the management command cannot: `manage.py` sets
+        # DJANGO_SETTINGS_MODULE inside its own process, so a container running it does
+        # not necessarily export the variable — and a healthcheck is a separate process.
+        # A traceback here would say "unhealthy" without saying why, from a probe whose
+        # whole job is to say why
+        sys.stderr.write(f'cannot read the settings: {error}\n')
+        return 1
     stream = sys.stdout if report.ok else sys.stderr
     stream.write(f'{report.message}\n')
     for warning in report.warnings:

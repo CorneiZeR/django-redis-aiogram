@@ -183,6 +183,10 @@ itself.
 ```yaml
   telegram_bot:
     command: python manage.py start_tgbot
+    environment:
+      # required: a healthcheck is a separate process, and `manage.py` only sets this
+      # inside its own — so without it here the probe cannot read your settings at all
+      DJANGO_SETTINGS_MODULE: core.settings
     healthcheck:
       test: ['CMD', 'python', '-m', 'django_redis_aiogram.healthcheck']
       interval: 30s
@@ -202,8 +206,15 @@ have to go in `timeout:` is not this package's to know, because what it covers i
 `INSTALLED_APPS`.
 
 The `python -m` form reads your settings module and stops there: measured at 69 ms
-end to end, interpreter startup included. `DJANGO_SETTINGS_MODULE` is already set in a
-container that runs `manage.py`, so nothing new has to be passed. Use the management
+end to end, interpreter startup included.
+
+**`DJANGO_SETTINGS_MODULE` has to be in the container's environment**, which is the one
+thing this form needs and the management command does not. The conventional `manage.py`
+sets it with `os.environ.setdefault(...)` *inside its own process*, and a healthcheck is
+a different process — so a container that runs `manage.py` quite happily may still not
+export it. Without it the probe answers `cannot read the settings: …` and exits 1, which
+is honest but permanently unhealthy. It is in the `environment:` block above for that
+reason. Use the management
 command when a person is looking at the output — it additionally scans for stranded
 in-flight lists and reports which delivery guarantee is in force, neither of which can
 change the verdict and both of which cost a round trip nobody is reading twice a
