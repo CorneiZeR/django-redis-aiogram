@@ -148,6 +148,19 @@ exists. Nothing accumulates if you skip it — the registry drops clients whose 
 has closed — but the sockets stay open until then, and the close is untidy rather
 than clean.
 
+## hiredis, if the consumer is busy
+
+```shell
+pip install 'django-redis-aiogram[hiredis]'
+```
+
+redis-py parses replies in Python unless `hiredis` is present, and then in C. Nothing
+in this package needs it and nothing changes if it is absent — it is an extra rather
+than a dependency because the shape of the win is narrow: it pays on a consumer
+reading a message at a time off a queue all day, and buys a web tier that only ever
+pushes almost nothing. Install it in the bot container if you have measured the
+parsing and not before.
+
 ## Is it working?
 
 `docker ps` answers the wrong question: the process being up says nothing about

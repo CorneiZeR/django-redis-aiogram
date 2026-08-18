@@ -142,6 +142,31 @@ them, so it is not one per message.
   of an aggregate, and the pause between chunks is skipped when a chunk deleted
   nothing and under `--dry-run` entirely.
 
+- **The boolean checks no longer refuse configuration that works.**
+  `{'ENABLED': 'true', 'EVENT_LOG': '1', 'ALLOW_PICKLE': 'no'}` is documented, boots
+  and sends — and failed `manage.py check` on five ids, because the rules demanded a
+  real `bool` while every one of those settings is coerced where it is used. They were
+  inverted twice: the values `coerce_bool` genuinely refuses raise
+  `ImproperlyConfigured` out of `apps.ready()` before a check runs, so the errors could
+  never fire on the case they were written for. E001, E002, E017, E031, E042 and E046
+  now ask by trying the coercion and report the message the runtime would have raised.
+  E003 stays strict, because `client.py` reads `RAISE_EXCEPTION` on raw truthiness and
+  `'false'` there would re-raise — that is a defect in `client.py` and has its own
+  issue.
+- **`W004` compared `BLPOP_TIMEOUT` against the wrong bound.** The consumer caps its
+  pop at `min(BLPOP_TIMEOUT, HEARTBEAT_INTERVAL, REDIS_TIMEOUT - 1)`, and the rule
+  looked only at the deadline — so `BLPOP_TIMEOUT=30, HEARTBEAT_INTERVAL=10,
+  REDIS_TIMEOUT=60` was silent while the pop ran at ten, and when the warning did fire
+  it told the operator to raise `REDIS_TIMEOUT` whether or not that was the term
+  binding. Both the check and the consumer now read one helper, and the hint names
+  whichever setting produced the cap.
+- **The container healthcheck no longer builds a bot.** It imported the shared `bot`
+  for one flag and a `Delivery` for a branch that cannot fire — `crash_safe` starts
+  true and is only lowered by `reclaim()`, which the probe must never call. Both pull
+  aiogram: 902 ms against 16 ms with `AUTODISCOVER=0`. It reads the keys from the
+  module that owns them and asks the server about the guarantee, which the rest of
+  that method already did.
+
 ### Added
 
 - **`await bot.asend(...)`**, and `asend_redis`, for code already on an event
@@ -277,6 +302,14 @@ them, so it is not one per message.
   **Event log** has the recipe, including the two honest notes about
   `prometheus_client` and about which container has to run the exporter.
 
+- **Check `W011`** — `EVENT_LOG_DATABASE` names an alias with nothing in
+  `DATABASE_ROUTERS` routing this app there. E040 sees a string, E041 sees a
+  configured alias with a real engine, W005 sees a database, and `migrate` still never
+  creates the table: the writer logs `no such table` once per batch for ever. A
+  warning rather than an error, because a router of your own returning the same alias
+  is a legitimate way to do it. Compared through `import_string`, so a dotted path and
+  an instance both count.
+
 ### Changed
 
 - **Encoding a queued call takes one pass instead of two.** `encode()` rebuilt
@@ -311,6 +344,20 @@ them, so it is not one per message.
   `RPUSH` nor `BLMOVE` is idempotent, and redis-py retries the whole
   send-and-read — a connection dropped after the server applied an `RPUSH` would
   queue the message twice and a real person would receive two of them.
+
+- **Importing the package costs 0.134 ms instead of 1.420 ms**, and pulls neither
+  `typing` nor `threading`. Annotations are postponed and `TYPE_CHECKING` is a local
+  sentinel; the lock around building the shared bot is gone, because a module body
+  runs once per process under Python's own import lock. Honestly: this only matters
+  outside Django, where `django.setup()` has not already paid for both modules —
+  inside one the figure is 0.088 ms either way. The guarantee the lock used to give is
+  pinned by eight threads on a barrier asserting they get one instance.
+- **`orjson` is not coming, and here is the number.** This package's `dumps` measures
+  0.91 µs end to end on a realistic 193-byte send, against 1.01 µs for a bare
+  `json.dumps` on the same payload — the encoder is already below that, because it
+  encodes in one pass rather than rebuilding the structure first. A faster library
+  could win about a microsecond, against a 14 µs Redis round trip. Recorded on the
+  Serialization page so the question stops being reopened.
 
 ### Infrastructure
 
