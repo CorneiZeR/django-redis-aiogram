@@ -17,6 +17,7 @@ from django.test import override_settings
 from redis.exceptions import ConnectionError, RedisError, ResponseError  # noqa: A004 - the point is to shadow it
 
 from django_redis_aiogram.delivery import BlpopDelivery
+from django_redis_aiogram.healthcheck import check
 
 QUEUE = 'TELEGRAM_BOT_MESSAGE'
 WORKER = 'tests'
@@ -344,3 +345,62 @@ def test_a_scan_that_fails_does_not_make_the_container_unhealthy(redis_server, m
     call_command('tgbot_healthcheck', stdout=out)
 
     assert 'healthy' in out.getvalue()
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_the_container_form_neither_scans_nor_writes(redis_server, monkeypatch):
+    """The one place the two entry points differ, and the reason the split exists.
+
+    A healthcheck runs twice a minute. `_stranded` is up to twenty `SCAN` rounds over a
+    keyspace the settings page says is often shared with a cache backend, and
+    `_guarantee` is a write — a no-op `LMOVE` on a missing key, but a write, which a
+    read-only replica refuses outright. Neither can change the verdict, so neither
+    belongs on that path by default.
+
+    Asserted on the calls, not on the output: a message that happens not to mention
+    stranded lists proves only that none were found.
+    """
+    calls: list[str] = []
+    for name in ('scan', 'lmove'):
+        original = getattr(redis_server, name)
+
+        def recording(*args, _name=name, _original=original, **kwargs):
+            calls.append(_name)
+            return _original(*args, **kwargs)
+
+        monkeypatch.setattr(redis_server, name, recording)
+
+    redis_server.set(HEARTBEAT, str(int(time.time())))
+    report = check()
+
+    assert report.ok, report.message
+    assert report.message.startswith('healthy: heartbeat'), report.message
+    assert calls == [], f'the container form paid for {sorted(set(calls))}'
+    assert 'once' not in report.message, f'the guarantee was probed and reported: {report.message}'
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_the_management_command_still_scans_and_reports_the_guarantee(redis_server, monkeypatch):
+    """The other half: the command's output must not change for anyone using it.
+
+    Without this, moving the defaults to off would silently take the guarantee line and
+    the stranded warning out of a command people read by hand — which is the sort of
+    quiet removal a changelog entry cannot make up for.
+    """
+    calls: list[str] = []
+    for name in ('scan', 'lmove'):
+        original = getattr(redis_server, name)
+
+        def recording(*args, _name=name, _original=original, **kwargs):
+            calls.append(_name)
+            return _original(*args, **kwargs)
+
+        monkeypatch.setattr(redis_server, name, recording)
+
+    redis_server.set(HEARTBEAT, str(int(time.time())))
+    out = StringIO()
+    call_command('tgbot_healthcheck', stdout=out)
+
+    assert 'at-least-once' in out.getvalue(), out.getvalue()
+    assert 'scan' in calls, f'the command stopped scanning: {calls}'
+    assert 'lmove' in calls, f'the command stopped probing the guarantee: {calls}'
