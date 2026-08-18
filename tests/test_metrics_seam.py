@@ -7,6 +7,7 @@ empty. Each of these fails against a gate left on `recorder.enabled`.
 """
 
 import asyncio
+import queue
 import threading
 import uuid
 
@@ -505,13 +506,13 @@ def test_the_last_events_before_shutdown_still_reach_a_receiver(redis_server, co
     worse. That is a documented exception to "on the writer's thread" rather than a
     hole in it, and this pins it.
     """
-    recorder.record(Event(kind='outbound.queued'))
-    buffer = recorder._queue
-    assert buffer is not None, 'nothing was buffered, so nothing is being tested'
-
-    # detach it the way a writer that has already gone leaves it behind
-    with recorder._guard:
-        recorder._queue = recorder._thread = None
+    # a standalone queue, so no writer is ever started: going through `record()`
+    # starts one, and it could consume and publish the event on its own thread before
+    # `_abandon` ran — which would make the assertion below depend on timing rather
+    # than on where `_abandon` publishes
+    buffer: queue.Queue = queue.Queue()
+    buffer.put_nowait(Event(kind='outbound.queued'))
+    assert recorder._thread is None, 'a writer is running, so this is not the abandoned path'
 
     on_thread = []
     events_recorded.connect(
@@ -553,3 +554,61 @@ def test_the_synchronous_flag_does_nothing_for_a_receiver_only_process(redis_ser
 
     assert kinds(collected) == ['outbound.queued'], f'the receiver saw {kinds(collected)}'
     assert on_thread == [WRITER_THREAD], f'ran on {on_thread} rather than the writer thread'
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+@pytest.mark.parametrize('nameable', [True, False], ids=['django can name it', 'django cannot'])
+def test_a_receiver_that_cannot_even_be_named_costs_nobody_their_batch(redis_server, collected, caplog, nameable):
+    """The reporting path must not become the failure it reports.
+
+    Two defects met here and the two cases below separate them, because each one
+    only reaches the other's code.
+
+    **Django cannot name a callable instance.** Its `send_robust` failure logging
+    reads `receiver.__qualname__` unguarded, and an instance does not inherit its
+    class's — so a callable object that raises makes `send_robust` *itself* raise
+    `AttributeError`, measured on 6.1. Its containment does not cover that receiver
+    shape at all, and `_publish` has to contain the dispatch as well.
+
+    **`repr()` was the fallback when we name a receiver.** Python evaluates every
+    argument before the call, so `getattr(receiver, '__qualname__', repr(receiver))`
+    ran `repr` even with the attribute there. That one needs a receiver Django *can*
+    name, or the dispatch fails first and our line never runs.
+
+    Either would have landed in `_flush`'s `except` and been counted as a failed
+    *write*: the other receivers lose the batch, a `log.dropped` row appears, and the
+    log blames the database for what a receiver did.
+    """
+
+    class Hostile:
+        """Raises from the call, and from every attempt to describe it."""
+
+        def __call__(self, sender, events, **kwargs):
+            message = 'this receiver is hostile'
+            raise RuntimeError(message)
+
+        def __repr__(self):
+            message = 'and it will not be named either'
+            raise RuntimeError(message)
+
+    receiver = Hostile()
+    if nameable:
+        # on the instance, not in the class body: `type.__new__` takes `__qualname__`
+        # out of the namespace to rename the class, so a class-body assignment leaves
+        # instances with nothing — which is the very gap Django trips over
+        receiver.__qualname__ = 'Hostile'
+    assert hasattr(receiver, '__qualname__') is nameable, 'the arrangement does not match its own label'
+
+    events_recorded.connect(receiver, weak=False, dispatch_uid='tests.metrics.hostile')
+    try:
+        with caplog.at_level('ERROR', logger='django_redis_aiogram'):
+            TelegramBot().send_redis(chat_id=7, text='hi')
+            recorder.flush(timeout=5)
+    finally:
+        events_recorded.disconnect(dispatch_uid='tests.metrics.hostile')
+
+    assert kinds(collected) == ['outbound.queued'], 'the working receiver lost its batch'
+    assert 'could not write an event batch' not in caplog.text, 'a receiver was counted as a failed write'
+    # which line appears depends on which layer caught it, and the point is that
+    # neither escapes
+    assert 'receiver raised' in caplog.text or 'publishing recorded events failed' in caplog.text

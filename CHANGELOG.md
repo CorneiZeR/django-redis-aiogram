@@ -232,9 +232,14 @@ them, so it is not one per message.
   drained, on the thread that called `recorder.stop()`. A signal
   rather than a setting naming a dotted path: no path to get wrong, no check id for
   it, no lazy import cache, and no question about what a failing import means.
-  `send_robust`, so a receiver that raises costs neither the other receivers their
-  batch nor the database its rows, and is logged as
-  `an events_recorded receiver raised`.
+  A receiver that raises costs neither the other receivers their batch nor the
+  database its rows, and is logged as `an events_recorded receiver raised`.
+  `send_robust` is most of that — and only most: Django's own failure logging reads
+  `receiver.__qualname__`, which a *callable instance* does not have, so for that
+  shape `send_robust` raises instead of containing anything, measured on 6.1. That is
+  caught here as well and logged as `publishing recorded events failed`, because
+  otherwise it reached the writer's failure counter and was reported as a database
+  refusing a batch it never saw.
 
   It fires with `EVENT_LOG` **off** — the table and the metrics are separate
   decisions, and gating them together is how an advertised metric comes out

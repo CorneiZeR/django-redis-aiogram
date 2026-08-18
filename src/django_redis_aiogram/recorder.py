@@ -122,6 +122,26 @@ def _number(key: str, cast: Callable[[Any], float]) -> float:
         return cast(DEFAULTS[key])
 
 
+def _receiver_name(receiver: object) -> str:
+    """Name a signal receiver for a log line, without calling anything that can raise.
+
+    ``repr()`` is deliberately not the fallback. Python evaluates every argument
+    before the call, so ``getattr(receiver, '__qualname__', repr(receiver))``
+    evaluates ``repr`` *even when the attribute is there* — and a receiver whose
+    ``__repr__`` raises would then take this line, and with it the rest of the batch's
+    receivers, out through :meth:`EventRecorder._flush`'s ``except``, where it would
+    be counted as a failed write. That is the failure this whole method exists to
+    contain, arriving through the code that reports it.
+
+    ``type(receiver).__name__`` is the last resort because reading it runs nothing.
+    """
+    for attribute in ('__qualname__', '__name__'):
+        name = getattr(receiver, attribute, None)
+        if isinstance(name, str) and name:
+            return name
+    return type(receiver).__name__
+
+
 def _acknowledge(wakes: list[Wake]) -> None:
     """Release everything waiting on this batch."""
     for wake in wakes:
@@ -530,11 +550,21 @@ class EventRecorder:
         """Hand a batch to whoever connected to :data:`events_recorded`.
 
         ``send_robust``, so one broken receiver neither loses the batch for the
-        others nor stops the writer — Django returns the exception instead of
-        raising it, and it is logged here because a receiver that fails silently is
-        a metric that reads as zero traffic. Django logs it too, on its own
-        ``django.dispatch`` logger; the line here is on the logger a project
+        others nor stops the writer, and it is logged here because a receiver that
+        fails silently is a metric that reads as zero traffic. Django logs it too, on
+        its own ``django.dispatch`` logger; the line here is on the logger a project
         configures for this package, which is where it will actually be seen.
+
+        **Wrapped anyway, because ``send_robust`` does not contain everything.**
+        Django's own failure logging reads ``receiver.__qualname__`` unguarded, and a
+        callable *instance* — an ordinary shape for a metrics collector — has no such
+        attribute. So a receiver like that raising makes ``send_robust`` itself raise
+        ``AttributeError``, measured on Django 6.1, and without this ``try`` it would
+        land in :meth:`_flush`'s ``except`` and be counted as a failed *write*: the
+        other receivers lose the batch, a ``log.dropped`` row appears, and the log
+        blames the database for something a receiver did. Containing it here makes
+        this method's promise true whatever Django does with it, on any supported
+        version.
 
         A tuple rather than the list itself: receivers run one after another with
         the same argument, so one of them sorting or clearing a list would decide
@@ -542,12 +572,17 @@ class EventRecorder:
         """
         if not events_recorded.receivers:
             return
-        for receiver, outcome in events_recorded.send_robust(sender=self, events=tuple(batch)):
+        try:
+            outcomes = events_recorded.send_robust(sender=self, events=tuple(batch))
+        except Exception:
+            logger.exception('publishing recorded events failed', extra={'tg_count': len(batch)})
+            return
+        for receiver, outcome in outcomes:
             if isinstance(outcome, BaseException):
                 logger.error(
                     'an events_recorded receiver raised',
                     exc_info=outcome,
-                    extra={'tg_receiver': getattr(receiver, '__qualname__', repr(receiver)), 'tg_count': len(batch)},
+                    extra={'tg_receiver': _receiver_name(receiver), 'tg_count': len(batch)},
                 )
 
     def _deliver(self, batch: list[Event]) -> None:

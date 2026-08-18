@@ -210,10 +210,17 @@ Two cases run elsewhere, both because there is no writer thread to run on:
   drained by then. Those are published rather than dropped because they are the last
   events before the process goes, and there is no writer left to hand them to
 
-A receiver that raises is logged as `an events_recorded receiver raised` and does
-not cost the other receivers their batch, or the database its rows —
-`send_robust`, so Django hands the exception back rather than letting it end the
-writer.
+A receiver that raises is logged as `an events_recorded receiver raised` and costs
+neither the other receivers their batch nor the database its rows. `send_robust` is
+most of that: Django hands the exception back instead of letting it end the writer.
+
+Not all of it, though, and the gap is worth knowing if you write a receiver as a
+class. Django's own failure logging reads `receiver.__qualname__`, which a *callable
+instance* does not have — so for that shape `send_robust` raises rather than
+containing anything, measured on Django 6.1. This package catches that too and logs
+`publishing recorded events failed`; without it the exception would be counted as a
+failed database write, which is the one story in the log that would send you to the
+wrong place entirely.
 
 Two honest notes about `prometheus_client` in particular. Its `labels()` and
 `inc()` both take locks, and in multiprocess mode an increment is an mmap write —

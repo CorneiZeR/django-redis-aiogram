@@ -4,8 +4,11 @@ Deliberately a ``django.dispatch.Signal`` rather than a setting naming a dotted
 path. A setting would need an entry in ``Settings.md``, a check id, an
 ``import_string``, a lazy cache to keep the import off the hot path, and a
 decision about what to do when the path is wrong. A signal needs none of that,
-Django already contains receiver exceptions for us through ``send_robust``, and
-connecting one is the thing every Django developer already knows how to do.
+``send_robust`` contains most of what a receiver can do wrong, and connecting one is
+the thing every Django developer already knows how to do. *Most*: see
+:meth:`~django_redis_aiogram.recorder.EventRecorder._publish` for the receiver shape
+Django's own containment misses, which is why this package does not rely on it
+alone.
 
 This module imports ``django.dispatch`` and nothing else — not aiogram, not the
 ORM, not the rest of this package. A metrics module can import it at settings
