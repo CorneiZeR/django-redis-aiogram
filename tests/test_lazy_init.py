@@ -358,3 +358,37 @@ def test_threads_racing_for_the_bot_all_get_the_same_one():
     assert not errors, errors
     assert len(seen) == 8, f'only {len(seen)} of 8 threads got there'
     assert len(set(map(id, seen))) == 1, f'{len(set(map(id, seen)))} different bots were built'
+
+
+def test_the_healthcheck_probe_does_not_import_aiogram():
+    """A container healthcheck runs on a timer, and paid ~900 ms every time.
+
+    It imported the shared `bot` for one flag and built a `Delivery` for a branch that
+    could not fire, and both pull aiogram. Measured in a process with
+    `AUTODISCOVER=0`: 902 ms against 16 ms.
+
+    The saving needs `AUTODISCOVER=0` to materialise, because the documented
+    `<app>/tg_router.py` layout imports aiogram during `django.setup()` anyway — so
+    this is decoupling first and speed second. What it buys unconditionally is that
+    the probe no longer depends on which class `DELIVERY` names.
+    """
+    script = textwrap.dedent("""
+        import sys
+
+        from django_redis_aiogram.management.commands import tgbot_healthcheck
+
+        assert 'aiogram' not in sys.modules, 'the healthcheck pulled aiogram'
+        assert 'django_redis_aiogram.client' not in sys.modules, 'it pulled the client half'
+        assert hasattr(tgbot_healthcheck, 'Command')
+        print('cheap probe ok')
+    """)
+    result = subprocess.run(  # noqa: S603 - our own interpreter, and a script written right above
+        [sys.executable, '-c', script],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=SUBPROCESS_TIMEOUT,
+        env={**os.environ, 'DJANGO_SETTINGS_MODULE': 'tests.settings', 'DJANGO_REDIS_AIOGRAM_AUTODISCOVER': '0'},
+    )
+    assert result.returncode == 0, result.stderr
+    assert 'cheap probe ok' in result.stdout

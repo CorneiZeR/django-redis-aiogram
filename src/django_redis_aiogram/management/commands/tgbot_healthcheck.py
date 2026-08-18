@@ -14,10 +14,8 @@ from django.core.management import BaseCommand, CommandError
 from redis import Redis
 from redis.exceptions import RedisError, ResponseError
 
-from django_redis_aiogram import bot
-from django_redis_aiogram.delivery import Delivery, get_delivery
-from django_redis_aiogram.redis import get_redis
-from django_redis_aiogram.settings import conf
+from django_redis_aiogram.redis import get_redis, heartbeat_key, processing_key, queue_key
+from django_redis_aiogram.settings import SETTINGS_NAME, coerce_bool, conf
 
 logger = logging.getLogger('django_redis_aiogram')
 
@@ -54,12 +52,11 @@ class Command(BaseCommand):
 
     def handle(self, *args: Any, **options: Any) -> None:
         """Report the first thing that is wrong, or that everything is fine."""
-        if not bot.enabled:
+        if not coerce_bool(conf['ENABLED'], f"{SETTINGS_NAME}['ENABLED']"):
             # nothing is meant to be running here, so nothing is wrong
             self.stdout.write('disabled in this process; nothing to check')
             return
 
-        delivery = get_delivery(handler=bot.send_raw)
         interval = max(1, int(conf['HEARTBEAT_INTERVAL']))
         max_age = options['max_age'] if options['max_age'] is not None else interval * 3
         max_queue = options['max_queue'] if options['max_queue'] is not None else int(conf['HEALTHCHECK_MAX_QUEUE'])
@@ -72,7 +69,7 @@ class Command(BaseCommand):
             raise CommandError(msg) from error
 
         try:
-            raw = connection.get(delivery.heartbeat_key)
+            raw = connection.get(heartbeat_key())
         except Exception as error:
             # ping answering says nothing about the next command: a failover in
             # between, or a key this replica cannot serve
@@ -81,7 +78,7 @@ class Command(BaseCommand):
 
         if raw is None:
             msg = (
-                f'no heartbeat at {delivery.heartbeat_key}: the consumer has not written one '
+                f'no heartbeat at {heartbeat_key()}: the consumer has not written one '
                 f'within {interval * 3}s, or it never started'
             )
             raise CommandError(msg)
@@ -89,7 +86,7 @@ class Command(BaseCommand):
         try:
             age = int(time.time()) - int(raw)
         except (TypeError, ValueError) as error:
-            msg = f'the heartbeat at {delivery.heartbeat_key} is not a timestamp'
+            msg = f'the heartbeat at {heartbeat_key()} is not a timestamp'
             raise CommandError(msg) from error
 
         if age > max_age:
@@ -97,7 +94,7 @@ class Command(BaseCommand):
             raise CommandError(msg)
 
         try:
-            queued = int(connection.llen(delivery.queue_key) or 0)
+            queued = int(connection.llen(queue_key()) or 0)
         except Exception as error:
             msg = f'could not read the queue length: {error}'
             raise CommandError(msg) from error
@@ -106,8 +103,8 @@ class Command(BaseCommand):
             msg = f'{queued} messages are queued, over the limit of {max_queue}'
             raise CommandError(msg)
 
-        stranded, swept = self._stranded(connection, delivery)
-        guarantee = self._guarantee(connection, delivery)
+        stranded, swept = self._stranded(connection)
+        guarantee = self._guarantee(connection)
         self.stdout.write(self.style.SUCCESS(f'healthy: heartbeat {age}s old, {queued} queued, {guarantee}'))
         if stranded:
             # not a failure: another worker may be sending them right now. But an
@@ -121,22 +118,20 @@ class Command(BaseCommand):
             )
 
     @staticmethod
-    def _guarantee(connection: Redis, delivery: Delivery) -> str:
+    def _guarantee(connection: Redis) -> str:
         """Which delivery guarantee this Redis can actually give.
 
-        Asked, not assumed. This command builds its own `Delivery`, and a fresh
-        one reports `crash_safe` until something proves otherwise — the consumer
-        learns the truth from `reclaim()`, which this probe must not call, since
-        requeueing a running worker's in-flight list would send those messages
-        twice.
+        Asked of the server, not of a consumer. This used to build a `Delivery` and
+        read its `crash_safe`, which cannot answer: that flag starts true and is only
+        lowered by `reclaim()`, which this probe must never call — requeueing a
+        running worker's in-flight list would send those messages twice. So the
+        branch reading it could not fire, and the instance existed for nothing.
 
-        So it asks the same question `reclaim()` does, on a key that does not
-        exist: rotating an empty list is a no-op on a server that has `LMOVE`,
-        and `unknown command` on one that does not.
+        It asks the same question `reclaim()` does, on a key that does not exist:
+        rotating an empty list is a no-op on a server that has `LMOVE`, and
+        `unknown command` on one that does not.
         """
-        if not delivery.crash_safe:
-            return 'at-most-once'
-        probe = f'{delivery.queue_key}:lmove-probe'
+        probe = f'{queue_key()}:lmove-probe'
         try:
             connection.lmove(probe, probe, 'LEFT', 'RIGHT')
         except ResponseError as error:
@@ -150,7 +145,7 @@ class Command(BaseCommand):
         return 'at-least-once'
 
     @staticmethod
-    def _stranded(connection: Redis, delivery: Delivery) -> tuple[int, bool]:
+    def _stranded(connection: Redis) -> tuple[int, bool]:
         """Count what is in flight under a worker name that is not this one.
 
         Read rather than acted on: a message under another name may be one another
@@ -163,8 +158,8 @@ class Command(BaseCommand):
         pass over someone else's keys twice a minute. A partial answer is worth
         having; one that pretends to be complete is not.
         """
-        pattern = f'{delivery.queue_key}:processing:*'
-        mine = delivery.processing_key
+        pattern = f'{queue_key()}:processing:*'
+        mine = processing_key()
         # SCAN may return the same key more than once when the keyspace changes
         # size mid-iteration, and counting one twice would invent a backlog
         seen: set[str] = set()
