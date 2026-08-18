@@ -11,6 +11,7 @@ from django.core.checks import Warning as CheckWarning
 from django.test import override_settings
 
 from django_redis_aiogram.checks import CHECKS, check_settings
+from django_redis_aiogram.dbrouter import TelegramEventLogRouter
 from django_redis_aiogram.defaults import DEFAULTS
 from django_redis_aiogram.events import worker_identity
 
@@ -55,9 +56,58 @@ def test_integer_below_minimum_is_caught():
     assert 'django_redis_aiogram.E012' in ids(errors(check_settings()))
 
 
-@override_settings(TELEGRAM_BOT={'ENABLED': 'yes', 'TOKEN': '42:x', 'REDIS_URL': 'r://x'})
-def test_wrong_boolean_type_is_caught():
-    assert 'django_redis_aiogram.E001' in ids(errors(check_settings()))
+@override_settings(
+    TELEGRAM_BOT={
+        'ENABLED': 'true',
+        'AUTODISCOVER': '1',
+        'ALLOW_PICKLE': 'no',
+        'EVENT_LOG': 'on',
+        'EVENT_LOG_SYNC': 'off',
+        'REQUIRE_CRASH_SAFE': 0,
+        'TOKEN': '42:x',
+        'REDIS_URL': 'r://x',
+    }
+)
+def test_a_configuration_that_boots_and_sends_does_not_fail_the_checks():
+    """Every boolean here comes from the environment, which has only strings.
+
+    This exact settings dict is documented, loads, and sends — and used to fail
+    `manage.py check` on five separate ids, because the rule demanded a real `bool`
+    while every one of these is coerced at the point of use. It was inverted twice
+    over: the values `coerce_bool` genuinely refuses raise `ImproperlyConfigured`
+    out of `apps.ready()` before a check ever runs, so the errors could not fire on
+    the case they were written for.
+    """
+    reported = {str(message.id) for message in check_settings()}
+    boolean_ids = {f'django_redis_aiogram.{code}' for code in ('E001', 'E002', 'E017', 'E031', 'E042', 'E046')}
+
+    assert reported & boolean_ids == set(), f'a working configuration was refused: {sorted(reported & boolean_ids)}'
+
+
+@override_settings(TELEGRAM_BOT={'ENABLED': 'maybe', 'TOKEN': '42:x', 'REDIS_URL': 'r://x'})
+def test_a_boolean_nothing_can_read_is_still_caught():
+    """The other direction, which is what keeps the rule a rule.
+
+    `'maybe'` is what `coerce_bool` refuses, so this is the value that would have
+    taken `apps.ready()` down — and the check has to name it rather than staying
+    quiet because it stopped demanding a `bool`.
+    """
+    reported = errors(check_settings())
+
+    assert 'django_redis_aiogram.E001' in ids(reported)
+    # the message is the one the runtime would have raised, not a paraphrase
+    assert any("must be one of ['0', '1', 'false'" in str(message) for message in reported), reported
+
+
+@override_settings(TELEGRAM_BOT={'RAISE_EXCEPTION': 'false', 'TOKEN': '42:x', 'REDIS_URL': 'r://x'})
+def test_raise_exception_still_demands_a_real_boolean():
+    """The one that stays strict, and the reason is in `client.py` rather than here.
+
+    `client.py` tests this setting with a bare `if`, so `'false'` would re-raise the
+    exception the project meant to swallow. Until that is fixed the strict check is
+    the honest one, and this test is what stops the sweep above from swallowing it.
+    """
+    assert 'django_redis_aiogram.E003' in ids(errors(check_settings()))
 
 
 @override_settings(TELEGRAM_BOT={'TOKEN': 42, 'REDIS_URL': 'r://x'})
@@ -116,11 +166,23 @@ DOCUMENTED = re.compile('`([EW]\\d{3})`(?:\\s*[\u2013-]\\s*`([EW]\\d{3})`)?')
 # E008 and E013 guarded the keyspace settings 3.0 removed. Their ids are gone
 # rather than reused: a project silencing one must not start silencing a new rule
 RETIRED_IDS = {'E008', 'E013'}
-EXPECTED_IDS = ({f'E{code:03d}' for code in range(1, 47)} - RETIRED_IDS) | {f'W{code:03d}' for code in range(1, 10)}
+# W010 is left out of the emitted set on purpose: it fires only when this machine's
+# hostname looks Docker-generated, so whether the fixtures below produce it differs
+# between a laptop and CI. It has its own tests, and
+# `test_every_check_id_is_documented` reads the registry rather than this set, so it
+# is still held to the documentation
+HOSTNAME_DEPENDENT_IDS = {'W010'}
+EXPECTED_IDS = ({f'E{code:03d}' for code in range(1, 47)} - RETIRED_IDS) | (
+    {f'W{code:03d}' for code in range(1, 12)} - HOSTNAME_DEPENDENT_IDS
+)
 
 WRONG_TYPES = {
-    'ENABLED': 'yes',
-    'AUTODISCOVER': 'no',
+    # non-coercible on purpose: 'yes' and 'no' are documented, working values, and
+    # E001/E002 asking for a real bool was the defect. `[]` and 4.2 take the other
+    # refusal path in `coerce_bool` — wrong type rather than unrecognised word
+    'ENABLED': 'maybe',
+    'AUTODISCOVER': [],
+    # still a real bool here: E003 stays strict while `client.py` reads it raw
     'RAISE_EXCEPTION': 1,
     'ALLOW_PICKLE': 'maybe',
     'TOKEN': 42,
@@ -142,7 +204,7 @@ WRONG_TYPES = {
     'DEFAULT_KWARGS': 42,
     'DEFAULT_BOT_PROPERTIES': 42,
     'RATE_LIMIT': 42,
-    'EVENT_LOG': 'maybe',
+    'EVENT_LOG': 4.2,
     'EVENT_LOG_KINDS': 'outbound.sent',
     'EVENT_LOG_PAYLOAD': 42,
     'EVENT_LOG_MAX_PAYLOAD_BYTES': 'lots',
@@ -233,8 +295,14 @@ def test_the_expected_ids_are_the_ones_the_checks_emit():
 
 
 def test_every_check_id_is_documented():
-    """An operator meeting E021 has to be able to look it up."""
-    missing = sorted(EXPECTED_IDS - documented_ids())
+    """An operator meeting E021 has to be able to look it up.
+
+    Read from the registry rather than from `EXPECTED_IDS`, which is the set of ids
+    the fixtures below *emit*. Some rows cannot be emitted by a `TELEGRAM_BOT` dict at
+    all — W010 needs an ephemeral hostname, W011 needs `DATABASE_ROUTERS` — so an id
+    added without touching that set was documented only by whoever remembered to.
+    """
+    missing = sorted({check.code for check in CHECKS} - documented_ids())
     assert not missing, f'check ids missing from docs/wiki/Settings.md: {missing}'
 
 
@@ -282,6 +350,110 @@ def test_an_unreadable_enabled_still_warns_and_reports_its_own_problem():
 
     assert 'django_redis_aiogram.E001' in reported
     assert 'django_redis_aiogram.W001' in reported
+
+
+@override_settings(
+    TELEGRAM_BOT={
+        'BLPOP_TIMEOUT': 30,
+        'HEARTBEAT_INTERVAL': 10,
+        'REDIS_TIMEOUT': 60,
+        'TOKEN': '1:x',
+        'REDIS_URL': 'redis://x',
+    }
+)
+def test_a_pop_capped_by_the_heartbeat_is_reported_and_names_it():
+    """The configuration W004 used to be silent on.
+
+    The consumer caps the pop at `min(BLPOP_TIMEOUT, HEARTBEAT_INTERVAL, REDIS_TIMEOUT
+    - 1)`, so this waits ten seconds while the setting says thirty. Comparing against
+    the read deadline alone — 60 here — said nothing, and the operator went on
+    believing the thirty took.
+    """
+    reported = [message for message in check_settings() if str(message.id).endswith('W004')]
+
+    assert reported, 'a pop capped at a third of its setting was not reported'
+    assert 'caps at 10' in reported[0].msg, reported[0].msg
+    assert 'HEARTBEAT_INTERVAL' in (reported[0].hint or ''), reported[0].hint
+
+
+@override_settings(
+    TELEGRAM_BOT={
+        'BLPOP_TIMEOUT': 30,
+        'HEARTBEAT_INTERVAL': 60,
+        'REDIS_TIMEOUT': 10,
+        'TOKEN': '1:x',
+        'REDIS_URL': 'redis://x',
+    }
+)
+def test_a_pop_capped_by_the_read_deadline_names_that_instead():
+    """The other binding term, because a hint that always says the same thing is a
+    hint that sends half its readers to the wrong setting."""
+    reported = [message for message in check_settings() if str(message.id).endswith('W004')]
+
+    assert reported, 'a pop outside the read deadline was not reported'
+    assert 'caps at 9' in reported[0].msg, reported[0].msg
+    assert 'REDIS_TIMEOUT' in (reported[0].hint or ''), reported[0].hint
+
+
+@override_settings(
+    TELEGRAM_BOT={
+        'BLPOP_TIMEOUT': 10,
+        'HEARTBEAT_INTERVAL': 10,
+        'REDIS_TIMEOUT': 60,
+        'TOKEN': '1:x',
+        'REDIS_URL': 'redis://x',
+    }
+)
+def test_a_pop_exactly_at_the_cap_is_not_reported():
+    """Equal is not over. The consumer runs it at ten, which is what was asked for, so
+    warning here would be the "fires on a working install" defect in miniature."""
+    assert [message for message in check_settings() if str(message.id).endswith('W004')] == []
+
+
+ROUTED_LOG = {'EVENT_LOG': True, 'EVENT_LOG_DATABASE': 'events', 'TOKEN': '1:x', 'REDIS_URL': 'redis://x'}
+
+
+def routing_warnings():
+    """The W011 messages the current settings produce."""
+    return [message for message in check_settings() if str(message.id).endswith('W011')]
+
+
+@override_settings(TELEGRAM_BOT=ROUTED_LOG, DATABASE_ROUTERS=[])
+def test_a_log_database_nothing_routes_to_is_reported():
+    """E040, E041 and W005 all pass on this, and `migrate` still never creates the table.
+
+    The alias names where the rows belong; the router is what puts them there. Set the
+    first and forget the second and every existing check is satisfied while the writer
+    logs `no such table` once per batch for ever.
+    """
+    reported = routing_warnings()
+
+    assert reported, 'a log pointed at an unrouted alias was not reported'
+    assert 'nothing routes this app there' in reported[0].msg
+    assert 'TelegramEventLogRouter' in (reported[0].hint or '')
+
+
+@override_settings(
+    TELEGRAM_BOT=ROUTED_LOG,
+    DATABASE_ROUTERS=['django_redis_aiogram.dbrouter.TelegramEventLogRouter'],
+)
+def test_a_dotted_path_router_satisfies_it():
+    """The spelling Django's own documentation uses."""
+    assert routing_warnings() == []
+
+
+@override_settings(TELEGRAM_BOT=ROUTED_LOG, DATABASE_ROUTERS=[TelegramEventLogRouter()])
+def test_an_instance_router_satisfies_it_too():
+    """`DATABASE_ROUTERS` takes instances as well, and a project mixing the two — a path
+    for ours, an instance for its own — is exactly what a string comparison gets wrong."""
+    assert routing_warnings() == []
+
+
+@override_settings(TELEGRAM_BOT={'EVENT_LOG': True, 'TOKEN': '1:x', 'REDIS_URL': 'redis://x'}, DATABASE_ROUTERS=[])
+def test_a_log_on_the_default_database_needs_no_router():
+    """Nothing was pointed anywhere, so nothing needs routing — and warning here would
+    be the "fires on a working install" defect this whole issue is about."""
+    assert routing_warnings() == []
 
 
 @override_settings(TELEGRAM_BOT={'TOKEN': '1:x', 'REDIS_URL': 'redis://localhost:6379/0'})

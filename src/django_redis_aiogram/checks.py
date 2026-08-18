@@ -33,7 +33,7 @@ from django_redis_aiogram.enums import (
     choices,
 )
 from django_redis_aiogram.events import known_kinds
-from django_redis_aiogram.settings import SETTINGS_NAME, coerce_bool, conf
+from django_redis_aiogram.settings import SETTINGS_NAME, blpop_ceiling, coerce_bool, conf
 from django_redis_aiogram.throttling import KNOWN_RATE_LIMIT_KEYS
 
 DELIVERY_CHOICES = choices(DeliveryKind)
@@ -89,11 +89,44 @@ class Check:
 
 
 def _a_boolean(key: str) -> list[Problem]:
-    """Require a real bool: a non-empty string would enable whatever it names."""
+    """Require a real bool, for the settings that are read on raw truthiness.
+
+    Only ``RAISE_EXCEPTION`` still is: ``client.py`` tests it with a bare ``if``, so
+    ``'false'`` there would re-raise the exception the project meant to swallow. That
+    is a defect in ``client.py`` rather than in this rule, and it has its own issue —
+    until it is fixed, this setting genuinely does need a real bool, and saying so at
+    boot is better than surprising someone at the first failed send.
+
+    Everything else goes through :func:`_a_readable_boolean`, because everything else
+    is coerced at the point of use.
+    """
     value = conf.get(key)
     if isinstance(value, bool):
         return []
     return [Problem(f'must be a boolean, got {type(value).__name__}.')]
+
+
+def _a_readable_boolean(key: str) -> list[Problem]:
+    """Accept whatever ``coerce_bool`` accepts, and report what it would refuse.
+
+    This rule used to demand a real ``bool``, which had it backwards in both
+    directions. ``{'ENABLED': 'true'}`` is documented, boots, sends — and failed
+    ``manage.py check``; while the values ``coerce_bool`` genuinely refuses raise
+    ``ImproperlyConfigured`` out of ``apps.ready()`` before any check runs, so the
+    error could never fire on the case it was written for. The package's own fixtures
+    tripped it on working settings.
+
+    Asked by trying the coercion rather than by reimplementing its rules, so the check
+    and the runtime cannot disagree — and the message is the one the runtime would
+    have raised, which is the sentence a reader needs.
+    """
+    try:
+        coerce_bool(conf.get(key), f"{SETTINGS_NAME}['{key}']")
+    except ImproperlyConfigured as error:
+        # the message already names the setting, and `Check._message` prefixes it
+        # again — so hand back only the tail
+        return [Problem(str(error).replace(f"{SETTINGS_NAME}['{key}'] ", '', 1))]
+    return []
 
 
 def _an_integer(key: str, *, minimum: int | None = None) -> list[Problem]:
@@ -370,22 +403,30 @@ def _known_keys(_key: str) -> list[Problem]:
 
 
 def _a_pop_inside_the_deadline(key: str) -> list[Problem]:
-    """Warn when BLPOP is asked to wait longer than a read is allowed to take.
+    """Warn when BLPOP is asked to wait longer than the consumer will let it.
 
-    The consumer caps the pop rather than letting it raise, so the setting would
-    otherwise be quietly ignored.
+    The consumer caps the pop rather than letting it raise, so a setting above the cap
+    is quietly ignored — and the operator who raised it goes on believing it took.
+
+    Compared against the whole cap, not the read deadline alone, which is what this
+    rule used to do. ``HEARTBEAT_INTERVAL`` binds it just as hard, so
+    ``BLPOP_TIMEOUT=30, HEARTBEAT_INTERVAL=10, REDIS_TIMEOUT=60`` was silent while the
+    pop ran at ten — and when the rule *did* fire, its hint named ``REDIS_TIMEOUT``
+    whether or not that was the term doing the binding. It now reports the cap the
+    consumer actually computes, from the same helper the consumer uses, and names
+    whichever setting produced it.
     """
     try:
         asked = int(conf[key])
-        deadline = int(conf['REDIS_TIMEOUT'])
+        ceiling = blpop_ceiling()
     except (TypeError, ValueError):
-        return []  # E014 and E030 own the type complaints
-    if asked < deadline:
+        return []  # E014, E023 and E030 own the type complaints
+    if asked <= ceiling.seconds:
         return []
     return [
         Problem(
-            f'is {asked}, which the read deadline caps at {max(1, deadline - 1)}.',
-            hint=f"Raise {SETTINGS_NAME}['REDIS_TIMEOUT'] above it, or lower this.",
+            f'is {asked}, which the consumer caps at {ceiling.seconds}.',
+            hint=f"Raise {SETTINGS_NAME}['{ceiling.bound_by}'], which is what binds it, or lower this.",
         )
     ]
 
@@ -487,6 +528,53 @@ def _somewhere_to_write_the_log(key: str) -> list[Problem]:
     ]
 
 
+def _a_routed_log_database(key: str) -> list[Problem]:
+    """Warn when the log is pointed at its own alias with nothing routing it there.
+
+    ``EVENT_LOG_DATABASE`` names where the rows belong; ``TelegramEventLogRouter`` is
+    what puts them there. Set the first and forget the second and every existing check
+    passes — E040 sees a string, E041 sees a configured alias with a real engine, W005
+    sees a database — while ``migrate`` never creates the table on it and the writer
+    logs ``no such table`` once per batch for ever.
+
+    A warning rather than an error, because a project may route this app by hand:
+    a router of its own that returns the same alias is a legitimate way to do it, and
+    this rule cannot see inside one.
+
+    Compared through ``import_string`` so both spellings count. ``DATABASE_ROUTERS``
+    accepts dotted paths and instances alike, and a project mixing the two — a path
+    for ours, an instance for its own — is exactly the case a string comparison gets
+    wrong.
+    """
+    if not _the_log_is_on():
+        return []
+    alias = str(conf.get(key) or '').strip()
+    if not alias:
+        return []  # nothing was pointed anywhere, so nothing needs routing
+    from django.conf import settings as django_settings  # noqa: PLC0415 - as above
+
+    from django_redis_aiogram.dbrouter import TelegramEventLogRouter  # noqa: PLC0415 - no django.db at import
+
+    for entry in getattr(django_settings, 'DATABASE_ROUTERS', ()) or ():
+        candidate = entry
+        if isinstance(entry, str):
+            try:
+                candidate = import_string(entry)
+            except ImportError:
+                continue  # a router Django itself will complain about
+        if candidate is TelegramEventLogRouter or isinstance(candidate, TelegramEventLogRouter):
+            return []
+    return [
+        Problem(
+            f'is {alias!r}, but nothing routes this app there.',
+            hint=(
+                "Add 'django_redis_aiogram.dbrouter.TelegramEventLogRouter' to DATABASE_ROUTERS, "
+                f'or leave {key} unset so the log uses the default database.'
+            ),
+        )
+    ]
+
+
 def _a_log_that_is_pruned(key: str) -> list[Problem]:
     """Warn when nothing will ever delete a row, so the table only grows."""
     if not _the_log_is_on():
@@ -572,10 +660,12 @@ def _filled_in_when_enabled(key: str, *, hint: str) -> list[Problem]:
 
 
 CHECKS: tuple[Check, ...] = (
-    Check('E001', 'ENABLED', _a_boolean),
-    Check('E002', 'AUTODISCOVER', _a_boolean),
+    Check('E001', 'ENABLED', _a_readable_boolean),
+    Check('E002', 'AUTODISCOVER', _a_readable_boolean),
+    # strict on purpose: `client.py` reads this one on raw truthiness, so 'false'
+    # would re-raise. See `_a_boolean` — the fix belongs in client.py
     Check('E003', 'RAISE_EXCEPTION', _a_boolean),
-    Check('E017', 'ALLOW_PICKLE', _a_boolean),
+    Check('E017', 'ALLOW_PICKLE', _a_readable_boolean),
     Check('E004', 'TOKEN', _a_string),
     Check('E005', 'REDIS_URL', _a_string),
     Check('E006', 'MODULE_NAME', _a_string),
@@ -601,7 +691,7 @@ CHECKS: tuple[Check, ...] = (
     Check('E020', 'RATE_LIMIT', _sane_rate_limits),
     Check('E022', 'SERIALIZER', _readable_serializer),
     Check('E019', 'FSM_STORAGE', _importable_storage),
-    Check('E031', 'EVENT_LOG', _a_boolean),
+    Check('E031', 'EVENT_LOG', _a_readable_boolean),
     Check('E032', 'EVENT_LOG_KINDS', _a_collection_of_strings),
     Check('E033', 'EVENT_LOG_PAYLOAD', partial(_a_string, allowed=PAYLOAD_CHOICES)),
     Check('E034', 'EVENT_LOG_MAX_PAYLOAD_BYTES', partial(_an_integer, minimum=0)),
@@ -612,11 +702,12 @@ CHECKS: tuple[Check, ...] = (
     Check('E039', 'EVENT_LOG_RETENTION_DAYS', partial(_an_integer, minimum=0)),
     Check('E040', 'EVENT_LOG_DATABASE', _a_string),
     Check('E041', 'EVENT_LOG_DATABASE', _a_configured_log_database),
-    Check('E042', 'EVENT_LOG_SYNC', _a_boolean),
+    Check('W011', 'EVENT_LOG_DATABASE', _a_routed_log_database),
+    Check('E042', 'EVENT_LOG_SYNC', _a_readable_boolean),
     Check('E043', 'REDIS_URL', _a_url_pickle_can_survive),
     Check('E044', 'DRAIN_TIMEOUT', partial(_a_number, minimum=0)),
     Check('E045', 'MAX_IN_FLIGHT', partial(_an_integer, minimum=0)),
-    Check('E046', 'REQUIRE_CRASH_SAFE', _a_boolean),
+    Check('E046', 'REQUIRE_CRASH_SAFE', _a_readable_boolean),
     Check('W005', 'EVENT_LOG', _somewhere_to_write_the_log),
     Check('W006', 'EVENT_LOG_RETENTION_DAYS', _a_log_that_is_pruned),
     Check('W007', 'EVENT_LOG_BATCH_SIZE', _a_batch_the_buffer_can_hold),

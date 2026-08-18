@@ -11,6 +11,7 @@ was absent.
 
 import os
 from collections.abc import Iterator, Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from django.conf import settings as django_settings
@@ -147,6 +148,37 @@ class Settings(Mapping[str, Any]):
 
 
 conf = Settings()
+
+
+@dataclass(frozen=True)
+class PopCeiling:
+    """How long a blocking pop may actually wait, and which setting decided that."""
+
+    seconds: int
+    bound_by: str
+
+
+def blpop_ceiling() -> PopCeiling:
+    """Return the real cap on a blocking pop, which is not ``BLPOP_TIMEOUT`` alone.
+
+    Three bounds meet at the consumer's pop and the smallest wins: the configured
+    ``BLPOP_TIMEOUT``, the ``HEARTBEAT_INTERVAL`` — a worker that popped for longer
+    than that would let its own heartbeat key expire and look dead — and one second
+    inside ``REDIS_TIMEOUT``, so the pop returns before the read deadline fires.
+
+    Lives here rather than beside the consumer because ``checks.py`` needs it too, and
+    importing :mod:`django_redis_aiogram.delivery` would pull in aiogram through
+    :mod:`django_redis_aiogram.api` — which is the whole reason ``manage.py check``
+    costs nothing.
+
+    ``bound_by`` is what makes a hint actionable: told only that the pop is capped, an
+    operator raises ``REDIS_TIMEOUT`` when it was the heartbeat that bound it.
+    """
+    interval = max(1, int(conf['HEARTBEAT_INTERVAL']))
+    deadline = max(1, int(conf['REDIS_TIMEOUT'])) - 1
+    if interval <= deadline:
+        return PopCeiling(seconds=max(1, interval), bound_by='HEARTBEAT_INTERVAL')
+    return PopCeiling(seconds=max(1, deadline), bound_by='REDIS_TIMEOUT')
 
 
 def _reset_on_setting_change(

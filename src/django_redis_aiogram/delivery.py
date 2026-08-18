@@ -40,9 +40,9 @@ from django_redis_aiogram.enums import DeliveryKind, EventKind
 from django_redis_aiogram.envelope import Envelope, UnknownEnvelopeVersionError, unpack
 from django_redis_aiogram.events import new_correlation_id, worker_identity
 from django_redis_aiogram.recorder import Event, as_identifier, recorder
-from django_redis_aiogram.redis import as_bytes, get_redis, heartbeat_key, processing_key, queue_key, read_timeout
+from django_redis_aiogram.redis import as_bytes, get_redis, heartbeat_key, processing_key, queue_key
 from django_redis_aiogram.serializers import PickleReadRefusedError, SerializationError, loads
-from django_redis_aiogram.settings import conf
+from django_redis_aiogram.settings import blpop_ceiling, conf
 
 logger = logging.getLogger('django_redis_aiogram')
 
@@ -474,13 +474,12 @@ class BlpopDelivery(Delivery):
 
     def run(self) -> None:
         """Block on the queue until :meth:`stop` is called."""
-        # 0 means "block for ever" in Redis, which would swallow stop(). The
-        # heartbeat is written between reads, so a read longer than its interval
-        # would let the key expire under a consumer that is doing fine
-        interval = max(1, int(conf['HEARTBEAT_INTERVAL']))
-        # and the read deadline caps it too: asking BLPOP to wait longer than
-        # the socket will wait for an answer turns an idle round into an error
-        timeout = max(1, min(int(conf['BLPOP_TIMEOUT']), interval, read_timeout() - 1))
+        # 0 means "block for ever" in Redis, which would swallow stop(); the
+        # heartbeat would expire under a consumer that is doing fine; and a pop asked
+        # to wait longer than the socket will turns an idle round into an error.
+        # `blpop_ceiling()` weighs all three, and `W004` reports on the same helper —
+        # one place, so the check cannot describe a cap the consumer does not use
+        timeout = max(1, min(int(conf['BLPOP_TIMEOUT']), blpop_ceiling().seconds))
         connection = get_redis()
         reclaimed = self.reclaim()
         logger.info(
