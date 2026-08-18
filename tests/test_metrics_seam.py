@@ -18,6 +18,7 @@ from aiogram.types import Chat, Message, Update, User
 from django.test import override_settings
 
 from django_redis_aiogram import TelegramBot
+from django_redis_aiogram import recorder as recorder_module
 from django_redis_aiogram.instrumentation import install_instrumentation, instrumented
 from django_redis_aiogram.recorder import WRITER_THREAD, Event, EventRecorder, recorder
 from django_redis_aiogram.signals import events_recorded
@@ -612,3 +613,45 @@ def test_a_receiver_that_cannot_even_be_named_costs_nobody_their_batch(redis_ser
     # which line appears depends on which layer caught it, and the point is that
     # neither escapes
     assert 'receiver raised' in caplog.text or 'publishing recorded events failed' in caplog.text
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_a_failure_while_reporting_a_receiver_costs_nobody_their_batch(redis_server, collected, monkeypatch):
+    """The reporting loop is inside the guard, not only the dispatch.
+
+    The review asked for this by way of a receiver whose `__getattr__` raises
+    something `getattr(..., None)` cannot absorb — and that turned out to be
+    unreachable: `Signal.connect` calls `iscoroutinefunction`, which reads `__name__`
+    itself, so such a receiver is rejected before it can ever be published to. Naming
+    it is therefore safe by construction.
+
+    What *is* reachable is the logging: a handler or formatter that raises, which is
+    ordinary enough in a project with custom logging. Same consequence either way —
+    outside the guard it lands in `_flush`'s `except` and is counted as a failed
+    write — so the guard covers the whole loop, and this drives it through the path
+    that can actually happen.
+    """
+    original = recorder_module.logger.error
+    calls = []
+
+    def hostile(*args, **kwargs):
+        calls.append(args)
+        message = 'the logging handler is broken'
+        raise RuntimeError(message)
+
+    def broken_receiver(sender, events, **kwargs):
+        message = 'this receiver raised'
+        raise RuntimeError(message)
+
+    events_recorded.connect(broken_receiver, weak=False, dispatch_uid='tests.metrics.broken')
+    monkeypatch.setattr(recorder_module.logger, 'error', hostile)
+    try:
+        TelegramBot().send_redis(chat_id=7, text='hi')
+        recorder.flush(timeout=5)
+    finally:
+        events_recorded.disconnect(dispatch_uid='tests.metrics.broken')
+        monkeypatch.setattr(recorder_module.logger, 'error', original)
+
+    assert calls, 'the reporting line never ran, so nothing is being tested'
+    assert kinds(collected) == ['outbound.queued'], 'the working receiver lost its batch'
+    assert recorder._dropped == 0, f'a broken log line was counted as {recorder._dropped} dropped events'

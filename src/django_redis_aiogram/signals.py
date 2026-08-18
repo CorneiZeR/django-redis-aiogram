@@ -62,7 +62,8 @@ from django.dispatch import Signal
 #: * under ``EVENT_LOG_SYNC``, on the thread that recorded the event, after its
 #:   write attempt. That flag only takes effect with the log on — there is nothing
 #:   to insert synchronously otherwise — so there the write is always attempted, and
-#:   may still fail. It is for tests, and this is one more reason it is
+#:   may still fail. It is a testing setting, and receivers running inside the send
+#:   path is one more reason to keep it one
 #: * at shutdown, on whichever thread called ``stop()``, for whatever the writer had
 #:   not drained. Those events are published rather than dropped because they are the
 #:   last ones before the process goes, and there is by then no writer left to hand

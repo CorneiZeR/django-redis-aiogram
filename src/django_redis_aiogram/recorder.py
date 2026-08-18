@@ -566,24 +566,37 @@ class EventRecorder:
         this method's promise true whatever Django does with it, on any supported
         version.
 
+        The upshot is a method that **cannot raise**, which is the property the rest
+        of the writer needs from it rather than a defensive habit.
+
         A tuple rather than the list itself: receivers run one after another with
         the same argument, so one of them sorting or clearing a list would decide
         what the next one sees.
         """
         if not events_recorded.receivers:
             return
+        # the reporting loop is inside the guard as well as the dispatch, because
+        # `getattr(..., None)` absorbs only `AttributeError` — a receiver whose
+        # `__getattr__` raises anything else makes naming it raise, and the whole
+        # point is that nothing about a receiver reaches `_flush`'s failure counter.
+        # A raise partway through does leave the remaining outcomes unlogged, which
+        # is a worse log and not a worse batch
         try:
-            outcomes = events_recorded.send_robust(sender=self, events=tuple(batch))
+            for receiver, outcome in events_recorded.send_robust(sender=self, events=tuple(batch)):
+                if isinstance(outcome, BaseException):
+                    logger.error(
+                        'an events_recorded receiver raised',
+                        exc_info=outcome,
+                        extra={'tg_receiver': _receiver_name(receiver), 'tg_count': len(batch)},
+                    )
         except Exception:
-            logger.exception('publishing recorded events failed', extra={'tg_count': len(batch)})
-            return
-        for receiver, outcome in outcomes:
-            if isinstance(outcome, BaseException):
-                logger.error(
-                    'an events_recorded receiver raised',
-                    exc_info=outcome,
-                    extra={'tg_receiver': _receiver_name(receiver), 'tg_count': len(batch)},
-                )
+            # even this is suppressed: `logger.exception` is `logger.error` with
+            # `exc_info`, so a project whose handler or formatter raises would take
+            # the fallback out too — and the whole purpose here is that **nothing**
+            # about publishing reaches `_flush`'s failure counter, where it would be
+            # reported as a database refusing a batch it never saw
+            with contextlib.suppress(Exception):
+                logger.exception('publishing recorded events failed', extra={'tg_count': len(batch)})
 
     def _deliver(self, batch: list[Event]) -> None:
         """Write a batch if this process keeps the table, then publish it either way.
