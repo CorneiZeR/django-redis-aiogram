@@ -111,7 +111,8 @@ Packaging-only work does not need the Redis suite, and vice versa.
   `tests/test_event_log_off.py` for the model, `tests/db/test_admin.py` for the
   admin.
 - **`recorder.py` imports no `django.db`.** Only `eventlog.py` does, and the
-  writer thread imports it on its first flush. That is what makes a disabled log
+  writer thread imports it on its first *write* — not its first flush, which since
+  3.1.0 are different things. That is what makes a disabled log
   cost nothing and what makes `record()` legal from a coroutine — `put_nowait`
   touches no I/O, so there is no `SynchronousOnlyOperation` to avoid. Since 3.1.0
   the writer also runs with the log *off*, for `events_recorded` receivers alone.

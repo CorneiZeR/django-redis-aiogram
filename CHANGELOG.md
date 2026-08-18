@@ -226,8 +226,10 @@ them, so it is not one per message.
   this is an error and not a warning.
 - **A metrics seam that is not the event log.** `django_redis_aiogram.signals`
   carries `events_recorded`, a `django.dispatch.Signal` fired once per batch on the
-  event writer's own thread — except under `EVENT_LOG_SYNC`, where there is no writer
-  thread — with the `Event` objects that batch holds. A signal
+  event writer's own thread, with the `Event` objects that batch holds — except in the
+  two cases where there is no writer thread to run on: under `EVENT_LOG_SYNC`, which
+  only takes effect with the log on, and at shutdown for whatever the writer had not
+  drained, on the thread that called `recorder.stop()`. A signal
   rather than a setting naming a dotted path: no path to get wrong, no check id for
   it, no lazy import cache, and no question about what a failing import means.
   `send_robust`, so a receiver that raises costs neither the other receivers their
@@ -251,11 +253,16 @@ them, so it is not one per message.
 
   Receivers see the batch **after** its write has been attempted — and only attempted:
   with the log off there is nothing to write, and a failed write publishes anyway. They
-  get it as a tuple. Both are containment rather than convenience: they were handed the same list and the
-  same `Event` objects the ORM was about to read, and a frozen dataclass does not
-  freeze the `detail` dict inside it — so a receiver clearing the list or editing a
-  `detail` could change what got persisted, and one receiver could decide what the
-  next one saw.
+  get it as a tuple.
+
+  Both are containment rather than convenience. Publishing came *first* originally, and
+  receivers were handed the same list and the same `Event` objects the ORM was about to
+  read — and a frozen dataclass does not freeze the `detail` dict inside it, so a
+  receiver clearing the list or editing a `detail` changed what got persisted. It
+  cannot now: by the time a receiver runs, the write is done. The tuple covers what
+  ordering does not — `send_robust` hands every receiver the same argument, so one of
+  them could otherwise decide what the next one sees. Each `detail` dict is still
+  shared between receivers, so treat it as read-only.
 
   `Event`'s field names are pinned in `tests/test_public_surface.py`, which makes
   them public API. Importing the seam pulls neither aiogram nor the ORM: 0.356 ms

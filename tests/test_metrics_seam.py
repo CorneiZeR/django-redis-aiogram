@@ -241,11 +241,18 @@ def test_event_log_kinds_filters_receivers_too(redis_server, collected):
     The alternative — receivers seeing everything while the table is filtered —
     would make the setting mean different things in two places, and a project
     reading `Event-log.md` would have no way to know which.
+
+    Both kinds in one run, and the admitted one is the point: asserting only that
+    nothing arrived would hold if the receiver never connected, if `record()` returned
+    on its first branch, or if the send failed outright — none of which is this
+    setting doing its job. The pass condition is that one arrived and the other did
+    not.
     """
-    TelegramBot().send_redis(chat_id=7, text='hi')
+    TelegramBot().send_redis(chat_id=7, text='hi')  # outbound.queued, excluded
+    recorder.record(Event(kind='outbound.sent'))  # admitted
     recorder.flush(timeout=5)
 
-    assert kinds(collected) == [], f'a kind the deployment excluded reached the receiver: {kinds(collected)}'
+    assert kinds(collected) == ['outbound.sent'], f'the receiver saw {kinds(collected)}'
 
 
 @override_settings(TELEGRAM_BOT=SETTINGS)
