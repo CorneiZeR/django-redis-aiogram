@@ -70,6 +70,25 @@ ahead. Without `LMOVE` it is at-most-once, unless `REQUIRE_CRASH_SAFE` is on —
 then the worker refuses to start rather than deliver that way. A send that
 exhausted `MAX_RETRIES` is logged and acknowledged, not redelivered.
 
+## The container is unhealthy while the probe says `healthy`
+
+The probe was killed by Docker's `timeout`, so its exit code never arrived — `docker
+inspect` shows `ExitCode: -1` and a growing `FailingStreak` beside a last line that
+reads `healthy: heartbeat 6s old, 0 queued`.
+
+It happens when the healthcheck runs `manage.py tgbot_healthcheck`, because a
+management command runs `django.setup()` first: the whole of your `INSTALLED_APPS`,
+every `AppConfig.ready()`, before the first Redis call. In one project that was 17.9
+seconds. Use the form that does not:
+
+```yaml
+      test: ['CMD', 'python', '-m', 'django_redis_aiogram.healthcheck']
+      timeout: 5s
+```
+
+See **[[Deployment]]**. Raising `timeout:` also stops the killing and leaves your whole
+Django app being imported twice a minute to read two keys.
+
 ## Handlers never fire
 
 ```python

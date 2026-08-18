@@ -271,3 +271,27 @@ def test_the_message_the_handler_receives_is_not_the_one_constructed():
 
     assert received, 'the handler never ran'
     assert received[0] is not original, 'patching the original would have worked'
+
+
+def test_the_deployment_healthcheck_recipe_names_a_runnable_module():
+    """The page tells readers what to put in `test:`, so it has to be real.
+
+    The old recipe named `manage.py tgbot_healthcheck` with `timeout: 10s`, and that
+    combination cannot work in a project of ordinary size — a management command runs
+    `django.setup()` first. If the page and the package drift again, the wrong half is
+    the one a reader copies into a compose file and only finds out about in production.
+    """
+    page = (pathlib.Path(__file__).resolve().parent.parent / 'docs' / 'wiki' / 'Deployment.md').read_text(
+        encoding='utf-8'
+    )
+
+    assert "test: ['CMD', 'python', '-m', 'django_redis_aiogram.healthcheck']" in page
+    assert "test: ['CMD', 'python', 'manage.py', 'tgbot_healthcheck']" not in page, (
+        'the page still tells readers to put the management command in a healthcheck'
+    )
+
+    module = importlib.import_module('django_redis_aiogram.healthcheck')
+    assert callable(module.main), 'the module the page names has no main() to run'
+    # `python -m` needs the guard, not just the function
+    source = pathlib.Path(module.__file__).read_text(encoding='utf-8')
+    assert "if __name__ == '__main__':" in source, 'the module cannot be run with python -m'

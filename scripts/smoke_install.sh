@@ -90,6 +90,18 @@ echo "--- the shipped migration applies"
 "$work/venv/bin/python" manage.py migrate --noinput 2>&1 | sed 's/^/    /'
 "$work/venv/bin/python" manage.py makemigrations --check --dry-run 2>&1 | sed 's/^/    /'
 
+echo "--- the healthcheck runs from an install, without django.setup()"
+# the Deployment page tells readers to put this exact command in a compose file, and
+# an install is the only place a packaging-level break in it shows up: a module missing
+# from the wheel, or one that has grown an import needing the app registry
+DJANGO_SETTINGS_MODULE=settings DJANGO_REDIS_AIOGRAM_REDIS_URL=redis://127.0.0.1:1/0 \
+    "$work/venv/bin/python" -m django_redis_aiogram.healthcheck > "$work/probe.out" 2> "$work/probe.err" \
+    && probe_status=0 || probe_status=$?
+grep -q 'redis is unreachable' "$work/probe.err" \
+    || { echo "    the probe did not reach Redis at all:"; sed 's/^/      /' "$work/probe.err"; exit 1; }
+[ "$probe_status" = 1 ] || { echo "    expected exit 1 from an unreachable Redis, got $probe_status"; exit 1; }
+echo "    python -m django_redis_aiogram.healthcheck refused an unreachable Redis with exit 1"
+
 echo "--- the 1.x package name is gone from the installed environment"
 "$work/venv/bin/python" - <<'PY'
 import importlib.util

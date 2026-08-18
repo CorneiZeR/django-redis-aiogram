@@ -403,3 +403,51 @@ def test_the_healthcheck_probe_does_not_import_aiogram():
     )
     assert result.returncode == 0, result.stderr
     assert 'cheap probe ok' in result.stdout
+
+
+def test_the_healthcheck_probe_does_not_populate_the_app_registry(tmp_path):
+    """It runs on a timer in a container, and `django.setup()` costs whatever the host
+    project costs.
+
+    Measured in one consumer — Django 5.2, twenty apps, one registering adapters in
+    `AppConfig.ready()` — 2.45s for the settings module against 17.89s more for
+    `apps.populate()`, which is what made Docker kill the probe at any timeout the wiki
+    could honestly publish, while the probe's own last line said `healthy`.
+
+    Asserted on evidence rather than on timing, which would flake on CI: the settings
+    module used here installs an app whose `ready()` writes a file. Absent means the
+    registry was never populated. The control below proves the marker fires at all.
+    """
+    marker = tmp_path / 'registry-marker'
+    environment = {
+        **os.environ,
+        'DJANGO_SETTINGS_MODULE': 'tests.marker_settings',
+        'DJANGO_REDIS_AIOGRAM_TEST_MARKER': str(marker),
+        'DJANGO_REDIS_AIOGRAM_REDIS_URL': 'redis://127.0.0.1:1/0',
+    }
+    probe = subprocess.run(
+        [sys.executable, '-m', 'django_redis_aiogram.healthcheck'],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=SUBPROCESS_TIMEOUT,
+        env=environment,
+    )
+
+    # a refusal is expected: nothing is listening on port 1. What matters is that it
+    # got far enough to try, and that it never booted the app registry to do so
+    assert probe.returncode == 1, f'the probe did not run at all: {probe.stderr}'
+    assert 'redis is unreachable' in probe.stderr, probe.stderr
+    assert not marker.exists(), 'the probe populated the app registry'
+
+    control = subprocess.run(
+        [sys.executable, '-c', 'import django; django.setup()'],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=SUBPROCESS_TIMEOUT,
+        env=environment,
+    )
+
+    assert control.returncode == 0, control.stderr
+    assert marker.exists(), 'the marker never fires, so its absence above proved nothing'

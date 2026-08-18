@@ -167,6 +167,38 @@ them, so it is not one per message.
   module that owns them and asks the server about the guarantee, which the rest of
   that method already did.
 
+- **The container healthcheck could not finish inside any timeout the wiki could
+  publish.** `manage.py tgbot_healthcheck` was correct and unusable: a management
+  command runs `django.setup()` first, which populates the app registry and executes
+  every `AppConfig.ready()` in the *host* project before the probe reads a single key.
+  Measured in a consumer project — Django 5.2, twenty apps, one registering adapters in
+  `ready()` — 2.45s for the settings module, **17.89s** more for `apps.populate()`, and
+  ~0.01s for the three Redis calls the probe actually makes. Docker killed it at the
+  documented `timeout: 10s`: `ExitCode: -1`, `FailingStreak: 62`, while the probe's own
+  last line read `healthy: heartbeat 6s old, 0 queued`. The container reported unhealthy
+  for the best part of an hour with nothing wrong.
+
+  The decision now lives in `django_redis_aiogram.healthcheck`, which imports nothing
+  that needs the registry, and **`python -m django_redis_aiogram.healthcheck`** is what
+  a healthcheck should run: 69 ms end to end, interpreter startup included.
+  `DJANGO_SETTINGS_MODULE` is already set in a container that runs `manage.py`, so
+  nothing new is passed.
+
+  **What a consumer does:** change the `test:` line, and lower `timeout:` if you had
+  raised it. `manage.py tgbot_healthcheck` keeps working, with the same flags, output
+  and exit codes — it is a wrapper now. It also keeps scanning for stranded in-flight
+  lists and reporting the delivery guarantee, which the `python -m` form leaves off
+  behind `--stranded` and `--guarantee`: neither can change the verdict, the scan is up
+  to twenty `SCAN` rounds over a keyspace often shared with a cache, and the guarantee
+  probe is a write that answers `unknown` on a read-only replica. Twice a minute for a
+  line nobody reads was the wrong trade.
+
+  `ping`, `GET` and `LLEN` are now guarded by `except RedisError` rather than
+  `except Exception`, which is what the two later stages already used. That narrowing
+  showed the suite's own fakes were raising Python's builtin `ConnectionError` — which
+  no real client produces, since redis-py's subclasses `RedisError` and not the
+  builtin.
+
 ### Added
 
 - **`await bot.asend(...)`**, and `asend_redis`, for code already on an event

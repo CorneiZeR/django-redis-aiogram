@@ -10,7 +10,11 @@ from io import StringIO
 import pytest
 from django.core.management import CommandError, call_command
 from django.test import override_settings
-from redis.exceptions import RedisError, ResponseError
+
+# redis-py's own ConnectionError, not the builtin: it subclasses `RedisError` and the
+# builtin does not, so a fake raising the builtin was pretending to be a failure no
+# real client produces — which `except Exception` in the probe used to hide
+from redis.exceptions import ConnectionError, RedisError, ResponseError  # noqa: A004 - the point is to shadow it
 
 from django_redis_aiogram.delivery import BlpopDelivery
 
@@ -111,7 +115,7 @@ def test_unhealthy_when_redis_is_unreachable(monkeypatch):
         def ping(self):
             raise ConnectionError(REFUSED)
 
-    monkeypatch.setattr('django_redis_aiogram.management.commands.tgbot_healthcheck.get_redis', Down)
+    monkeypatch.setattr('django_redis_aiogram.healthcheck.get_redis', Down)
 
     with pytest.raises(CommandError, match='redis is unreachable'):
         healthcheck()
@@ -204,7 +208,7 @@ def test_a_heartbeat_read_that_fails_after_ping_is_reported(redis_server, monkey
             return getattr(redis_server, name)
 
     monkeypatch.setattr(
-        'django_redis_aiogram.management.commands.tgbot_healthcheck.get_redis',
+        'django_redis_aiogram.healthcheck.get_redis',
         FailsTheRead,
     )
 
@@ -228,7 +232,7 @@ def test_a_queue_read_that_fails_is_reported(redis_server, monkeypatch):
             return getattr(redis_server, name)
 
     monkeypatch.setattr(
-        'django_redis_aiogram.management.commands.tgbot_healthcheck.get_redis',
+        'django_redis_aiogram.healthcheck.get_redis',
         FailsTheCount,
     )
 

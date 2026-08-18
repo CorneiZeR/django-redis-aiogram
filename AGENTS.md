@@ -22,6 +22,7 @@ src/django_redis_aiogram/
     checks.py       system checks E001-E044, W001-W009
     settings.py     lazy settings with an environment fallback
     redis.py        lazy connection
+    healthcheck.py  the container probe; must import nothing needing the app registry
     routers.py      autodiscover
     models.py       TelegramEvent, the append-only feed; migrations/ beside it
     events.py       the event-kind registry and the correlation id
@@ -110,6 +111,14 @@ Packaging-only work does not need the Redis suite, and vice versa.
   `client`, `serializers` or `api`. A subprocess test pins each:
   `tests/test_event_log_off.py` for the model, `tests/db/test_admin.py` for the
   admin.
+- **`healthcheck.py` never populates the app registry.** It exists so
+  `python -m django_redis_aiogram.healthcheck` can answer without `django.setup()`,
+  which in one measured consumer cost 17.9s of `AppConfig.ready()` against 0.01s of
+  probing — more than any Docker `timeout` the wiki could publish. So: no models, no
+  aiogram, no `django_redis_aiogram.client`, and nothing that reaches them
+  transitively. `tests/test_lazy_init.py` proves it with a settings module whose app
+  writes a file from `ready()`, and asserts the file is absent — plus a control that
+  the file appears under `django.setup()`, so its absence means something.
 - **`recorder.py` imports no `django.db`.** Only `eventlog.py` does, and the
   writer thread imports it on its first *write* — not its first flush, which since
   3.1.0 are different things. That is what makes a disabled log

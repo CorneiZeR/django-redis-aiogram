@@ -9,7 +9,9 @@ PATCH_TARGETS = (
     'django_redis_aiogram.delivery.get_redis',
     'django_redis_aiogram.client.get_redis',
     'django_redis_aiogram.get_redis',
-    'django_redis_aiogram.management.commands.tgbot_healthcheck.get_redis',
+    # the probe's decision moved out of the command in 3.1.0, so it can run without
+    # django.setup(); the command is a wrapper and holds no connection of its own
+    'django_redis_aiogram.healthcheck.get_redis',
     'django_redis_aiogram.management.commands.tgbot_reclaim.get_redis',
 )
 

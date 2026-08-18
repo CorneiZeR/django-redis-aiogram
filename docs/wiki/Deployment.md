@@ -184,12 +184,30 @@ itself.
   telegram_bot:
     command: python manage.py start_tgbot
     healthcheck:
-      test: ['CMD', 'python', 'manage.py', 'tgbot_healthcheck']
+      test: ['CMD', 'python', '-m', 'django_redis_aiogram.healthcheck']
       interval: 30s
-      timeout: 10s
+      timeout: 5s
       start_period: 30s
       retries: 3
 ```
+
+**Not `manage.py tgbot_healthcheck`, and this matters more than it looks.** That
+command still exists and still works; what it also does is `django.setup()`, which
+populates the app registry and runs every `AppConfig.ready()` in *your* project before
+it reads a single Redis key. In one measured project — twenty apps, one of them
+registering adapters in `ready()` — that was 17.9 seconds against 0.01 seconds of
+actual probing, so Docker killed the probe at every timeout and the container read
+`unhealthy` for the best part of an hour while the bot was fine. The number that would
+have to go in `timeout:` is not this package's to know, because what it covers is your
+`INSTALLED_APPS`.
+
+The `python -m` form reads your settings module and stops there: measured at 69 ms
+end to end, interpreter startup included. `DJANGO_SETTINGS_MODULE` is already set in a
+container that runs `manage.py`, so nothing new has to be passed. Use the management
+command when a person is looking at the output — it additionally scans for stranded
+in-flight lists and reports which delivery guarantee is in force, neither of which can
+change the verdict and both of which cost a round trip nobody is reading twice a
+minute. `--stranded` and `--guarantee` turn them on for the `python -m` form too.
 
 `start_period` matters: the first heartbeat is written when the consumer's loop
 first turns, so a container checked immediately after start has nothing to show
