@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 import textwrap
+import threading
 from pathlib import Path
 
 import pytest
@@ -316,3 +317,44 @@ def test_connecting_a_metrics_receiver_pulls_neither_aiogram_nor_the_orm():
     )
     assert result.returncode == 0, result.stderr
     assert 'cheap seam ok' in result.stdout
+
+
+def test_threads_racing_for_the_bot_all_get_the_same_one():
+    """The guarantee that replaced an explicit lock, so it needs holding down.
+
+    Two instances mean two event loops and two HTTP sessions, and `loop_lock` — which
+    exists to stop `run_until_complete` being re-entered — would be guarding one of
+    them while the other was entered. The lock this package used to hold is gone
+    because `_singleton`'s module body runs once per process and Python makes
+    concurrent importers wait on that module's own import lock.
+
+    A `Barrier` rather than luck: every thread is held until all of them are ready, so
+    they reach the import at the same moment rather than in sequence.
+    """
+    import django_redis_aiogram
+
+    # forget both the cached attribute and the module whose body builds it, so this
+    # really is a first access rather than a read of what an earlier test left
+    django_redis_aiogram.__dict__.pop('bot', None)
+    sys.modules.pop('django_redis_aiogram._singleton', None)
+
+    gate = threading.Barrier(8)
+    seen: list[object] = []
+    errors: list[BaseException] = []
+
+    def grab():
+        try:
+            gate.wait(timeout=10)
+            seen.append(django_redis_aiogram.bot)
+        except BaseException as error:
+            errors.append(error)
+
+    threads = [threading.Thread(target=grab, name=f'racer-{index}') for index in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=15)
+
+    assert not errors, errors
+    assert len(seen) == 8, f'only {len(seen)} of 8 threads got there'
+    assert len(set(map(id, seen))) == 1, f'{len(set(map(id, seen)))} different bots were built'
