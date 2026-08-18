@@ -88,42 +88,57 @@ Class lookup is limited to `aiogram.types` members that subclass
 
 Asked often enough to be worth answering with a number rather than a preference.
 
-**The bench.** One realistic queued send — `send_message` with a chat id and a
-thirty-character body — packed into an envelope with a fixed correlation id and
-timestamp, so the payload is byte-stable between runs:
+**The bench**, runnable as it stands from a Django shell:
 
 ```python
+import json
+import timeit
+import uuid
+
+from django_redis_aiogram.envelope import pack
+from django_redis_aiogram.serializers import get_serializer
+
 payload = pack(
     'send_message',
     {'chat_id': 12345, 'text': 'hello there, a realistic message'},
     uuid.UUID('11111111-1111-1111-1111-111111111111'),
     1700000000.0,
 )
+serializer = get_serializer()  # bound once, the way the queueing path binds it
+
+calls = 200_000
+print(timeit.timeit(lambda: serializer.dumps(payload), number=calls) / calls * 1e6)
+print(timeit.timeit(lambda: json.dumps(payload), number=calls) / calls * 1e6)
 ```
 
-`timeit`, 200 000 calls, per-call mean, CPython 3.13.14 on arm64 macOS. The encoded
-payload is 202 bytes.
+A fixed correlation id and timestamp, so the payload is byte-stable between runs: a
+32-character body, 202 bytes encoded. Per-call means over 200 000 calls, CPython
+3.13.14 on arm64 macOS.
 
 | | |
 | --- | --- |
-| `get_serializer().dumps(payload)` | **0.90 µs** |
-| `json.dumps(payload)` — same output, default separators | 0.81 µs |
-| `json.dumps(payload, separators=(',', ':'))` — 190 bytes, different output | 1.03 µs |
+| `serializer.dumps(payload)`, serializer bound | **0.91 µs** |
+| `json.dumps(payload)` — same bytes | 0.83 µs |
+| `get_serializer().dumps(payload)` — lookup included | 1.00 µs |
+| `json.dumps(payload, separators=(',', ':'))` — 190 bytes, different output | 1.01 µs |
 
-So the tagging encoder costs about **0.09 µs** over a bare `json.dumps` producing the
-same bytes: that is the price of `default` being available to encode aiogram models,
-and it is the whole of what a faster library has to beat *plus* the 0.81 µs underneath
-it. Against a Redis round trip measured at 14 µs and a Telegram call in tens of
-milliseconds, a microsecond per message is not the thing to spend a dependency on —
-and `orjson` would also change what is representable, since it has its own rules about
-`dict` keys and subclasses while the tagging here depends on `default` being called
-for exactly the types it registers.
+So the tagging costs about **0.08 µs** over a bare `json.dumps` producing the same
+bytes: the price of `default` being available to encode aiogram models. The third row
+is a separate 0.09 µs for resolving the serializer, which the queueing path pays once
+per write rather than once per message — worth separating, because it is the same size
+as the overhead and easy to attribute to the wrong thing.
 
-The third row is worth knowing for a different reason: this package encodes with
-Python's **default** separators, so a payload carries about 6% more bytes than it
-needs to. Cheap to change and deliberately not changed here — it would rewrite every
-queued payload's bytes, which is a decision for a release that is thinking about
-storage rather than one closing out its checks.
+A faster library has to beat 0.08 µs *plus* the 0.83 µs underneath it — roughly a
+microsecond in total, against a Redis round trip measured at 14 µs and a Telegram call
+in tens of milliseconds. `orjson` would also change what is representable, since it
+has its own rules about `dict` keys and subclasses while the tagging here depends on
+`default` being called for exactly the types it registers.
+
+The last row is worth knowing for a different reason: this package encodes with
+Python's **default** separators, so a payload carries about 6% more bytes than it needs
+to. Cheap to change and deliberately not changed here — it would rewrite every queued
+payload's bytes, which is a decision for a release thinking about storage rather than
+one closing out its checks.
 
 ## Pickle, the escape hatch
 

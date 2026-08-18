@@ -397,15 +397,6 @@ def test_a_pop_capped_by_the_read_deadline_names_that_instead():
 
 @override_settings(
     TELEGRAM_BOT={
-        'BLPOP_TIMEOUT': 10,
-        'HEARTBEAT_INTERVAL': 10,
-        'REDIS_TIMEOUT': 60,
-        'TOKEN': '1:x',
-        'REDIS_URL': 'redis://x',
-    }
-)
-@override_settings(
-    TELEGRAM_BOT={
         'BLPOP_TIMEOUT': 30,
         'HEARTBEAT_INTERVAL': 9,
         'REDIS_TIMEOUT': 10,
@@ -431,6 +422,15 @@ def test_a_tie_between_the_two_limits_names_both():
     assert 'both have to move' in hint, hint
 
 
+@override_settings(
+    TELEGRAM_BOT={
+        'BLPOP_TIMEOUT': 10,
+        'HEARTBEAT_INTERVAL': 10,
+        'REDIS_TIMEOUT': 60,
+        'TOKEN': '1:x',
+        'REDIS_URL': 'redis://x',
+    }
+)
 def test_a_pop_exactly_at_the_cap_is_not_reported():
     """Equal is not over. The consumer runs it at ten, which is what was asked for, so
     warning here would be the "fires on a working install" defect in miniature."""

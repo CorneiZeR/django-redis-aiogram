@@ -536,8 +536,9 @@ def _a_routed_log_database(key: str) -> list[Problem]:
     ``EVENT_LOG_DATABASE`` names where the rows belong; ``TelegramEventLogRouter`` is
     what puts them there. Set the first and forget the second and every existing check
     passes — E040 sees a string, E041 sees a configured alias with a real engine, W005
-    sees a database — while ``migrate`` never creates the table on it and the writer
-    logs ``no such table`` once per batch for ever.
+    sees a database — while a plain ``migrate`` does not create the table on it and the
+    writer logs ``no such table`` once per batch for ever. ``migrate --database=<alias>``
+    still would, which is why this is a warning: someone may be doing exactly that.
 
     A warning rather than an error, because a project may route this app by hand:
     a router of its own that returns the same alias is a legitimate way to do it, and

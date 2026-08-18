@@ -353,14 +353,17 @@ them, so it is not one per message.
   inside one the figure is 0.088 ms either way. The guarantee the lock used to give is
   pinned by eight threads on a barrier asserting they get one instance.
 - **`orjson` is not coming, and here is the number.** On a fixed 202-byte send,
-  `timeit` over 200 000 calls on CPython 3.13.14: this package's `dumps` is **0.90 µs**
-  and a bare `json.dumps` producing the same bytes is **0.81 µs**. So the tagging
-  encoder costs about 0.09 µs, and a faster library has to beat that plus the 0.81 µs
-  underneath it — roughly a microsecond in total, against a 14 µs Redis round trip and
-  a Telegram call in tens of milliseconds. `orjson` would also change what is
-  representable, since the tagging depends on `default` being called for exactly the
-  types it registers. The bench, the payload and the platform are on the Serialization
-  page so the question stops being reopened.
+  `timeit` over 200 000 calls on CPython 3.13.14: `serializer.dumps(payload)` is
+  **0.91 µs** with the serializer bound the way the queueing path binds it, and a bare
+  `json.dumps` producing the same bytes is **0.83 µs**. So the tagging costs about
+  0.08 µs, and a faster library has to beat that plus the 0.83 µs underneath it —
+  roughly a microsecond in total, against a 14 µs Redis round trip and a Telegram call
+  in tens of milliseconds. Resolving the serializer is a separate 0.09 µs, paid once per
+  write rather than per message, and worth separating because it is the same size as the
+  overhead. `orjson` would also change what is representable, since the tagging depends
+  on `default` being called for exactly the types it registers. The runnable bench, the
+  payload and the platform are on the Serialization page so the question stops being
+  reopened.
 
 ### Infrastructure
 
