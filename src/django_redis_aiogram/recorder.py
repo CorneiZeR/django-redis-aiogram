@@ -9,7 +9,11 @@ to a bounded queue that one writer thread drains in batches.
 ``record()`` reaches only ``Queue.put_nowait`` — a lock, a deque append and a
 notify. Nothing in that chain is decorated ``@async_unsafe``, which is what
 makes it legal from a coroutine with no ``sync_to_async`` and no
-``SynchronousOnlyOperation``. It also avoids what a synchronous insert would do
+``SynchronousOnlyOperation``. One setting suspends that, and only one:
+``EVENT_LOG_SYNC`` inserts on the calling thread on purpose, which is why it is
+documented as a testing setting and why it declines to act inside a running loop.
+
+Going through the queue also avoids what a synchronous insert would do
 inside a caller's ``atomic()`` block: on PostgreSQL a failed statement aborts
 the whole transaction, so logging would corrupt the caller's data.
 
@@ -494,8 +498,14 @@ class EventRecorder:
 
         Both happen inside :meth:`_deliver`, which writes first and publishes in a
         ``finally`` — so a failing database costs rows and not metrics, and nothing
-        reaching the ``except`` here came from a receiver: :meth:`_publish` contains
-        those itself.
+        reaching the ``except`` here came from a receiver: :meth:`_publish` cannot
+        raise.
+
+        Which means **receivers run on whatever thread calls this**, and that is not
+        only the writer's: :meth:`drain_once` calls it on the caller's, which is what
+        lets a test drive the real flush path. The signal's own documentation states
+        the rule that way round rather than listing the threads, so a fourth one does
+        not make it wrong.
         """
         # under the counter's lock, both of them: `_drop`'s docstring already names
         # "the writer on a failed flush" among the threads it protects against, and

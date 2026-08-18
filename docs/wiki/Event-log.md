@@ -194,13 +194,16 @@ enough.
 
 ### Where it runs, and what that costs
 
-On the **event writer's own thread**, and — with `EVENT_LOG` on — after that
-batch's own write has been attempted. So a slow receiver delays neither a send nor
-the rows it just saw, only later batches and how long the writer takes to stop.
-Never delaying a send is the whole reason this is not a settings hook calling into
-your code from the send path.
+The rule is **whichever thread flushed the batch publishes it**, and normally that is
+the event writer's own — with `EVENT_LOG` on, after that batch's own write has been
+attempted. So a slow receiver delays neither a send nor the rows it just saw, only
+later batches and how long the writer takes to stop. Never delaying a send is the
+whole reason this is not a settings hook calling into your code from the send path.
 
-Two cases run elsewhere, both because there is no writer thread to run on:
+Three other threads can flush a batch, so three other threads can publish one:
+
+* whatever calls `recorder.drain_once()`, which exists so a test can drive the real
+  flush path on its own thread
 
 * under `EVENT_LOG_SYNC`, on the thread that recorded the event, after its write
   attempt. That flag only takes effect with the log on — there is nothing to insert
@@ -222,6 +225,12 @@ containing anything, measured on Django 6.1. This package catches that too and l
 `publishing recorded events failed`; without it the exception would be counted as a
 failed database write, which is the one story in the log that would send you to the
 wrong place entirely.
+
+One consequence survives the catch: `send_robust` stops its own receiver loop when it
+raises, so **receivers after the offending one never see that batch**. The rows are
+unaffected — they were written first — and the next batch starts the loop again. If
+that matters to you, do not write a receiver as a callable class, or keep the risky
+one last.
 
 Two honest notes about `prometheus_client` in particular. Its `labels()` and
 `inc()` both take locks, and in multiprocess mode an increment is an mmap write —

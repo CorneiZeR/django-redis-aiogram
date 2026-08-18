@@ -114,7 +114,9 @@ Packaging-only work does not need the Redis suite, and vice versa.
   writer thread imports it on its first *write* — not its first flush, which since
   3.1.0 are different things. That is what makes a disabled log
   cost nothing and what makes `record()` legal from a coroutine — `put_nowait`
-  touches no I/O, so there is no `SynchronousOnlyOperation` to avoid. Since 3.1.0
+  touches no I/O, so there is no `SynchronousOnlyOperation` to avoid. `EVENT_LOG_SYNC`
+  is the one exception and is test-only: it inserts on the calling thread, which is
+  also why it refuses to act inside a running loop, where the ORM is `@async_unsafe`. Since 3.1.0
   the writer also runs with the log *off*, for `events_recorded` receivers alone.
   Such a process writes no rows, so `EventRecorder._run` must not call
   `_close_connections()` on its way out: that imports `eventlog.py`, which imports

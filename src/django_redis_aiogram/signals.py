@@ -17,9 +17,8 @@ time without dragging anything in.
 
 from django.dispatch import Signal
 
-#: Fired once per batch of recorded events, from the event writer's own thread —
-#: except under ``EVENT_LOG_SYNC``, and at shutdown, where there is no writer thread
-#: to run on.
+#: Fired once per batch of recorded events, on whichever thread flushed that batch —
+#: normally the event writer's own, and three other threads can be it.
 #:
 #: Receivers get ``events``: a tuple of :class:`~django_redis_aiogram.recorder.Event`,
 #: whose field names are pinned by ``tests/test_public_surface.py`` and are
@@ -53,21 +52,32 @@ from django.dispatch import Signal
 #:   dashboard. Receiving a batch is therefore not evidence that a row exists for
 #:   it, and with ``EVENT_LOG`` off there is no row by design.
 #:
-#: It runs on the writer thread, once the batch's own write has been attempted, so a
-#: slow receiver delays neither a send nor that write — only later batches, and the
-#: writer's shutdown.
+#: The rule is **whichever thread flushed the batch publishes it**, and normally that
+#: is the event writer's, once the batch's own write has been attempted — so a slow
+#: receiver delays neither a send nor that write, only later batches and the writer's
+#: shutdown. Never delaying a send is the point of the design; the rest follows from
+#: the rule rather than being promised separately.
 #:
-#: Two cases run somewhere else, both because there is no writer thread to run on:
+#: Three other threads can flush a batch, so three other threads can publish one:
 #:
-#: * under ``EVENT_LOG_SYNC``, on the thread that recorded the event, after its
-#:   write attempt. That flag only takes effect with the log on — there is nothing
-#:   to insert synchronously otherwise — so there the write is always attempted, and
-#:   may still fail. It is a testing setting, and receivers running inside the send
-#:   path is one more reason to keep it one
-#: * at shutdown, on whichever thread called ``stop()``, for whatever the writer had
-#:   not drained. Those events are published rather than dropped because they are the
-#:   last ones before the process goes, and there is by then no writer left to hand
-#:   them to
+#: * whatever calls ``EventRecorder.drain_once()``, which exists so a test can drive
+#:   the real flush path on its own thread
+#: * at shutdown, whichever thread called ``stop()``, for whatever the writer had not
+#:   drained. Those events are published rather than dropped because they are the last
+#:   ones before the process goes, and there is by then no writer left to hand them to
+#: * under ``EVENT_LOG_SYNC``, the thread that recorded the event, which is the one
+#:   case with no batch and no writer involved at all
+#:
+#: ``EVENT_LOG_SYNC`` only takes effect with the log on — there is nothing to insert
+#: synchronously otherwise — so the write is always attempted there, and may still
+#: fail. It is a testing setting, and receivers running inside the send path is one
+#: more reason to keep it one.
+#:
+#: A dispatch that fails can leave later receivers without the batch: ``send_robust``
+#: stops its own loop when Django's failure logging raises, which it does for a
+#: callable instance. This package catches that and logs
+#: ``publishing recorded events failed``, but the receivers after the offending one
+#: were never called.
 #:
 #: The write happens before either, and only when ``EVENT_LOG`` is on: with the log
 #: off nothing is written at all, and a receiver is the only thing the batch reaches.

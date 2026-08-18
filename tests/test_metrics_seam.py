@@ -32,13 +32,17 @@ def a_bot():
     """
 
     class Fake:
+        """Accepts every send and closes its session without doing anything."""
+
         async def send_message(self, **kwargs):
-            return None
+            """Accept the call the way Telegram would, and answer with nothing."""
 
         class session:
+            """The one attribute `TelegramBot.close` reaches for."""
+
             @staticmethod
             async def close():
-                return None
+                """Close nothing; there is no session to release."""
 
     return Fake()
 
@@ -59,6 +63,7 @@ def collected():
     seen: list[Event] = []
 
     def receiver(sender, events, **kwargs):
+        """Keep every event that arrives, in arrival order."""
         seen.extend(events)
 
     events_recorded.connect(receiver, weak=False, dispatch_uid='tests.metrics')
@@ -195,6 +200,7 @@ def test_an_update_reaches_a_receiver(collected):
     )
 
     async def handler(event, data):
+        """Stand in for the handler chain the middleware wraps."""
         return 'done'
 
     asyncio.run(middleware(handler, update, {}))
@@ -267,6 +273,7 @@ def test_one_broken_receiver_does_not_cost_the_others_their_batch(redis_server, 
     """
 
     def broken(sender, events, **kwargs):
+        """Fail the way a receiver with a bug in it fails."""
         msg = 'this receiver is broken'
         raise RuntimeError(msg)
 
@@ -344,6 +351,7 @@ def test_a_receiver_cannot_change_what_was_written(redis_server, collected, monk
     monkeypatch.setattr(recorder, '_write', lambda batch: written.append([dict(e.detail or {}) for e in batch]))
 
     def vandal(sender, events, **kwargs):
+        """Rewrite every `detail` it is handed, which used to reach the rows."""
         for event in events:
             if event.detail is not None:
                 event.detail.clear()
@@ -373,6 +381,7 @@ def test_a_receiver_cannot_take_the_batch_from_the_next_one(redis_server, collec
     shapes = []
 
     def inspect(sender, events, **kwargs):
+        """Record what type the batch arrived as."""
         shapes.append(type(events).__name__)
 
     events_recorded.connect(inspect, weak=False, dispatch_uid='tests.metrics.inspect')
@@ -413,6 +422,7 @@ def test_a_receiver_still_gets_the_detail_a_seam_measured_itself(redis_server, c
     """
 
     def refuse(*args, **kwargs):
+        """Stand in for a Redis that has gone away."""
         message = 'redis is gone'
         raise ConnectionError(message)
 
@@ -438,6 +448,7 @@ def test_a_failed_write_still_reaches_a_receiver(redis_server, collected, monkey
     """
 
     def refuse(batch):
+        """Fail the way an unmigrated database fails."""
         message = 'no such table: django_redis_aiogram_telegramevent'
         raise RuntimeError(message)
 
@@ -469,10 +480,12 @@ def test_the_drop_counter_is_only_ever_touched_under_its_own_lock():
 
         @property
         def _dropped(self):
+            """Read the count from the instance dictionary."""
             return self.__dict__.get('dropped_value', 0)
 
         @_dropped.setter
         def _dropped(self, value):
+            """Record whether the counter lock was held, then store the value."""
             counter = self.__dict__.get('_counter')
             if counter is not None:
                 # __init__ sets the count before it builds the lock
@@ -482,6 +495,7 @@ def test_the_drop_counter_is_only_ever_touched_under_its_own_lock():
     watcher = Watching()
 
     def refuse(batch):
+        """Fail every write, so the failure branch of `_flush` runs."""
         message = 'no such table'
         raise RuntimeError(message)
 
@@ -585,10 +599,12 @@ def test_a_receiver_that_cannot_even_be_named_costs_nobody_their_batch(redis_ser
         """Raises from the call, and from every attempt to describe it."""
 
         def __call__(self, sender, events, **kwargs):
+            """Raise, so the failure path runs."""
             message = 'this receiver is hostile'
             raise RuntimeError(message)
 
         def __repr__(self):
+            """Raise as well, so naming it is not safe either."""
             message = 'and it will not be named either'
             raise RuntimeError(message)
 
@@ -635,11 +651,13 @@ def test_a_failure_while_reporting_a_receiver_costs_nobody_their_batch(redis_ser
     calls = []
 
     def hostile(*args, **kwargs):
+        """Stand in for a logging handler or formatter that raises."""
         calls.append(args)
         message = 'the logging handler is broken'
         raise RuntimeError(message)
 
     def broken_receiver(sender, events, **kwargs):
+        """Raise, so the reporting line runs at all."""
         message = 'this receiver raised'
         raise RuntimeError(message)
 
