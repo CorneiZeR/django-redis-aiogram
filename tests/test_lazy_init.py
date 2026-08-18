@@ -431,6 +431,9 @@ def test_the_probe_with_no_settings_module_refuses_in_one_line():
     assert probe.stderr.startswith('cannot read the settings: '), probe.stderr
     assert 'DJANGO_SETTINGS_MODULE' in probe.stderr, probe.stderr
     assert 'Traceback' not in probe.stderr, probe.stderr
+    # one line, which is the actual claim: a traceback-free multi-line dump would pass
+    # the check above and still be the thing a healthcheck cannot show anybody
+    assert len(probe.stderr.splitlines()) == 1, probe.stderr
 
 
 def test_the_healthcheck_probe_does_not_populate_the_app_registry(tmp_path):

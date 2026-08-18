@@ -88,10 +88,10 @@ from `django_redis_aiogram`, keep the ORM access async, and do not touch
 `docker-compose.yml` running `python manage.py start_tgbot`, restarting always,
 depending on redis, sharing the same image and `.env` as `back`. Give it a
 healthcheck running `python -m django_redis_aiogram.healthcheck` with
-`DJANGO_SETTINGS_MODULE` in its `environment:` — the probe is a separate process and
-`manage.py` only sets that variable inside its own. Not `manage.py
-tgbot_healthcheck` in a healthcheck: it runs `django.setup()` first and Docker kills
-it at the timeout. Leave `DJANGO_REDIS_AIOGRAM_ENABLED` unset on the other services
+`DJANGO_SETTINGS_MODULE` in its `environment:` — the probe is a separate process, and
+`manage.py` only sets that variable inside its own process. Not
+`manage.py tgbot_healthcheck` in a healthcheck: it runs `django.setup()` first and
+Docker kills it at the timeout. Leave `DJANGO_REDIS_AIOGRAM_ENABLED` unset on the other services
 — they queue messages."*
 
 **Turn on the event log.** *"Run `manage.py migrate` first, then enable

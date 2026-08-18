@@ -10,6 +10,8 @@ import datetime
 import importlib
 import pathlib
 import re
+import subprocess
+import sys
 
 import fakeredis
 import pytest
@@ -292,9 +294,28 @@ def test_the_deployment_healthcheck_recipe_names_a_runnable_module():
 
     module = importlib.import_module('django_redis_aiogram.healthcheck')
     assert callable(module.main), 'the module the page names has no main() to run'
-    # `python -m` needs the guard, not just the function
-    source = pathlib.Path(module.__file__).read_text(encoding='utf-8')
-    assert "if __name__ == '__main__':" in source, 'the module cannot be run with python -m'
+
+    # run it, rather than grep the source for `if __name__`: that string is equally
+    # present in a comment or a docstring. `--help` is the invocation that needs neither
+    # settings nor a Redis, so it answers "is this runnable with python -m" and nothing
+    # else — the probe's real exit codes are pinned in tests/test_lazy_init.py
+    helped = subprocess.run(
+        [sys.executable, '-m', 'django_redis_aiogram.healthcheck', '--help'],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert helped.returncode == 0, helped.stderr
+    assert 'python -m django_redis_aiogram.healthcheck' in helped.stdout, helped.stdout
+    for flag in ('--max-queue', '--max-age', '--stranded', '--guarantee'):
+        assert flag in helped.stdout, f'{flag} is not on the module the page names'
+
+
+#: `DJANGO_SETTINGS_MODULE: core.settings` or `DJANGO_SETTINGS_MODULE=core.settings`,
+#: with something after the separator that is not the start of a comment
+SETTINGS_MODULE_ASSIGNMENT = re.compile(r'DJANGO_SETTINGS_MODULE\s*[:=]\s*[^\s#]')
 
 
 @pytest.mark.parametrize('page_name', ['Deployment', 'Troubleshooting'])
@@ -314,9 +335,16 @@ def test_every_published_healthcheck_carries_the_settings_module(page_name):
     blocks = [block for block in page.split('```') if 'django_redis_aiogram.healthcheck' in block]
     assert blocks, f'{page_name} publishes no healthcheck recipe any more'
     for block in blocks:
-        assert 'DJANGO_SETTINGS_MODULE' in block, (
-            f'a healthcheck recipe on {page_name} omits the one variable the probe cannot run without'
-        )
+        # an assignment with a value, not the name anywhere in the block: the prose that
+        # explains why the variable is needed mentions it too, and a recipe whose only
+        # mention is a comment — or `DJANGO_SETTINGS_MODULE:` with nothing after it — is
+        # exactly the one that reads unhealthy for ever
+        assigned = [
+            line
+            for line in block.splitlines()
+            if not line.lstrip().startswith('#') and SETTINGS_MODULE_ASSIGNMENT.match(line.lstrip().lstrip('- '))
+        ]
+        assert assigned, f'a healthcheck recipe on {page_name} does not set DJANGO_SETTINGS_MODULE to anything'
 
 
 #: fragments of what the probe writes, stable across the interpolated parts. Held here as
