@@ -424,7 +424,19 @@ class EventRecorder:
                 events.append(item)
 
     def _abandon(self, buffer: 'queue.Queue[Event | Wake]') -> None:
-        """Write what is left in a queue nobody will drain again, or count it lost."""
+        """Write what is left in a queue nobody will drain again, or count it lost.
+
+        **Receivers run on whatever thread calls this**, which is the writer's own
+        when it is exiting and the caller's when :meth:`stop` reached a queue the
+        writer had already left behind. That is not a lapse in the writer-thread
+        contract so much as the end of it: this queue exists precisely because no
+        writer will ever drain it, so there is no writer thread to route through.
+
+        Publishing anyway rather than dropping, because these are the last events
+        before the process goes — the same reasoning that makes this method write
+        them instead of discarding them. The contract says so on all three surfaces
+        that state it.
+        """
         leftover, wakes = self._empty(buffer)
         _acknowledge(wakes)
         if not leftover:

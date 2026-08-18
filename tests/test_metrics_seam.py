@@ -18,7 +18,7 @@ from django.test import override_settings
 
 from django_redis_aiogram import TelegramBot
 from django_redis_aiogram.instrumentation import install_instrumentation, instrumented
-from django_redis_aiogram.recorder import Event, EventRecorder, recorder
+from django_redis_aiogram.recorder import WRITER_THREAD, Event, EventRecorder, recorder
 from django_redis_aiogram.signals import events_recorded
 
 
@@ -477,3 +477,38 @@ def test_the_drop_counter_is_only_ever_touched_under_its_own_lock():
     assert held, 'nothing wrote the counter, so nothing is being tested'
     assert all(held), f'the counter was written unguarded {held.count(False)} of {len(held)} times'
     assert watcher._dropped == 3, f'the count came out as {watcher._dropped} for two drops and one failed batch'
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_the_last_events_before_shutdown_still_reach_a_receiver(redis_server, collected):
+    """A queue the writer never drained is published by whoever calls `stop()`.
+
+    `_abandon` exists because that queue will never be drained by a writer — either
+    it died, or `stop()` detached it out from under a producer. So there is no
+    writer thread to route through: publishing on the calling thread is the only
+    thing available, and dropping the last events before the process goes would be
+    worse. That is a documented exception to "on the writer's thread" rather than a
+    hole in it, and this pins it.
+    """
+    recorder.record(Event(kind='outbound.queued'))
+    buffer = recorder._queue
+    assert buffer is not None, 'nothing was buffered, so nothing is being tested'
+
+    # detach it the way a writer that has already gone leaves it behind
+    with recorder._guard:
+        recorder._queue = recorder._thread = None
+
+    on_thread = []
+    events_recorded.connect(
+        lambda sender, events, **kwargs: on_thread.append(threading.current_thread().name),
+        weak=False,
+        dispatch_uid='tests.metrics.thread',
+    )
+    try:
+        recorder._abandon(buffer)
+    finally:
+        events_recorded.disconnect(dispatch_uid='tests.metrics.thread')
+
+    assert kinds(collected) == ['outbound.queued'], f'the abandoned batch was lost: {kinds(collected)}'
+    assert on_thread == [threading.current_thread().name], f'it ran on {on_thread}, not the calling thread'
+    assert WRITER_THREAD not in on_thread, 'the writer was gone, so it cannot have run there'

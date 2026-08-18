@@ -15,7 +15,8 @@ time without dragging anything in.
 from django.dispatch import Signal
 
 #: Fired once per batch of recorded events, from the event writer's own thread —
-#: except under ``EVENT_LOG_SYNC``, where there is no writer thread at all.
+#: except under ``EVENT_LOG_SYNC``, and at shutdown, where there is no writer thread
+#: to run on.
 #:
 #: Receivers get ``events``: a tuple of :class:`~django_redis_aiogram.recorder.Event`,
 #: whose field names are pinned by ``tests/test_public_surface.py`` and are
@@ -51,7 +52,17 @@ from django.dispatch import Signal
 #:
 #: It runs on the writer thread, once the batch's own write has been attempted, so a
 #: slow receiver delays neither a send nor that write — only later batches, and the
-#: writer's shutdown. Under ``EVENT_LOG_SYNC`` there is no writer thread at all and
-#: receivers run on the thread that recorded the event, after its insert: that flag
-#: is for tests, and this is one more reason it is.
+#: writer's shutdown.
+#:
+#: Two cases run somewhere else, both because there is no writer thread to run on:
+#:
+#: * under ``EVENT_LOG_SYNC``, on the thread that recorded the event, after its
+#:   insert — that flag is for tests, and this is one more reason it is
+#: * at shutdown, on whichever thread called ``stop()``, for whatever the writer had
+#:   not drained. Those events are published rather than dropped because they are the
+#:   last ones before the process goes, and there is by then no writer left to hand
+#:   them to
+#:
+#: The write happens before either, and only when ``EVENT_LOG`` is on: with the log
+#: off nothing is written at all, and a receiver is the only thing the batch reaches.
 events_recorded: Signal = Signal()

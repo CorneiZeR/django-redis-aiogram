@@ -70,7 +70,7 @@ All prefixed with `tg_`, to avoid colliding with `LogRecord` attributes.
 | `scheduling a send on a loop nothing in this process runs` | WARNING | nothing polls this process and no loop thread exists, so the send is created and never stepped |
 | `rate limited by telegram` | WARNING | refused and backing off |
 | `a synchronous send was called from a running event loop` | WARNING | `send`, `send_redis` or `send_many` from async code: correct, but it writes on the loop's own thread. `tg_alternative` names the awaitable form. Said once per process |
-| `an events_recorded receiver raised` | ERROR | one of your metrics receivers raised; the batch still reached the others and the database. `tg_receiver` names it |
+| `an events_recorded receiver raised` | ERROR | one of your metrics receivers raised; the batch still reached the other receivers, and the database if the event log is on and the write succeeded. `tg_receiver` names it |
 | `delivery started` | INFO | the consumer is up |
 | `message sent` | INFO | one call succeeded |
 | `the event log is falling behind; events are being dropped` | ERROR | the writer cannot keep up; rows are being lost, messages are not |
