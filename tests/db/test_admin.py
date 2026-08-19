@@ -500,8 +500,8 @@ def test_an_o_param_for_an_unindexed_column_does_not_sort(client, index, column)
     Django reads it in one place — the template tag — while `ChangeList` maps `?o=`
     straight onto `list_display`. So a bookmark, a shared link, or a query string kept
     from before this restriction still ordered the whole table by a column no index can
-    serve: on 200 000 rows a sequential scan and a sort, once for the page and again for
-    the bounded count.
+    serve: on 200 000 rows a sequential scan and a sort for the page. Not for the count —
+    `BoundedPaginator` drops the ordering — so this is the page query, once per view.
 
     Asserted on the SQL rather than on the attribute, which is what the previous test did
     and why this went unnoticed.
