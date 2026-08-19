@@ -3,6 +3,8 @@
 import contextlib
 
 import pytest
+from aiogram import exceptions
+from aiogram.methods import SendMessage
 from django.test import override_settings
 
 from django_redis_aiogram import TelegramBot
@@ -142,13 +144,34 @@ class Refusing:
             """aiogram's session, reduced to the one call `close()` makes."""
 
 
-def a_failing_send(raise_exception):
+class RateLimited:
+    """A bot Telegram always meters, so the retry loop runs out instead of failing."""
+
+    def __init__(self):
+        self.attempts = []
+
+    async def send_message(self, **kwargs):
+        """Refuse the way Telegram refuses, which is the other raising path entirely."""
+        self.attempts.append(kwargs)
+        raise exceptions.TelegramRetryAfter(
+            method=SendMessage(chat_id=1, text='x'),
+            message='Too Many Requests',
+            retry_after=0,
+        )
+
+    class session:
+        @staticmethod
+        async def close():
+            """aiogram's session, reduced to the one call `close()` makes."""
+
+
+def a_failing_send(raise_exception, bot=Refusing):
     """Drive one doomed send on the caller's thread and report what reached them."""
     with override_settings(
         TELEGRAM_BOT={**SETTINGS, 'RAISE_EXCEPTION': raise_exception, 'MAX_RETRIES': 0, 'RATE_LIMIT': None}
     ):
         instance = TelegramBot()
-        refusing = Refusing()
+        refusing = bot()
         instance._bot = refusing
         try:
             # no loop runner, so `send_raw` drives the coroutine here and a raise
@@ -182,3 +205,19 @@ def test_the_flag_still_reaches_the_caller_when_it_is_asked_to():
     for asked in (True, 'true'):
         with pytest.raises(ValueError, match='chat not found'):
             a_failing_send(asked)
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_the_exhausted_retry_path_reads_the_word_too():
+    """The second place the flag is read, and the one the tests above cannot reach.
+
+    A refusal Telegram *retries* leaves the loop by exhausting `MAX_RETRIES`, not through
+    the generic handler, so it raises `last_error` from a different line. Reverting that
+    line alone to raw truthiness left 116 tests passing — half a fix with no failure to
+    its name, in the change whose whole subject is reading this flag correctly.
+    """
+    assert a_failing_send('false', bot=RateLimited), 'the send never ran, so nothing was proved'
+
+    for asked in (True, 'true'):
+        with pytest.raises(exceptions.TelegramRetryAfter):
+            a_failing_send(asked, bot=RateLimited)

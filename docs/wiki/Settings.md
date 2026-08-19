@@ -28,7 +28,7 @@ Neither is required for the project to boot.
 unparseable raises `ImproperlyConfigured` rather than being read as true — which
 matters because the environment can only give you a string, so `'false'` under a
 bare truthiness test would mean the opposite of what it says. `RAISE_EXCEPTION`
-was the last setting read that way, and is not any more. See **[[Deployment]]**.
+was the last setting read that way, and no longer is. See **[[Deployment]]**.
 
 ## Bot behaviour
 
