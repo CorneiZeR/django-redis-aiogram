@@ -88,24 +88,6 @@ class Check:
         return report(f'{label} {problem.message}', hint=problem.hint, id=f'{_ID_PREFIX}.{self.code}')
 
 
-def _a_boolean(key: str) -> list[Problem]:
-    """Require a real bool, for the settings that are read on raw truthiness.
-
-    Only ``RAISE_EXCEPTION`` still is: ``client.py`` tests it with a bare ``if``, so
-    ``'false'`` there would re-raise the exception the project meant to swallow. That
-    is a defect in ``client.py`` rather than in this rule, and it has its own issue —
-    until it is fixed, this setting genuinely does need a real bool, and saying so at
-    boot is better than surprising someone at the first failed send.
-
-    Everything else goes through :func:`_a_readable_boolean`, because everything else
-    is coerced at the point of use.
-    """
-    value = conf.get(key)
-    if isinstance(value, bool):
-        return []
-    return [Problem(f'must be a boolean, got {type(value).__name__}.')]
-
-
 def _a_readable_boolean(key: str) -> list[Problem]:
     """Accept whatever ``coerce_bool`` accepts, and report what it would refuse.
 
@@ -665,9 +647,7 @@ def _filled_in_when_enabled(key: str, *, hint: str) -> list[Problem]:
 CHECKS: tuple[Check, ...] = (
     Check('E001', 'ENABLED', _a_readable_boolean),
     Check('E002', 'AUTODISCOVER', _a_readable_boolean),
-    # strict on purpose: `client.py` reads this one on raw truthiness, so 'false'
-    # would re-raise. See `_a_boolean` — the fix belongs in client.py
-    Check('E003', 'RAISE_EXCEPTION', _a_boolean),
+    Check('E003', 'RAISE_EXCEPTION', _a_readable_boolean),
     Check('E017', 'ALLOW_PICKLE', _a_readable_boolean),
     Check('E004', 'TOKEN', _a_string),
     Check('E005', 'REDIS_URL', _a_string),

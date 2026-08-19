@@ -23,9 +23,12 @@ Neither is required for the project to boot.
 | `AUTODISCOVER` | `True` | Import `<app>.<MODULE_NAME>` on startup |
 | `MODULE_NAME` | `'tg_router'` | Module to look for in each installed app |
 
-`ENABLED` is parsed, not tested for truthiness: `'false'`, `'no'`, `'off'` and
-`0` all disable the bot. Anything unparseable raises `ImproperlyConfigured`
-rather than being read as enabled. See **[[Deployment]]**.
+**Every boolean setting here is parsed, not tested for truthiness**: `'false'`,
+`'no'`, `'off'` and `0` all mean false, wherever a boolean is accepted. Anything
+unparseable raises `ImproperlyConfigured` rather than being read as true — which
+matters because the environment can only give you a string, so `'false'` under a
+bare truthiness test would mean the opposite of what it says. `RAISE_EXCEPTION`
+was the last setting read that way, and is not any more. See **[[Deployment]]**.
 
 ## Bot behaviour
 
@@ -142,7 +145,7 @@ entry naming a retired one is dead but harmless.
 | `W001` / `W002` | `TOKEN` / `REDIS_URL` empty while the bot is enabled |
 | `W003` | `TELEGRAM_BOT` contains unknown keys |
 | `W004` | `BLPOP_TIMEOUT` is at or above `REDIS_TIMEOUT`, so the consumer caps it |
-| `E001`–`E003`, `E017` | a boolean setting is not a boolean |
+| `E001`–`E003`, `E017` | a boolean setting holds something that cannot be read as true or false |
 | `E004`–`E007`, `E009`–`E011` | a string setting is wrong, or not one of the allowed values |
 | `E012`, `E014` | an integer setting is wrong or below its minimum |
 | `E015` / `E016` | `DEFAULT_KWARGS` not callable / `DEFAULT_BOT_PROPERTIES` not a mapping |
@@ -158,7 +161,7 @@ entry naming a retired one is dead but harmless.
 | `E028` | `MODE` is not `polling` or `webhook` |
 | `E029` | `WEBHOOK_ALLOWED_UPDATES` is not a list, or names an update type Telegram does not have |
 | `E030` | `REDIS_TIMEOUT` is wrong or below 1 |
-| `E031`, `E042` | `EVENT_LOG` / `EVENT_LOG_SYNC` is not a boolean |
+| `E031`, `E042` | `EVENT_LOG` / `EVENT_LOG_SYNC` cannot be read as true or false |
 | `E032`, `E035` | `EVENT_LOG_KINDS` / `EVENT_LOG_REDACT_KEYS` is not a list or tuple of strings |
 | `E033` | `EVENT_LOG_PAYLOAD` is not `none`, `summary` or `full` |
 | `E034`, `E039` | `EVENT_LOG_MAX_PAYLOAD_BYTES` / `EVENT_LOG_RETENTION_DAYS` is wrong or negative |
@@ -168,7 +171,7 @@ entry naming a retired one is dead but harmless.
 | `E043` | `REDIS_URL` sets `decode_responses` while `ALLOW_PICKLE` is `True` |
 | `E044` | `DRAIN_TIMEOUT` is not a finite number, or is negative |
 | `E045` | `MAX_IN_FLIGHT` is not an integer, or is negative |
-| `E046` | `REQUIRE_CRASH_SAFE` is not a boolean |
+| `E046` | `REQUIRE_CRASH_SAFE` cannot be read as true or false |
 | `W010` | `WORKER_NAME` is empty **and** the hostname is one Docker generated, so a replacement container gets a different name. A fixed hostname is not warned about |
 | `W011` | `EVENT_LOG_DATABASE` names an alias but nothing in `DATABASE_ROUTERS` routes this app there, so a plain `migrate` does not create the table on it — `migrate --database=<alias>` still would. A warning rather than an error: a router of your own returning the same alias is a legitimate way to do it, and this cannot see inside one |
 | `W005` | the log is on while its database has no engine, so every event is dropped |

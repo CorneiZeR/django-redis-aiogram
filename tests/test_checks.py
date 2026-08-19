@@ -100,14 +100,16 @@ def test_a_boolean_nothing_can_read_is_still_caught():
 
 
 @override_settings(TELEGRAM_BOT={'RAISE_EXCEPTION': 'false', 'TOKEN': '42:x', 'REDIS_URL': 'r://x'})
-def test_raise_exception_still_demands_a_real_boolean():
-    """The one that stays strict, and the reason is in `client.py` rather than here.
+def test_raise_exception_accepts_what_the_environment_can_express():
+    """It was the last setting demanding a real bool, and only because of a defect.
 
-    `client.py` tests this setting with a bare `if`, so `'false'` would re-raise the
-    exception the project meant to swallow. Until that is fixed the strict check is
-    the honest one, and this test is what stops the sweep above from swallowing it.
+    `client.py` read it with a bare `if`, so `'false'` — truthy, and what
+    `DJANGO_REDIS_AIOGRAM_RAISE_EXCEPTION=false` arrives as — re-raised the exception the
+    project had asked to have swallowed. The check was strict to say so at boot rather
+    than at the first failed send. The read goes through `coerce_bool` now, so the
+    documented spelling is a working value here too.
     """
-    assert 'django_redis_aiogram.E003' in ids(errors(check_settings()))
+    assert 'django_redis_aiogram.E003' not in ids(errors(check_settings()))
 
 
 @override_settings(TELEGRAM_BOT={'TOKEN': 42, 'REDIS_URL': 'r://x'})
@@ -182,8 +184,7 @@ WRONG_TYPES = {
     # refusal path in `coerce_bool` — wrong type rather than unrecognised word
     'ENABLED': 'maybe',
     'AUTODISCOVER': [],
-    # still a real bool here: E003 stays strict while `client.py` reads it raw
-    'RAISE_EXCEPTION': 1,
+    'RAISE_EXCEPTION': 'maybe',
     'ALLOW_PICKLE': 'maybe',
     'TOKEN': 42,
     'REDIS_URL': 42,

@@ -2,6 +2,7 @@
 
 import contextlib
 
+import pytest
 from django.test import override_settings
 
 from django_redis_aiogram import TelegramBot
@@ -119,3 +120,65 @@ def test_sends_during_startup_are_queued_not_sent_directly(redis_server, monkeyp
 
     assert direct == [], 'a startup-time send was driven through send_raw'
     assert redis_server.llen('TELEGRAM_BOT_MESSAGE') == 1
+
+
+class Refusing:
+    """A bot whose every send fails, so the retry path runs to its end."""
+
+    def __init__(self):
+        self.attempts = []
+
+    async def send_message(self, **kwargs):
+        """Refuse with something `_schedule` does not intercept on its way out."""
+        self.attempts.append(kwargs)
+        # not RuntimeError: `_schedule` catches that one to spot a loop already
+        # running under it, so it would never reach the branch under test
+        msg = 'chat not found'
+        raise ValueError(msg)
+
+    class session:
+        @staticmethod
+        async def close():
+            """aiogram's session, reduced to the one call `close()` makes."""
+
+
+def a_failing_send(raise_exception):
+    """Drive one doomed send on the caller's thread and report what reached them."""
+    with override_settings(
+        TELEGRAM_BOT={**SETTINGS, 'RAISE_EXCEPTION': raise_exception, 'MAX_RETRIES': 0, 'RATE_LIMIT': None}
+    ):
+        instance = TelegramBot()
+        refusing = Refusing()
+        instance._bot = refusing
+        try:
+            # no loop runner, so `send_raw` drives the coroutine here and a raise
+            # from it lands on this line — the way it reaches a caller's view
+            instance.send_raw('send_message', chat_id=1, text='x')
+        finally:
+            instance._bot = None
+            instance.close()
+        return refusing.attempts
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_raise_exception_reads_the_word_and_not_its_truthiness():
+    """`DJANGO_REDIS_AIOGRAM_RAISE_EXCEPTION=false` arrives as `'false'`, which is truthy.
+
+    Read with a bare `if`, that re-raised into the caller the exception the project had
+    just asked to have swallowed — and only after a send had exhausted `MAX_RETRIES`, so a
+    project that spelled the flag the way the environment can spell it learned about it
+    the day Telegram started refusing them.
+    """
+    assert a_failing_send('false'), 'the send never ran, so nothing was proved'
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_the_flag_still_reaches_the_caller_when_it_is_asked_to():
+    """The other direction, so the fix cannot be "the flag never fires".
+
+    `'true'` is the string form as well: the point is that the word is read, not that
+    strings are ignored.
+    """
+    for asked in (True, 'true'):
+        with pytest.raises(ValueError, match='chat not found'):
+            a_failing_send(asked)

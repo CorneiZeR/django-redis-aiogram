@@ -11,6 +11,22 @@ them, so it is not one per message.
 
 ### Fixed
 
+- **`RAISE_EXCEPTION='false'` no longer re-raises.** `client.py` tested this setting with
+  a bare `if`, the only boolean in the package still read that way, so the string
+  `'false'` — which is what `DJANGO_REDIS_AIOGRAM_RAISE_EXCEPTION=false` arrives as, and
+  truthy — propagated into the caller the exception the project had just asked to have
+  swallowed. `'0'`, `'no'` and `'off'` did the same. Both reads now go through
+  `coerce_bool`, behind one private property, so the two failure paths read the flag
+  through the same line and cannot diverge. Private deliberately: the fix is the coercion,
+  and a new name on the public surface would be a commitment carried into 4.0 for it.
+
+  The failure needed a send to exhaust `MAX_RETRIES` first, so a project that spelled the
+  flag the way an environment variable can spell it would have met it on the day Telegram
+  started refusing them — not on the day they configured it. `E003` was strict for exactly
+  this reason and is now `_a_readable_boolean` like the rest, which means **every boolean
+  setting in this package is parsed rather than tested for truthiness**, with no exception
+  left to remember.
+
 - **Updates in one web process are handled concurrently.** A process serving the
   webhook drove nothing, so every `feed_update` took `run_until_complete` *under
   the loop lock* and updates handled strictly one at a time. Measured on four

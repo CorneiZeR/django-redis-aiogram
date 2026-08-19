@@ -54,8 +54,8 @@ means they should rarely be reached — Telegram can still refuse a message for
 reasons that have nothing to do with your rate.
 
 Exhausting the retries logs an error with `tg_function` and `tg_max_retries`,
-and re-raises the last refusal when `RAISE_EXCEPTION` is set. See
-**[[Logging]]**.
+and re-raises the last refusal when `RAISE_EXCEPTION` reads as true — `'false'`
+from the environment reads as false, like every boolean here. See **[[Logging]]**.
 
 ## Tuning
 

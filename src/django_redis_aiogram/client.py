@@ -400,6 +400,17 @@ class TelegramBot:
         return coerce_bool(conf['ENABLED'], f"{SETTINGS_NAME}['ENABLED']")
 
     @property
+    def _raises_send_failures(self) -> bool:
+        """Whether a failed send reaches the caller instead of only the log.
+
+        Read through ``coerce_bool``, like every other boolean here. A bare ``if`` on the
+        raw value is how ``DJANGO_REDIS_AIOGRAM_RAISE_EXCEPTION=false`` — the string
+        ``'false'``, which is truthy — used to re-raise the exception the project had asked
+        to have swallowed, on a path that only runs once a send has exhausted its retries.
+        """
+        return coerce_bool(conf['RAISE_EXCEPTION'], f"{SETTINGS_NAME}['RAISE_EXCEPTION']")
+
+    @property
     def rate_limiter(self) -> RateLimiter | None:
         """Paced per token: Telegram meters the bot, not this object.
 
@@ -860,7 +871,7 @@ class TelegramBot:
                         error=error,
                     )
                     logger.exception('send failed', extra={'tg_function': function})
-                    if conf['RAISE_EXCEPTION']:
+                    if self._raises_send_failures:
                         raise
                     return
                 else:
@@ -892,7 +903,7 @@ class TelegramBot:
                 'giving up on message',
                 extra={'tg_function': function, 'tg_max_retries': self.max_retries},
             )
-            if conf['RAISE_EXCEPTION'] and last_error is not None:
+            if self._raises_send_failures and last_error is not None:
                 raise last_error
 
         call_kwargs = {**conf['DEFAULT_KWARGS'](function), **kwargs}
