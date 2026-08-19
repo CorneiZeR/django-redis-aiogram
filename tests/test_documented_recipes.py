@@ -376,6 +376,20 @@ WEBHOOK_REFUSALS = (
 )
 
 
+def webhook_source():
+    """The view, as text."""
+    root = pathlib.Path(__file__).resolve().parent.parent
+    return (root / 'src' / 'django_redis_aiogram' / 'webhook.py').read_text(encoding='utf-8')
+
+
+def catalogued_refusals():
+    """The messages Troubleshooting lists under 503, read out of the page itself."""
+    root = pathlib.Path(__file__).resolve().parent.parent
+    page = (root / 'docs' / 'wiki' / 'Troubleshooting.md').read_text(encoding='utf-8')
+    section = page.split('**503** means')[1].split('**400** means')[0]
+    return set(re.findall(r'^- `([^`]+)`', section, flags=re.MULTILINE))
+
+
 @pytest.mark.parametrize('fragment', WEBHOOK_REFUSALS)
 def test_every_reason_the_webhook_refuses_is_catalogued(fragment):
     """A 503 is the one answer that makes Telegram try again, so its causes are read.
@@ -385,12 +399,21 @@ def test_every_reason_the_webhook_refuses_is_catalogued(fragment):
     one it does. Asserted in both directions, so a reworded line cannot leave the
     catalogue describing something that never happens.
     """
-    root = pathlib.Path(__file__).resolve().parent.parent
-    source = (root / 'src' / 'django_redis_aiogram' / 'webhook.py').read_text(encoding='utf-8')
-    page = (root / 'docs' / 'wiki' / 'Troubleshooting.md').read_text(encoding='utf-8')
+    assert fragment in webhook_source(), 'the view no longer logs this; the page and this list still do'
+    assert fragment in catalogued_refusals(), 'Troubleshooting does not name a reason the view answers 503'
 
-    assert fragment in source, 'the view no longer logs this; the page and this list still do'
-    assert fragment in page, 'Troubleshooting does not name a reason the view answers 503'
+
+def test_the_catalogue_and_the_view_agree_on_how_many_refusals_there_are():
+    """The list above is written by hand, so on its own it cannot notice a fifth reason.
+
+    A new `status=503` branch, or a bullet added to the page for something the view never
+    logs, would both leave every per-fragment assertion true. Counted from the source and
+    compared as sets with the page, so either side gaining or losing one fails here.
+    """
+    assert webhook_source().count('status=503') == len(WEBHOOK_REFUSALS), (
+        'the view has a 503 branch this list does not name'
+    )
+    assert catalogued_refusals() == set(WEBHOOK_REFUSALS), 'the page and this list disagree about the causes'
 
 
 @pytest.mark.parametrize('fragment', PROBE_REFUSALS)
