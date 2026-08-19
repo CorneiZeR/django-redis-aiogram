@@ -950,6 +950,18 @@ def test_a_non_ascii_secret_is_refused_rather_than_raised():
     assert response.status_code == 403
 
 
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'WEBHOOK_SECRET': 'пароль'})
+def test_a_matching_non_ascii_secret_passes():
+    """Comparing bytes means comparing, not refusing.
+
+    The other half of that fix, and the half the documentation first got wrong: a secret
+    outside ASCII is not rejected for being outside ASCII — it is compared like any other,
+    so one that matches is accepted and only a mismatch is a 403.
+    """
+    assert post(an_update(), secret='пароль').status_code == 200
+    assert post(an_update(update_id=2), secret='другой').status_code == 403
+
+
 @override_settings(TELEGRAM_BOT=SETTINGS)
 def test_an_update_reaching_a_closed_loop_is_refused_not_swallowed(monkeypatch):
     """A 200 here tells Telegram to stop redelivering an update nothing handled.
@@ -994,11 +1006,14 @@ def test_a_loop_thread_that_outlives_the_join_is_kept_so_close_can_retry(monkeyp
         blocked.set()
         released.wait(5)
 
-    assert instance._ensure_loop_runs(), 'the runner never started'
-    asyncio.run_coroutine_threadsafe(hold(), instance.loop)
-    assert blocked.wait(5), 'the loop never reached the blocking coroutine'
-
+    # the try opens before the first assertion after the runner exists: a failure between
+    # here and the finally would otherwise leave a blocked thread turning a loop, and the
+    # report would show the next test's timeout rather than the assertion that broke
     try:
+        assert instance._ensure_loop_runs(), 'the runner never started'
+        asyncio.run_coroutine_threadsafe(hold(), instance.loop)
+        assert blocked.wait(5), 'the loop never reached the blocking coroutine'
+
         instance.close()
 
         assert instance._runner is not None, 'the orphan was forgotten, so nothing can stop it'
@@ -1008,8 +1023,10 @@ def test_a_loop_thread_that_outlives_the_join_is_kept_so_close_can_retry(monkeyp
         released.set()
         if instance._runner is not None:
             instance._runner.join(timeout=5)
+        # the retry, which is also the assertion below: run in the teardown so that a
+        # failure above still closes the loop this test opened
+        instance.close()
 
-    instance.close()
     assert instance._loop is None or instance._loop.is_closed(), 'the retry closed nothing'
 
 
@@ -1043,12 +1060,17 @@ def test_a_send_waits_for_our_own_runner_instead_of_driving_the_loop(monkeypatch
     instance._runner = threading.Thread(target=lambda: release.wait(5), daemon=True)
     instance._runner.start()
 
-    instance.send_raw('send_message', chat_id=1, text='x')
+    try:
+        instance.send_raw('send_message', chat_id=1, text='x')
 
-    assert sent == [], 'the send drove the loop our own thread was about to run'
-    release.set()
-    instance._runner.join(timeout=5)
-    instance.close()
+        assert sent == [], 'the send drove the loop our own thread was about to run'
+    finally:
+        release.set()
+        instance._runner.join(timeout=5)
+        # closing is what steps the handed-off send, and it is also this test's cleanup:
+        # in the finally so a failure above does not leave the loop and the thread behind
+        instance.close()
+
     assert sent == [1], 'the handed-off send was never stepped'
 
 

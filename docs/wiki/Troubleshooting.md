@@ -143,7 +143,8 @@ redeliver — which is what you want. Four reasons, each with its own log line:
 **403** means the `X-Telegram-Bot-Api-Secret-Token` header did not match
 `WEBHOOK_SECRET`. Check that the value you registered with `manage.py tgbot_webhook set`
 is the one the process now reads — rotating the setting without re-registering gives
-exactly this. A header that is not ASCII also lands here rather than in a traceback.
+exactly this. The comparison is on bytes, so a secret outside ASCII is compared like any
+other: a matching one passes, and a mismatched one gets this 403 rather than a traceback.
 
 **400** means the body did not parse as an update. Something other than Telegram is
 posting to that URL.
