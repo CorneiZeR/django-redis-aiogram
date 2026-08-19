@@ -799,3 +799,31 @@ def test_two_overlapping_flushes_report_one_gap_between_them(redis_server, monke
     finally:
         recorder._touched_database = False
         recorder._dropped = 0
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'EVENT_LOG': True})
+def test_a_gap_row_the_database_refuses_one_at_a_time_keeps_its_count(redis_server, monkeypatch, caplog):
+    """A refusal is the same loss as a raise, and this was the path that ignored it.
+
+    `write_batch` reports how many rows the database refused individually — a return this
+    branch introduced. The gap batch is one row, so a return of 1 means the `log.dropped`
+    row did not land, while the claim had already been taken off: the hole disappeared with
+    no exception anywhere to notice it.
+    """
+
+    def refuse_every_row(batch):
+        """What `write_batch` returns when the database took none of them."""
+        return len(batch)
+
+    monkeypatch.setattr(recorder, '_write', refuse_every_row)
+    recorder._dropped = 5
+
+    with caplog.at_level('ERROR', logger='django_redis_aiogram'):
+        recorder._record_gap(5)
+
+    try:
+        assert recorder._dropped == 5, 'the gap was lost to a refusal nobody checked'
+        assert 'refused the gap row' in caplog.text
+    finally:
+        recorder._touched_database = False
+        recorder._dropped = 0

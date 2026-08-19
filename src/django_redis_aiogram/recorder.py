@@ -563,6 +563,11 @@ class EventRecorder:
         nothing to report, and this returns rather than writing a row about zero events.
         Anything a producer drops while the write is in flight stays for the next one.
 
+        A refusal counts as a failure here, not only an exception. ``_deliver`` returns how
+        many rows the database refused one at a time, and this batch is one row — so a
+        return of 1 means the gap row did *not* land, which is the same loss as a raise and
+        was the one path this method used to ignore. Both give the claim back.
+
         The failure stays suppressed either way: the batch this follows did land, and a
         gap row that cannot be written must not turn a successful flush into a failed one.
         """
@@ -572,11 +577,22 @@ class EventRecorder:
         if not claimed:
             return
         try:
-            self._deliver([Event(kind=EventKind.LOG_DROPPED.value, detail={'dropped': claimed})])
+            refused = self._deliver([Event(kind=EventKind.LOG_DROPPED.value, detail={'dropped': claimed})])
         except Exception:
-            with self._counter:
-                self._dropped += claimed
+            self._reclaim(claimed)
             logger.exception('could not record the gap; keeping the count for the next flush')
+            return
+        if refused:
+            self._reclaim(claimed)
+            logger.error(
+                'the database refused the gap row; keeping the count for the next flush',
+                extra={'tg_dropped': claimed},
+            )
+
+    def _reclaim(self, claimed: int) -> None:
+        """Put a claim back, so a gap nobody could record survives to be recorded."""
+        with self._counter:
+            self._dropped += claimed
 
     @staticmethod
     def _write(batch: list[Event]) -> int:
