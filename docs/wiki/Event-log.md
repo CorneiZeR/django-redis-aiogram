@@ -109,6 +109,11 @@ a minute as `the event log is falling behind`. When the writer catches up it
 records a `log.dropped` row, so the gap is visible in the data and not only in
 the log.
 
+A row the database refuses on its own — a constraint, a column too small — is counted
+the same way, so a batch that lands 39 of 40 rows leaves a `log.dropped` behind it
+rather than a silent hole. The count survives a gap row that itself cannot be written:
+it is subtracted only once that row lands, so the next successful flush reports it.
+
 `EVENT_LOG_BUFFER_SIZE`, `EVENT_LOG_BATCH_SIZE` and `EVENT_LOG_FLUSH_INTERVAL`
 size it. A batch larger than the buffer can never fill, so `W007` says so.
 
@@ -297,7 +302,11 @@ app, and dragging `auth` along would move your users with it.
 What the admin deliberately does not do, because the table is sized by traffic:
 no full result count, no date drilldown (its truncation is a scan no index can
 serve), and no substring search — the two searchable columns are matched
-exactly, so both use their index.
+exactly, so both use their index. Sorting is limited to the three indexed columns:
+`created_at`, `kind` and `chat_id`. The other headers are not links, and an `?o=`
+naming one of them — from a bookmark, or a link shared before this restriction — is
+dropped rather than honoured, because ordering the whole table by `worker` is a
+sequential scan and a sort on every page.
 
 Paging counts at most **10 000 rows**, inside a `LIMIT`. The number is exact for
 the filtered views people actually read and stops growing past the cap, so the

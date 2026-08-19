@@ -443,6 +443,11 @@ def test_a_kind_filtered_changelist_needs_no_sort(client):
             cursor.execute(f'EXPLAIN QUERY PLAN {sql}')
             plan = ' '.join(str(row) for row in cursor.fetchall())
             assert 'TEMP B-TREE' not in plan.upper(), f'{plan}\nfor: {sql}'
+            # and the index by name. Without this the assertion above passes with no index
+            # at all — sqlite serves `ORDER BY -id` by walking the primary key, so a plan
+            # with no sort and a full scan reads exactly like the fixed one, at the cost the
+            # index was added to remove
+            assert 'drai_event_kind_id' in plan, f'the kind filter no longer uses its index\n{plan}'
 
 
 @pytest.mark.django_db
