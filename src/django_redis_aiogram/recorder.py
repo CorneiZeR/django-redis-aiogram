@@ -515,7 +515,7 @@ class EventRecorder:
         with self._counter:
             dropped_before = self._dropped
         try:
-            self._deliver(batch)
+            refused = self._deliver(batch)
         except Exception:
             failures += 1
             with self._counter:
@@ -533,6 +533,16 @@ class EventRecorder:
                 extra={'tg_count': len(batch), 'tg_failures': failures},
             )
             return failures, 0.0
+        if refused:
+            # rows this very batch lost, one at a time, on the ladder below `write_batch`.
+            # Counted rather than reported now: the gap row belongs to the *next*
+            # successful flush, the same way a producer's drop does
+            with self._counter:
+                self._dropped += refused
+            logger.warning(
+                'the database refused part of an event batch',
+                extra={'tg_count': refused, 'tg_batch': len(batch)},
+            )
         if dropped_before:
             self._record_gap(dropped_before)
         return 0, 0.0
@@ -543,18 +553,31 @@ class EventRecorder:
         Subtracts what it is about to report rather than assigning zero: the count
         was snapshotted before the write, and anything dropped while that write was
         in flight has to survive to be reported by the next one.
+
+        Subtracted *after* the write, and added back when it fails. Taken off first, a
+        gap row the database refused took the hole with it — the count was already zero,
+        so no later flush would ever report those events and the feed would read as
+        complete coverage of a period that lost rows. The failure itself stays suppressed:
+        the batch this follows did land, and a gap row that cannot be written must not
+        turn a successful flush into a failed one.
         """
+        try:
+            self._deliver([Event(kind=EventKind.LOG_DROPPED.value, detail={'dropped': dropped})])
+        except Exception:
+            logger.exception('could not record the gap; keeping the count for the next flush')
+            return
         with self._counter:
             self._dropped -= dropped
-        with contextlib.suppress(Exception):
-            self._deliver([Event(kind=EventKind.LOG_DROPPED.value, detail={'dropped': dropped})])
 
     @staticmethod
-    def _write(batch: list[Event]) -> None:
-        """Hand a batch to the ORM, importing it here so a disabled process never does."""
+    def _write(batch: list[Event]) -> int:
+        """Hand a batch to the ORM, importing it here so a disabled process never does.
+
+        Returns how many rows did not land, which only a partial refusal produces.
+        """
         from django_redis_aiogram.eventlog import write_batch  # noqa: PLC0415 - the point: no django.db above
 
-        write_batch(batch)
+        return write_batch(batch)
 
     def _publish(self, batch: list[Event]) -> None:
         """Hand a batch to whoever connected to :data:`events_recorded`.
@@ -608,8 +631,12 @@ class EventRecorder:
             with contextlib.suppress(Exception):
                 logger.exception('publishing recorded events failed', extra={'tg_count': len(batch)})
 
-    def _deliver(self, batch: list[Event]) -> None:
+    def _deliver(self, batch: list[Event]) -> int:
         """Write a batch if this process keeps the table, then publish it either way.
+
+        Returns how many rows the database refused individually — zero unless a partial
+        refusal happened, and zero in a process that does not write at all.
+
 
         The order is the contract, and it is two claims rather than one. The write
         is **attempted first**, so nothing a receiver does can change a row that was
@@ -625,12 +652,14 @@ class EventRecorder:
         clearing the list or editing a ``detail`` changed what got persisted. This
         way round makes that impossible instead of asking receivers to be careful.
         """
+        refused = 0
         try:
             if self.enabled:
                 self._touched_database = True
-                self._write(batch)
+                refused = self._write(batch)
         finally:
             self._publish(batch)
+        return refused
 
     @staticmethod
     def _close_connections() -> None:

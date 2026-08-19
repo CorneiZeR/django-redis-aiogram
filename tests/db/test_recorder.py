@@ -717,3 +717,104 @@ def test_an_event_put_into_a_detached_queue_is_moved_to_the_live_one(paused_writ
     assert orphan.empty()
     assert recorder.drain_once() == 1
     assert TelegramEvent.objects.filter(chat_id=22).count() == 1
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT={**ON, 'EVENT_LOG_SYNC': True})
+def test_recording_does_not_close_a_connection_whose_autocommit_is_off(monkeypatch):
+    """`in_atomic_block` is half of what an open transaction means, and the worse half.
+
+    With autocommit off — `transaction.set_autocommit(False)`, or `AUTOCOMMIT: False` on
+    the alias — the server holds a transaction from the first statement and no block
+    exists anywhere. `close_if_unusable_or_obsolete` then closes on its very first
+    branch, because `get_autocommit()` disagrees with the configured value, while
+    `close()` skips `needs_rollback` *because* `in_atomic_block` is False. So the caller's
+    writes are rolled back by the server and nothing raises: measured on PostgreSQL 16,
+    the caller's row was gone after a `commit()` that reported success.
+
+    Asserted on the close rather than on `needs_rollback`, which is exactly what this case
+    does not set — and on sqlite, where the consequence cannot be reproduced at all, the
+    rule is the only thing there is to pin. The control below closes for real.
+    """
+    closed = []
+    monkeypatch.setattr(connection, 'is_in_memory_db', lambda: False)
+    monkeypatch.setattr(connection, '_close', lambda: closed.append('closed'))
+    recorder = EventRecorder()
+    transaction.set_autocommit(False)
+
+    try:
+        recorder.record(an_event(chat_id=4321))
+    finally:
+        transaction.rollback()
+        transaction.set_autocommit(True)
+        connection.closed_in_transaction = False
+        connection.needs_rollback = False
+
+    assert closed == [], 'the connection holding the caller transaction was dropped under it'
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT={**ON, 'EVENT_LOG_SYNC': True})
+def test_an_obsolete_connection_is_still_recycled(monkeypatch):
+    """The control: the guard must not have turned into "never recycle".
+
+    Discarding a connection the database has since dropped is what `_recycle` is for —
+    an expired `CONN_MAX_AGE`, a restart, a previous error. A guard that refused every
+    close would satisfy the test above and break the reason the call exists.
+    """
+    closed = []
+    monkeypatch.setattr(connection, 'is_in_memory_db', lambda: False)
+    monkeypatch.setattr(connection, '_close', lambda: closed.append('closed'))
+    # obsolete by age: `close_if_unusable_or_obsolete` closes once `close_at` has passed
+    connection.close_at = time.monotonic() - 1
+    recorder = EventRecorder()
+
+    try:
+        recorder.record(an_event(chat_id=8765))
+    finally:
+        connection.close_at = None
+        connection.closed_in_transaction = False
+
+    assert closed == ['closed'], 'a connection past its CONN_MAX_AGE was kept'
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT=ON)
+def test_rows_the_database_refuses_one_at_a_time_are_counted(paused_writer, caplog):
+    """A partial refusal was indistinguishable from a clean write.
+
+    The ladder returns how many rows landed, and that number decided only whether to
+    raise. So a batch of forty that lost one left `_dropped` at zero, produced no
+    `log.dropped` row, and the feed read as complete coverage of a period that had lost
+    a row. `write_batch` reports the loss now and the recorder counts it, which the next
+    successful flush turns into a gap row — the same route a producer's drop takes.
+    """
+    recorder = EventRecorder()
+    saved = TelegramEvent.save
+
+    def refuse_the_batch(self, rows, *args, **kwargs):
+        """Send the whole batch down the per-row ladder."""
+        msg = 'no'
+        raise DatabaseError(msg)
+
+    def refuse_one_row(self, *args, **kwargs):
+        """`_write_row` saves rather than bulk-creating, which is where a row is lost."""
+        if self.chat_id == 2:
+            msg = 'not this one'
+            raise DatabaseError(msg)
+        return saved(self, *args, **kwargs)
+
+    with pytest.MonkeyPatch.context() as patch, caplog.at_level('WARNING', logger='django_redis_aiogram'):
+        patch.setattr(QuerySet, 'bulk_create', refuse_the_batch)
+        patch.setattr(TelegramEvent, 'save', refuse_one_row)
+        recorder._flush([an_event(chat_id=chat_id) for chat_id in (1, 2, 3)], failures=0)
+
+    assert TelegramEvent.objects.count() == 2, 'the wrong rows were lost'
+    assert recorder._dropped == 1, f'the refused row was not counted: {recorder._dropped}'
+    assert 'refused part of an event batch' in caplog.text
+
+    # the next successful flush turns the count into the gap row
+    recorder._flush([an_event(chat_id=4)], failures=0)
+    gap = TelegramEvent.objects.get(kind=EventKind.LOG_DROPPED.value)
+    assert gap.detail == {'dropped': 1}
+    assert recorder._dropped == 0

@@ -15,6 +15,7 @@ import pytest
 from aiogram import Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Chat, Message, Update, User
+from django.db import OperationalError
 from django.test import override_settings
 
 from django_redis_aiogram import TelegramBot
@@ -673,3 +674,40 @@ def test_a_failure_while_reporting_a_receiver_costs_nobody_their_batch(redis_ser
     assert calls, 'the reporting line never ran, so nothing is being tested'
     assert kinds(collected) == ['outbound.queued'], 'the working receiver lost its batch'
     assert recorder._dropped == 0, f'a broken log line was counted as {recorder._dropped} dropped events'
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'EVENT_LOG': True})
+def test_a_gap_row_that_cannot_be_written_keeps_its_count(redis_server, monkeypatch):
+    """The hole outlives the row that failed to describe it.
+
+    The count was subtracted *before* the write and the write's failure suppressed, so a
+    gap row the database refused took the hole with it: `_dropped` was already zero, no
+    later flush would report those events, and the feed then read as complete coverage of
+    a period that had lost rows. Subtracted after the write now, and the count stays for
+    the next flush to report.
+    """
+
+    def refuse(batch):
+        raise OperationalError('no such table: django_redis_aiogram_event')
+
+    monkeypatch.setattr(recorder, '_write', refuse)
+    recorder._dropped = 7
+
+    recorder._record_gap(7)
+
+    assert recorder._dropped == 7, 'the gap was forgotten with the row that could not report it'
+    recorder._touched_database = False
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'EVENT_LOG': True})
+def test_a_gap_row_that_lands_clears_its_count(redis_server, monkeypatch):
+    """The control, so the fix above cannot be "never subtract"."""
+    # 0 refused, which is what `write_batch` returns on a clean write: a double returning
+    # None would be a shape no real path produces
+    monkeypatch.setattr(recorder, '_write', lambda batch: 0)
+    recorder._dropped = 7
+
+    recorder._record_gap(7)
+
+    assert recorder._dropped == 0, 'a reported gap was reported twice'
+    recorder._touched_database = False

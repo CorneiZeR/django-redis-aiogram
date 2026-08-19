@@ -48,6 +48,7 @@ All prefixed with `tg_`, to avoid colliding with `LogRecord` attributes.
 | `tg_kind` | the event log kind of a row |
 | `tg_receiver` | the `events_recorded` receiver that raised |
 | `tg_count` | events in the batch being written |
+| `tg_batch` | how many rows the batch held, when part of it was refused |
 | `tg_dropped` | events lost because the buffer was full, or sends dropped at shutdown |
 | `tg_failures` | consecutive failures of the event writer |
 

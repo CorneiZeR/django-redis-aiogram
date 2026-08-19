@@ -99,8 +99,15 @@ def to_row(
     )
 
 
-def write_batch(events: Sequence[Event]) -> None:
-    """Insert one batch, recycling a connection the database has since dropped."""
+def write_batch(events: Sequence[Event]) -> int:
+    """Insert one batch, recycling a connection the database has since dropped.
+
+    Returns how many rows did **not** land, so the caller can count them. A total
+    refusal raises; a partial one used to return here indistinguishable from a clean
+    write, so the rows the database refused one at a time disappeared with no counter,
+    no ``log.dropped`` row and nothing but a per-row line in the log — while the feed
+    read as complete coverage of the period that lost them.
+    """
     alias = log_alias()
     _recycle(alias)
     # resolved once for the batch: both walk the settings, and a batch is 200 rows
@@ -119,9 +126,14 @@ def write_batch(events: Sequence[Event]) -> None:
         _recycle(alias, force=True)
         # the retry needs the same net as the first attempt: a fresh connection
         # rejecting one poison row must not cost the whole batch
-        _refused(rows, _write_half(rows, alias), error)
+        written = _write_half(rows, alias)
+        _refused(rows, written, error)
+        return len(rows) - written
     except DatabaseError as error:
-        _refused(rows, _write_one_by_one(rows, alias), error)
+        written = _write_one_by_one(rows, alias)
+        _refused(rows, written, error)
+        return len(rows) - written
+    return 0
 
 
 def _recycle(alias: str, *, force: bool = False) -> None:
@@ -137,6 +149,16 @@ def _recycle(alias: str, *, force: bool = False) -> None:
     for rollback, so recording an event would destroy the writes the caller made
     alongside it. A connection Django is already using is not stale anyway.
 
+    ``in_atomic_block`` is only half of what *open transaction* means. With autocommit
+    off — ``transaction.set_autocommit(False)``, or ``AUTOCOMMIT: False`` on the alias —
+    the server holds one from the first statement with no block anywhere in sight, and
+    then it is worse than the block case: ``close_if_unusable_or_obsolete`` sees
+    ``get_autocommit()`` disagreeing with the configured value and closes on that basis,
+    while ``close()`` skips setting ``needs_rollback`` precisely *because*
+    ``in_atomic_block`` is False. So the caller's writes are rolled back by the server
+    and nothing raises. Measured on PostgreSQL 16: the caller's row was gone after a
+    successful ``commit()``, with the event row written.
+
     One alias, not all of them. ``close_old_connections()`` walks every initialized
     connection, so with ``EVENT_LOG_DATABASE`` pointing somewhere of its own it
     reaches past the log's connection — which is not in a transaction — and closes
@@ -145,7 +167,7 @@ def _recycle(alias: str, *, force: bool = False) -> None:
     writes to.
     """
     connection = connections[alias]
-    if connection.in_atomic_block:
+    if connection.in_atomic_block or not connection.get_autocommit():
         return
     if force:
         connection.close()

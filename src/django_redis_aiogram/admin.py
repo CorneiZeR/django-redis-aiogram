@@ -12,6 +12,7 @@ import uuid
 from typing import TYPE_CHECKING, Any, cast
 
 from django.contrib import admin, messages
+from django.contrib.admin.views.main import ORDER_VAR
 from django.core.exceptions import ImproperlyConfigured, ValidationError
 from django.core.paginator import Paginator
 from django.db.models import Field, QuerySet
@@ -199,7 +200,18 @@ class TelegramEventAdmin(ModelAdminBase):
         A page that reports exactly ten thousand results reads as the whole
         answer. Silently, it would be the same defect the paginator exists to
         avoid, moved one step along.
+
+        It also drops an ``?o=`` naming a column no index can serve. ``sortable_by``
+        decides whether a header is rendered as a *link* and nothing else — Django reads
+        it in one place, the template tag, while ``ChangeList`` maps ``?o=`` straight onto
+        ``list_display``. So a bookmark, a shared link or a query string kept from before
+        this restriction still ordered the whole table by ``function``, ``worker`` or
+        ``error_code``: on 200 000 rows a sequential scan and a sort, once for the page
+        and again for the bounded count. Filtered rather than refused, because an operator
+        following an old link wants the page; the ordering falls back to the default,
+        which the index serves.
         """
+        self._drop_unsortable_ordering(request)
         response = super().changelist_view(request, extra_context)
         changelist = getattr(response, 'context_data', {}).get('cl')
         paginator = getattr(changelist, 'paginator', None)
@@ -211,6 +223,27 @@ class TelegramEventAdmin(ModelAdminBase):
                 messages.WARNING,
             )
         return response
+
+    def _drop_unsortable_ordering(self, request: HttpRequest) -> None:
+        """Keep only the ``?o=`` terms whose column is in :attr:`sortable_by`."""
+        requested = request.GET.get(ORDER_VAR)
+        if not requested:
+            return
+        allowed = {str(index) for index, field in enumerate(self.list_display) if field in self.sortable_by}
+        terms = requested.split('.')
+        kept = [term for term in terms if term.lstrip('-') in allowed]
+        if len(kept) == len(terms):
+            return
+        params = request.GET.copy()
+        if kept:
+            params[ORDER_VAR] = '.'.join(kept)
+        else:
+            del params[ORDER_VAR]
+        # django-stubs types `request.GET` immutable, which it is by convention rather
+        # than by construction; rewriting it before `super()` reads the params is what
+        # Django's own admin does, and the alternative — a ChangeList subclass — puts the
+        # rule further from the reason for it
+        request.GET = params  # type: ignore[assignment]
 
     def get_fields(self, request: HttpRequest, _obj: TelegramEvent | None = None) -> list[Any]:
         """Hide the two columns that can hold a message body or a stack trace."""

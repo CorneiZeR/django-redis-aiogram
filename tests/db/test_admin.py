@@ -472,3 +472,33 @@ def test_the_created_at_headers_sort_at_most_a_tie(order):
 
     assert 'drai_event_recent' in plan, plan
     assert 'USE TEMP B-TREE FOR ORDER BY' not in plan.upper(), plan
+
+
+@pytest.mark.django_db
+@override_settings(TELEGRAM_BOT=ON)
+@pytest.mark.parametrize(('index', 'column'), [('2', 'function'), ('5', 'worker'), ('6', 'error_code')])
+def test_an_o_param_for_an_unindexed_column_does_not_sort(client, index, column):
+    """`sortable_by` only decides whether the header is a link.
+
+    Django reads it in one place — the template tag — while `ChangeList` maps `?o=`
+    straight onto `list_display`. So a bookmark, a shared link, or a query string kept
+    from before this restriction still ordered the whole table by a column no index can
+    serve: on 200 000 rows a sequential scan and a sort, once for the page and again for
+    the bounded count.
+
+    Asserted on the SQL rather than on the attribute, which is what the previous test did
+    and why this went unnoticed.
+    """
+    for chat_id in range(3):
+        an_event(chat_id=chat_id, worker='w')
+    client.force_login(a_reader('sorter', 'view_telegramevent'))
+
+    with CaptureQueriesContext(connection) as queries:
+        response = client.get(f'{CHANGELIST}?o={index}')
+
+    assert response.status_code == 200, 'an old link should still render the page'
+    touched = [q['sql'] for q in queries if 'django_redis_aiogram_event' in q['sql']]
+    assert touched, 'the changelist issued no query at all'
+    for sql in touched:
+        assert f'"{column}" ASC' not in sql, f'ordered by {column}: {sql}'
+        assert f'"{column}" DESC' not in sql, f'ordered by {column}: {sql}'
