@@ -154,8 +154,9 @@ Packaging-only work does not need the Redis suite, and vice versa.
   included.** Those two are what ruff's `D` rules cannot see, and they are where
   this package keeps its retry loop, its acknowledgement callback and its loop
   thread — so `tests/test_docstring_coverage.py` walks the syntax tree and names
-  the definition that is missing one. Write the *why*: a docstring restating the
-  name passes the test and helps nobody. `tests/` is exempt, which
+  the definition that is missing one — and one that only restates it, where every
+  word of the summary is filler or a word of the name. Write the *why*, which is
+  the part no test can check for you. `tests/` is exempt, which
   `pyproject.toml` records as `"D", # test names are the documentation`.
 - Public API is annotated; the package ships `py.typed` and mypy runs on it.
 - No new runtime dependencies without a reason that survives being questioned.

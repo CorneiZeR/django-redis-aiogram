@@ -171,10 +171,10 @@ def test_the_scan_accepts_a_documented_nesting():
 def test_every_definition_in_the_module_has_a_docstring(path):
     """Not a percentage: one number over a threshold hides which one is missing.
 
-    Write the *why*. A docstring that restates the name satisfies this test and helps
-    nobody, and the enclosing docstring is usually the wrong place for a closure's
-    reason — `once` is a latch and not a lock, `done` skips cancellation deliberately,
-    and neither is guessable from the code around it.
+    Existence only: whether a docstring says anything is the next test's question. Write
+    the *why* — and note that the enclosing docstring is usually the wrong place for a
+    closure's reason, since `once` is a latch rather than a lock and `done` skips
+    cancellation deliberately, neither of which is guessable from the code around it.
     """
     tree = ast.parse(path.read_text(encoding='utf-8'))
 
