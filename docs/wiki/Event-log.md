@@ -111,8 +111,11 @@ the log.
 
 A row the database refuses on its own — a constraint, a column too small — is counted
 the same way, so a batch that lands 39 of 40 rows leaves a `log.dropped` behind it
-rather than a silent hole. The count survives a gap row that itself cannot be written:
-it is subtracted only once that row lands, so the next successful flush reports it.
+rather than a silent hole. The count survives a gap row that itself cannot be written: it
+is taken off the counter before the row is written and given back if that row does not
+land — raised or refused alike — so the next successful flush reports it. Taking it off
+first is also what stops two flushes reporting the same hole, since a worker draining by
+hand and the writer thread can both be mid-flush at once.
 
 `EVENT_LOG_BUFFER_SIZE`, `EVENT_LOG_BATCH_SIZE` and `EVENT_LOG_FLUSH_INTERVAL`
 size it. A batch larger than the buffer can never fill, so `W007` says so.

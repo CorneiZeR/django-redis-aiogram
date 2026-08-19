@@ -481,7 +481,19 @@ def test_the_created_at_headers_sort_at_most_a_tie(order):
 
 @pytest.mark.django_db
 @override_settings(TELEGRAM_BOT=ON)
-@pytest.mark.parametrize(('index', 'column'), [('2', 'function'), ('5', 'worker'), ('6', 'error_code')])
+# both directions: the filter strips the sign before deciding, so a regression that
+# dropped `2` and kept `-2` would restore descending sorts on an unindexed column
+@pytest.mark.parametrize(
+    ('index', 'column'),
+    [
+        ('2', 'function'),
+        ('-2', 'function'),
+        ('5', 'worker'),
+        ('-5', 'worker'),
+        ('6', 'error_code'),
+        ('-6', 'error_code'),
+    ],
+)
 def test_an_o_param_for_an_unindexed_column_does_not_sort(client, index, column):
     """`sortable_by` only decides whether the header is a link.
 

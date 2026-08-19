@@ -27,7 +27,15 @@ them, so it is not one per message.
 - **A gap row the database refused took the gap with it.** `_record_gap` subtracted the
   count before writing and suppressed the write's failure, so the hole it could not
   describe was forgotten: no later flush would report those events and the feed read as
-  complete coverage of a period that had lost rows. Subtracted after the write now.
+  complete coverage of a period that had lost rows.
+
+  The count is now *claimed* under the counter's lock before the row is written, and given
+  back if that row does not land — whether the write raised or the database refused the
+  row on its own. Claiming rather than subtracting afterwards is what keeps two flushes
+  from reporting the same hole: `drain_once()` runs on the caller's thread while the
+  writer runs its own, both snapshot the count before their batch, and a subtraction after
+  the write let each of them take it off. It claims no more than is there, so a drop
+  landing while the row is being written survives for the next flush.
 
 - **Rows the database refused one at a time were counted nowhere.** The ladder under
   `write_batch` knew how many landed and used it only to decide whether to raise, so a
