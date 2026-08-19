@@ -78,6 +78,41 @@ them, so it is not one per message.
   flight, and the loop that would have acknowledged them has already returned by then.
   Without it every message the drain delivered stayed in the in-flight list and the next
   start sent it again — a duplicate per restart, rather than per crash.
+- **The webhook view answered 200 to updates nothing had handled.** `close()` puts
+  `_closing` back to False in its `finally`, and `feed_update` checked only that flag and
+  `loop.is_running()` — so a request that captured the loop before a teardown and reached
+  the lock after it drove `run_until_complete` on a *closed* loop. The `RuntimeError`
+  landed in the view's `except Exception`, which answers 200, and Telegram never
+  redelivered the update. Measured under contention: 1,797 of them against 232,141
+  correct refusals. `feed_update` now refuses a closed loop the way `_schedule` always
+  has, so the view answers 503 and Telegram tries again.
+
+  Three more from the same lens. `_ensure_loop_runs` would start a thread on a closed
+  loop, where `run_forever` raises with nothing to catch it and every caller then waits
+  out `RUNNER_TIMEOUT` for a readiness event no living thread can set. `_stop_runner` set
+  `_runner` to None *before* it knew whether the join had worked, so a loop thread it
+  could not stop was forgotten: `close()` says "leaving everything in place keeps
+  `close()` retryable" while every later call returned immediately without asking the
+  orphan again, holding the loop, the aiogram session and the FSM client for the life of
+  the process. And it queued `loop.stop` even when the thread was already gone, which
+  left the callback in the ready queue to fire inside the drain's own
+  `run_until_complete` and take the teardown down with `Event loop stopped before Future
+  completed`.
+
+- **A non-ASCII secret header was an unauthenticated 500.** `hmac.compare_digest`
+  refuses `str` arguments outside ASCII, so the comparison itself raised `TypeError`
+  from the one branch whose job is to answer 403 — a traceback in the log for anyone who
+  found the URL. Compared as bytes now.
+
+- **A send arriving before our own loop thread reached `run_forever` killed it.**
+  `is_running()` is False for that whole window, so `_schedule` drove the loop itself and
+  the runner died with `This event loop is already running` — reported through
+  `threading.excepthook` rather than the package logger. Worse, the driving call ran the
+  `call_soon` the dead thread had queued, so `_runner_ready` was set and
+  `_ensure_loop_runs` reported a runner it owned while nothing turned the loop; every
+  update answered 503 until the next call noticed. `_schedule` now consults the runner as
+  `feed_update` already did.
+
 - **`manage.py check` no longer imports aiogram.** `DEFAULT_BOT_PROPERTIES`
   defaults to `{}`, and the check that validates it reached for
   `DefaultBotProperties` before noticing there was nothing to validate — so

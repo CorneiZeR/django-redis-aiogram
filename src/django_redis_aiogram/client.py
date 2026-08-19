@@ -528,10 +528,17 @@ class TelegramBot:
         coroutine = self.dispatcher.feed_update(self.bot, update)
         loop = self.loop
         with loop_lock(loop):
-            if self._closing:
+            if self._closing or loop.is_closed():
                 # decided under the same lock the shutdown snapshot is taken
                 # under, or an update submitted just after it would be neither
-                # waited for nor cancelled, and its request would never return
+                # waited for nor cancelled, and its request would never return.
+                #
+                # `is_closed()` as well, because `close()` puts `_closing` back to
+                # False in its finally: a request that captured the loop before the
+                # teardown and reached this lock after it saw a loop that was neither
+                # closing nor running, drove `run_until_complete` on a closed one, and
+                # the view answered 200 to an update nothing had handled — so Telegram
+                # never redelivered it. `_schedule` has always checked both
                 coroutine.close()
                 raise ShuttingDownError
             if not loop.is_running():
@@ -620,6 +627,12 @@ class TelegramBot:
                 if loop.is_running():
                     # polling drives it; there is nothing to start
                     return False
+                if loop.is_closed():
+                    # starting a thread on it would raise "Event loop is closed" inside
+                    # that thread, where nothing catches it, and every caller would then
+                    # wait out RUNNER_TIMEOUT for a readiness event no one can set.
+                    # Refusing is the caller's cue to answer that it did not run
+                    return False
                 self._runner_ready.clear()
 
                 def run() -> None:
@@ -696,12 +709,27 @@ class TelegramBot:
                 logger.warning('cancelling updates still in flight', extra={'tg_pending': len(unfinished)})
                 for future in unfinished:
                     future.cancel()
-        if loop is not None and not loop.is_closed():
+        if loop is not None and not loop.is_closed() and runner.is_alive():
+            # only while the thread is there to consume it: queued at a loop nobody is
+            # turning, the `stop` sits in the ready queue and fires inside the *drain's*
+            # `run_until_complete` instead, which then raises "Event loop stopped before
+            # Future completed" and takes the teardown down with it
             with contextlib.suppress(RuntimeError):
                 loop.call_soon_threadsafe(loop.stop)
         runner.join(timeout=RUNNER_TIMEOUT)
         if runner.is_alive():
             logger.warning('the event loop thread did not stop in time', extra={'tg_timeout': RUNNER_TIMEOUT})
+            # put it back. `close()` refuses on a running loop and returns, so this
+            # orphan is still driving it — and with `_runner` left as None every later
+            # `close()` returned in no time without asking it to stop again, leaving the
+            # loop, the aiogram session and the FSM client open for the life of the
+            # process. `_runner_ready` goes back with it: the thread that outlived the
+            # join is the one running the loop, so waiting on a cleared event would
+            # refuse every update for `RUNNER_TIMEOUT` and never clear
+            with self._build_guard:
+                if self._runner is None:
+                    self._runner = runner
+                    self._runner_ready.set()
 
     def send(
         self,
@@ -1027,6 +1055,18 @@ class TelegramBot:
                 # decided under the lock: seen from outside it, a loop another
                 # thread drives for one run_until_complete looks running right
                 # up to the moment it stops, and the handoff would be lost
+                self._hand_off(coroutine, loop, outbound, on_complete)
+                return
+            with self._build_guard:
+                # guard inside the lock, the order that already exists here
+                runner = self._runner
+            if runner is not None and runner.is_alive():
+                # `is_running()` is False for the whole window between `Thread.start()`
+                # and the runner reaching `run_forever`, so driving the loop here killed
+                # our own thread with "this event loop is already running" — and set
+                # `_runner_ready` on the way, because this call ran the `call_soon` the
+                # dead thread had queued. `feed_update` consults `owned` for exactly
+                # this; nothing here did
                 self._hand_off(coroutine, loop, outbound, on_complete)
                 return
             try:

@@ -82,7 +82,10 @@ def telegram_webhook(request: HttpRequest) -> HttpResponse:  # noqa: PLR0911 - a
         return HttpResponse(status=503)
 
     given = request.META.get(SECRET_HEADER, '')
-    if not hmac.compare_digest(given, webhook_secret()):
+    # bytes, not str: `compare_digest` refuses str arguments outside ASCII, so a header
+    # with one non-ASCII character used to raise TypeError here — an unauthenticated
+    # 500 with a traceback, from the branch whose whole job is to answer 403
+    if not hmac.compare_digest(given.encode(), webhook_secret().encode()):
         logger.warning('webhook rejected an update with a wrong secret')
         return HttpResponse(status=403)
 
