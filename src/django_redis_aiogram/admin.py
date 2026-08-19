@@ -212,10 +212,11 @@ class TelegramEventAdmin(ModelAdminBase):
         it in one place, the template tag, while ``ChangeList`` maps ``?o=`` straight onto
         ``list_display``. So a bookmark, a shared link or a query string kept from before
         this restriction still ordered the whole table by ``function``, ``worker`` or
-        ``error_code``: on 200 000 rows a sequential scan and a sort, once for the page
-        and again for the bounded count. Filtered rather than refused, because an operator
-        following an old link wants the page; the ordering falls back to the default,
-        which the index serves.
+        ``error_code``: on 200 000 rows a sequential scan and a sort for the page. Not for
+        the count — :class:`BoundedPaginator` drops the ordering, for the reason given
+        there — so this is the page query alone, once per view. Filtered rather than
+        refused, because an operator following an old link wants the page; the ordering
+        falls back to the default, which the index serves.
         """
         self._drop_unsortable_ordering(request)
         response = super().changelist_view(request, extra_context)
