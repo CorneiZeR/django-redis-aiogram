@@ -6,24 +6,26 @@ import pathlib
 import re
 
 import pytest
-from django.core.checks import Error
+from django.core.checks import WARNING, Error
 from django.core.checks import Warning as CheckWarning
 from django.test import override_settings
 
-from django_redis_aiogram.checks import CHECKS, check_settings
+from django_redis_aiogram.checks import CHECKS, check_settings, worker_name_problems
 from django_redis_aiogram.dbrouter import TelegramEventLogRouter
 from django_redis_aiogram.defaults import DEFAULTS
 from django_redis_aiogram.events import worker_identity
+from django_redis_aiogram.redis import read_timeout
+from django_redis_aiogram.settings import blpop_ceiling
 
 
 @pytest.fixture(autouse=True)
 def _stable_hostname(monkeypatch):
-    """Pin the hostname, because W010 reads it.
+    """Pin the hostname, because I001 reads it.
 
     Without this the whole module's results depend on where it runs: a container
     started without `hostname:` gets a twelve-character hex name, which is exactly
-    what W010 exists to report, so `test_the_defaults_report_nothing` would pass
-    on a laptop and fail in Docker. The tests that are *about* W010 patch it back.
+    what I001 exists to report, so `test_the_defaults_report_nothing` would pass
+    on a laptop and fail in Docker. The tests that are *about* I001 patch it back.
     """
     monkeypatch.setenv('HOSTNAME', 'bot-worker-1')
 
@@ -160,7 +162,7 @@ def test_disabled_bot_does_not_warn_about_credentials():
 
 SETTINGS_PAGE = pathlib.Path(__file__).resolve().parent.parent / 'docs' / 'wiki' / 'Settings.md'
 # the table separates a range with an en dash
-DOCUMENTED = re.compile('`([EW]\\d{3})`(?:\\s*[\u2013-]\\s*`([EW]\\d{3})`)?')
+DOCUMENTED = re.compile('`([EWI]\\d{3})`(?:\\s*[\u2013-]\\s*`([EWI]\\d{3})`)?')
 
 # Every id the checks can emit. Three settings dicts are needed: a wrong type
 # stops a check before it can reach its value-level complaint, and an alias that
@@ -168,14 +170,18 @@ DOCUMENTED = re.compile('`([EW]\\d{3})`(?:\\s*[\u2013-]\\s*`([EW]\\d{3})`)?')
 # E008 and E013 guarded the keyspace settings 3.0 removed. Their ids are gone
 # rather than reused: a project silencing one must not start silencing a new rule
 RETIRED_IDS = {'E008', 'E013'}
-# W010 is left out of the emitted set on purpose: it fires only when this machine's
+# I001 is left out of the emitted set on purpose: it fires only when this machine's
 # hostname looks Docker-generated, so whether the fixtures below produce it differs
 # between a laptop and CI. It has its own tests, and
 # `test_every_check_id_is_documented` reads the registry rather than this set, so it
 # is still held to the documentation
-HOSTNAME_DEPENDENT_IDS = {'W010'}
-EXPECTED_IDS = ({f'E{code:03d}' for code in range(1, 47)} - RETIRED_IDS) | (
-    {f'W{code:03d}' for code in range(1, 12)} - HOSTNAME_DEPENDENT_IDS
+HOSTNAME_DEPENDENT_IDS = {'I001'}
+EXPECTED_IDS = (
+    ({f'E{code:03d}' for code in range(1, 47)} - RETIRED_IDS)
+    # W011 and W010 became I002 and I001: a check cannot tell which process it runs in, so
+    # neither condition is one to fail `check --fail-level WARNING` over
+    | {f'W{code:03d}' for code in range(1, 10)}
+    | ({'I001', 'I002'} - HOSTNAME_DEPENDENT_IDS)
 )
 
 WRONG_TYPES = {
@@ -300,7 +306,7 @@ def test_every_check_id_is_documented():
 
     Read from the registry rather than from `EXPECTED_IDS`, which is the set of ids
     the fixtures below *emit*. Some rows cannot be emitted by a `TELEGRAM_BOT` dict at
-    all — W010 needs an ephemeral hostname, W011 needs `DATABASE_ROUTERS` — so an id
+    all — I001 needs an ephemeral hostname, I002 needs `DATABASE_ROUTERS` — so an id
     added without touching that set was documented only by whoever remembered to.
     """
     missing = sorted({check.code for check in CHECKS} - documented_ids())
@@ -443,7 +449,7 @@ ROUTED_LOG = {'EVENT_LOG': True, 'EVENT_LOG_DATABASE': 'events', 'TOKEN': '1:x',
 
 def routing_warnings():
     """The W011 messages the current settings produce."""
-    return [message for message in check_settings() if str(message.id).endswith('W011')]
+    return [message for message in check_settings() if str(message.id).endswith('I002')]
 
 
 @override_settings(TELEGRAM_BOT=ROUTED_LOG, DATABASE_ROUTERS=[])
@@ -457,7 +463,7 @@ def test_a_log_database_nothing_routes_to_is_reported():
     reported = routing_warnings()
 
     assert reported, 'a log pointed at an unrouted alias was not reported'
-    assert 'nothing routes this app there' in reported[0].msg
+    assert 'cannot see a router that sends this app there' in reported[0].msg
     assert 'TelegramEventLogRouter' in (reported[0].hint or '')
 
 
@@ -587,7 +593,7 @@ def test_a_container_that_forgot_its_hostname_is_warned_about(monkeypatch):
     """
     monkeypatch.setenv('HOSTNAME', 'ba333cb79e00')
 
-    assert 'django_redis_aiogram.W010' in ids(check_settings())
+    assert 'django_redis_aiogram.I001' in ids(check_settings())
 
 
 @override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost'})
@@ -618,3 +624,58 @@ def test_a_named_worker_is_not_warned_about(monkeypatch):
     monkeypatch.setenv('HOSTNAME', 'ba333cb79e00')
 
     assert 'django_redis_aiogram.W010' not in ids(check_settings())
+
+
+@override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost:6379/0'})
+def test_a_documented_configuration_survives_fail_level_warning():
+    """`check --fail-level WARNING` is what projects run in CI and in entrypoints.
+
+    Both of the ids added in this release were warnings about conditions a check cannot
+    decide from where it stands: an ephemeral hostname, which every container without
+    `hostname:` has whether or not it consumes anything, and a log alias that a router
+    this check cannot read may well serve. So a web container that upgraded went from
+    exit 0 to exit 1 on a configuration that works. They report as information now.
+    """
+    reported = [message for message in check_settings() if message.level >= WARNING]
+
+    assert reported == [], f'a working configuration would fail --fail-level WARNING: {ids(reported)}'
+
+
+@override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost:6379/0'})
+def test_the_worker_name_rule_is_information_and_the_consumer_warns_for_itself(monkeypatch):
+    """One rule, two audiences: the check informs, `start_tgbot` warns.
+
+    Being the consumer is knowable in the command and not in a check, and this is the
+    one place the same rule is asked twice — so it is asked of one function.
+    """
+    monkeypatch.setattr('django_redis_aiogram.checks.socket.gethostname', lambda: 'ba333cb79e00')
+    monkeypatch.delenv('HOSTNAME', raising=False)
+
+    reported = [message for message in check_settings() if str(message.id).endswith('I001')]
+
+    assert len(reported) == 1, 'the rule stopped reporting at all'
+    assert reported[0].level < WARNING, 'a check that cannot tell which process it is in warned'
+    assert worker_name_problems(), 'the command would be told nothing'
+
+
+@override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost:6379/0', 'REDIS_TIMEOUT': 1})
+def test_a_read_deadline_of_one_second_is_refused():
+    """At 1 the consumer's blocking pop cannot fit inside the deadline it is capped by.
+
+    `blpop_ceiling()` promises one second inside `REDIS_TIMEOUT`; at 1 the subtraction
+    clamps back to 1, so the pop's own timeout *equals* the read deadline and the deadline
+    always wins. Every idle second then costs a `TimeoutError`, a traceback and a
+    reconnect, against a healthy server, for ever — and `W004` invited exactly that by
+    suggesting `BLPOP_TIMEOUT` be lowered to match.
+    """
+    assert 'django_redis_aiogram.E030' in ids(errors(check_settings()))
+
+
+@pytest.mark.parametrize('timeout', [2, 3, 5, 10, 60])
+def test_every_read_deadline_the_check_admits_leaves_room_for_the_pop(timeout):
+    """The floor and the ceiling are one statement, so they are asserted together."""
+    with override_settings(
+        TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost:6379/0', 'REDIS_TIMEOUT': timeout}
+    ):
+        assert errors(check_settings()) == [], 'the check refuses a value the consumer can work with'
+        assert blpop_ceiling().seconds < read_timeout(), 'the pop cannot outlast the socket it reads through'

@@ -185,10 +185,15 @@ class PopCeiling:
 def blpop_ceiling() -> PopCeiling:
     """Return the real cap on a blocking pop, which is not ``BLPOP_TIMEOUT`` alone.
 
-    Three bounds meet at the consumer's pop and the smallest wins: the configured
-    ``BLPOP_TIMEOUT``, the ``HEARTBEAT_INTERVAL`` — a worker that popped for longer
-    than that would let its own heartbeat key expire and look dead — and one second
-    inside ``REDIS_TIMEOUT``, so the pop returns before the read deadline fires.
+    Two bounds are weighed here and the smallest wins: the ``HEARTBEAT_INTERVAL`` — a
+    worker that popped for longer than that would let its own heartbeat key expire and
+    look dead — and one second inside ``REDIS_TIMEOUT``, so the pop returns before the
+    read deadline fires. The configured ``BLPOP_TIMEOUT`` is the third, applied by the
+    caller against this ceiling, which is why ``bound_by`` can never name it.
+
+    One second inside ``REDIS_TIMEOUT`` is only possible from 2 upwards, which is what
+    ``E030``'s floor is for: at 1 the subtraction clamps back to 1, the pop's timeout
+    equals the read deadline, and every idle pop raises instead of returning empty.
 
     Lives here rather than beside the consumer because ``checks.py`` needs it too, and
     importing :mod:`django_redis_aiogram.delivery` would pull in aiogram through

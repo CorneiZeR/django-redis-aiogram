@@ -172,8 +172,8 @@ entry naming a retired one is dead but harmless.
 | `E044` | `DRAIN_TIMEOUT` is not a finite number, or is negative |
 | `E045` | `MAX_IN_FLIGHT` is not an integer, or is negative |
 | `E046` | `REQUIRE_CRASH_SAFE` cannot be read as true or false |
-| `W010` | `WORKER_NAME` is empty **and** the hostname is one Docker generated, so a replacement container gets a different name. A fixed hostname is not warned about |
-| `W011` | `EVENT_LOG_DATABASE` names an alias but nothing in `DATABASE_ROUTERS` routes this app there, so a plain `migrate` does not create the table on it — `migrate --database=<alias>` still would. A warning rather than an error: a router of your own returning the same alias is a legitimate way to do it, and this cannot see inside one |
+| `I001` | `WORKER_NAME` is empty **and** the hostname is one Docker generated, so a replacement container gets a different name — which strands whatever the old container was sending. Information rather than a warning because a check cannot tell a consumer from a web process, and every container without `hostname:` matches; `start_tgbot` warns for itself at startup |
+| `I002` | `EVENT_LOG_DATABASE` names an alias and nothing in `DATABASE_ROUTERS` that this check can read sends this app there, so a plain `migrate` may not create the table — `migrate --database=<alias>` still would. Information rather than a warning: a router of your own returning that alias is equally correct, and this cannot see inside one |
 | `W005` | the log is on while its database has no engine, so every event is dropped |
 | `W006` | the log is on with `EVENT_LOG_RETENTION_DAYS` at 0, so nothing ever deletes a row |
 | `W007` | `EVENT_LOG_BATCH_SIZE` is above `EVENT_LOG_BUFFER_SIZE`, so the batch can never fill |

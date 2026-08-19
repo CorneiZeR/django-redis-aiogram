@@ -19,6 +19,7 @@ from django.core.management import BaseCommand, CommandError
 from django_redis_aiogram import bot
 from django_redis_aiogram.delivery import Delivery, get_delivery
 from django_redis_aiogram.enums import UpdateMode
+from django_redis_aiogram.events import worker_identity
 from django_redis_aiogram.recorder import recorder
 from django_redis_aiogram.redis import read_timeout
 from django_redis_aiogram.settings import SETTINGS_NAME, coerce_bool, conf
@@ -95,7 +96,7 @@ class Command(BaseCommand):
             )
 
         delivery = get_delivery(handler=bot.send_raw)
-        self._require_crash_safety(delivery)
+        self._preflight(delivery)
         threads: list[threading.Thread] = []
 
         # Both modes: starting the consumer before the loop runs would let a
@@ -199,6 +200,32 @@ class Command(BaseCommand):
 
         threading.Thread(target=wait_then_stop, name='tgbot-idle', daemon=True).start()
         loop.run_forever()
+
+    def _preflight(self, delivery: Delivery) -> None:
+        """Everything worth saying or refusing before a thread exists."""
+        self._warn_about_an_unstable_worker_name()
+        self._require_crash_safety(delivery)
+
+    def _warn_about_an_unstable_worker_name(self) -> None:
+        """Say it here, where being the consumer is known.
+
+        The in-flight list is keyed on the worker's name, so a name that changes when the
+        container is replaced strands whatever the old one was sending. As a system check
+        this can only be information: `manage.py check` runs in every process, and a check
+        cannot tell a consumer from a web tier — as a warning it failed
+        `check --fail-level WARNING` in containers that own no in-flight list at all.
+
+        This process is the consumer. The same rule, reused rather than restated, so the
+        two cannot drift.
+        """
+        from django_redis_aiogram.checks import worker_name_problems  # noqa: PLC0415 - no aiogram at import
+
+        for problem in worker_name_problems():
+            logger.warning(
+                'the worker name will not survive a replacement container',
+                extra={'tg_worker': worker_identity()},
+            )
+            self.stdout.write(self.style.WARNING(f'WORKER_NAME {problem.message}'))
 
     @staticmethod
     def _require_crash_safety(delivery: Delivery) -> None:

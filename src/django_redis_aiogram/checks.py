@@ -18,7 +18,7 @@ from dataclasses import dataclass, fields
 from functools import partial
 from typing import Any
 
-from django.core.checks import CheckMessage, Error
+from django.core.checks import CheckMessage, Error, Info
 from django.core.checks import Warning as CheckWarning
 from django.core.exceptions import ImproperlyConfigured
 from django.utils.module_loading import import_string
@@ -44,6 +44,8 @@ PAYLOAD_CHOICES = choices(PayloadDetail)
 _STORAGE_CHOICES = choices(StorageKind)
 #: what Docker generates when a container is started without `hostname:`
 _EPHEMERAL_HOSTNAME = re.compile(r'[0-9a-f]{12}')
+#: the first letter of a check id decides how loudly it reports; see :class:`Check`
+_LEVELS = {'E': Error, 'W': CheckWarning, 'I': Info}
 _ID_PREFIX = 'django_redis_aiogram'
 
 
@@ -67,8 +69,13 @@ Validator = Callable[[str], list[Problem]]
 class Check:
     """One row of the registry: the id it reports under, the setting, the rule.
 
-    An id starting with ``W`` reports as a warning, so it cannot fail
-    ``manage.py check``; anything else reports as an error.
+    The id's first letter picks the level. ``E`` is an error and fails
+    ``manage.py check`` outright. ``W`` is a warning: it does not fail a plain ``check``,
+    but it *does* fail ``check --fail-level WARNING``, which projects run in CI and in
+    container entrypoints — so a warning has to be something the project can actually act
+    on, in every process that runs checks. ``I`` is information: worth printing, but about
+    a condition this check cannot decide from where it stands, so failing a build on it
+    would be a guess.
     """
 
     code: str
@@ -84,7 +91,7 @@ class Check:
         key = self.key if problem.key is None else problem.key
         # an empty key means the check is about the settings dict as a whole
         label = f"{SETTINGS_NAME}['{key}']" if key else SETTINGS_NAME
-        report = CheckWarning if self.code.startswith('W') else Error
+        report = _LEVELS.get(self.code[0], Error)
         return report(f'{label} {problem.message}', hint=problem.hint, id=f'{_ID_PREFIX}.{self.code}')
 
 
@@ -310,8 +317,11 @@ def _a_worker_that_keeps_its_name(key: str) -> list[Problem]:
             'replacement container gets a different one. The in-flight list is keyed on that name, '
             'so a worker killed mid-send would never find its own message again.',
             hint=(
-                'Set WORKER_NAME, or give the container a fixed `hostname:`. '
-                '`manage.py tgbot_reclaim --worker <name>` is the way back from a list already stranded.'
+                'Set WORKER_NAME, or give the container a fixed `hostname:`. This matters only '
+                'where `start_tgbot` runs, which is why it is information rather than a warning: '
+                'nothing here can tell that from a web process. '
+                '`manage.py tgbot_reclaim --worker <name>` is the way back from a list already '
+                'stranded, run from a process whose own name differs.'
             ),
         )
     ]
@@ -512,6 +522,15 @@ def _somewhere_to_write_the_log(key: str) -> list[Problem]:
     ]
 
 
+def worker_name_problems() -> list[Problem]:
+    """Return the worker-name problems, for a caller that knows it *is* the consumer.
+
+    `I001` reports this as information because a system check cannot tell which process it
+    is running in. `start_tgbot` can, and warns. One rule, two audiences.
+    """
+    return _a_worker_that_keeps_its_name('WORKER_NAME')
+
+
 def _a_routed_log_database(key: str) -> list[Problem]:
     """Warn when the log is pointed at its own alias with nothing routing it there.
 
@@ -551,10 +570,12 @@ def _a_routed_log_database(key: str) -> list[Problem]:
             return []
     return [
         Problem(
-            f'is {alias!r}, but nothing routes this app there.',
+            f'is {alias!r}, and this check cannot see a router that sends this app there.',
             hint=(
                 "Add 'django_redis_aiogram.dbrouter.TelegramEventLogRouter' to DATABASE_ROUTERS, "
-                f'or leave {key} unset so the log uses the default database.'
+                f'or leave {key} unset so the log uses the default database. A router of your own '
+                'returning that alias is equally correct and is what this cannot read, which is why '
+                'this is information rather than a warning.'
             ),
         )
     ]
@@ -659,7 +680,11 @@ CHECKS: tuple[Check, ...] = (
     Check('E011', 'FSM_STORAGE', _a_string),
     Check('E012', 'MAX_RETRIES', partial(_an_integer, minimum=1)),
     Check('E014', 'BLPOP_TIMEOUT', partial(_an_integer, minimum=1)),
-    Check('E030', 'REDIS_TIMEOUT', partial(_an_integer, minimum=1)),
+    # 2, not 1: the consumer's blocking pop is capped one second inside this, and at 1
+    # the subtraction clamps back to 1 — so the pop's own timeout equals the read
+    # deadline and the deadline always wins. Every idle second then costs a
+    # `TimeoutError`, a traceback and a reconnect, on a healthy server, for ever
+    Check('E030', 'REDIS_TIMEOUT', partial(_an_integer, minimum=2)),
     Check('W004', 'BLPOP_TIMEOUT', _a_pop_inside_the_deadline),
     Check('E023', 'HEARTBEAT_INTERVAL', partial(_an_integer, minimum=1)),
     Check('E024', 'HEALTHCHECK_MAX_QUEUE', partial(_an_integer, minimum=0)),
@@ -685,7 +710,10 @@ CHECKS: tuple[Check, ...] = (
     Check('E039', 'EVENT_LOG_RETENTION_DAYS', partial(_an_integer, minimum=0)),
     Check('E040', 'EVENT_LOG_DATABASE', _a_string),
     Check('E041', 'EVENT_LOG_DATABASE', _a_configured_log_database),
-    Check('W011', 'EVENT_LOG_DATABASE', _a_routed_log_database),
+    # I, not W: this cannot see inside a router, so a project whose own router returns
+    # the alias is correctly configured and would still be reported. Information the
+    # reader can act on, not a condition worth failing `check --fail-level WARNING`
+    Check('I002', 'EVENT_LOG_DATABASE', _a_routed_log_database),
     Check('E042', 'EVENT_LOG_SYNC', _a_readable_boolean),
     Check('E043', 'REDIS_URL', _a_url_pickle_can_survive),
     Check('E044', 'DRAIN_TIMEOUT', partial(_a_number, minimum=0)),
@@ -696,7 +724,11 @@ CHECKS: tuple[Check, ...] = (
     Check('W007', 'EVENT_LOG_BATCH_SIZE', _a_batch_the_buffer_can_hold),
     Check('W008', 'EVENT_LOG_KINDS', _kinds_this_version_records),
     Check('W009', 'EVENT_LOG_SYNC', _a_writer_that_does_not_block),
-    Check('W010', 'WORKER_NAME', _a_worker_that_keeps_its_name),
+    # I, not W: a check cannot tell a consumer from the web tier, and every container
+    # without `hostname:` matches — so as a warning it failed `check --fail-level WARNING`
+    # in processes that own no in-flight list. `start_tgbot` warns for itself, where being
+    # the consumer is known
+    Check('I001', 'WORKER_NAME', _a_worker_that_keeps_its_name),
     Check('W003', '', _known_keys),
     Check(
         'W001',

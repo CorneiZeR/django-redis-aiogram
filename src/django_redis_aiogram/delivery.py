@@ -491,8 +491,10 @@ class BlpopDelivery(Delivery):
         # 0 means "block for ever" in Redis, which would swallow stop(); the
         # heartbeat would expire under a consumer that is doing fine; and a pop asked
         # to wait longer than the socket will turns an idle round into an error.
-        # `blpop_ceiling()` weighs all three, and `W004` reports on the same helper —
-        # one place, so the check cannot describe a cap the consumer does not use
+        # `blpop_ceiling()` weighs the last two and this line applies the first against
+        # them, which is why `bound_by` never names `BLPOP_TIMEOUT`. `W004` reports on the
+        # same helper — one place, so the check cannot describe a cap the consumer does
+        # not use
         timeout = max(1, min(int(conf['BLPOP_TIMEOUT']), blpop_ceiling().seconds))
         connection = get_redis()
         reclaimed = self.reclaim()
