@@ -779,6 +779,35 @@ def test_an_obsolete_connection_is_still_recycled(monkeypatch):
 
 
 @pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT={**ON, 'EVENT_LOG_SYNC': True})
+def test_a_close_outside_an_atomic_block_does_not_mark_a_rollback(monkeypatch):
+    """Why the autocommit case is silent, which is what makes it dangerous.
+
+    Django sets `needs_rollback` in `close()` only when `in_atomic_block` is true. With
+    autocommit off there is no block, so the connection is closed, the server rolls the
+    caller's statements back, and nothing raises — the caller commits and reports success.
+
+    This is the half sqlite can prove: the *consequence* needs a transactional backend, and
+    the loss was measured on PostgreSQL 16 and recorded in `_recycle`'s docstring. Together
+    they are the whole chain — the guard is load-bearing, and without it the failure is
+    quiet rather than loud.
+    """
+    monkeypatch.setattr(connection, 'is_in_memory_db', lambda: False)
+    monkeypatch.setattr(connection, '_close', lambda: None)
+    transaction.set_autocommit(False)
+
+    try:
+        assert connection.in_atomic_block is False, 'autocommit off is not an atomic block'
+        connection.close()
+
+        assert connection.needs_rollback is False, 'the caller would have been told'
+    finally:
+        connection.needs_rollback = False
+        connection.closed_in_transaction = False
+        transaction.set_autocommit(True)
+
+
+@pytest.mark.django_db(transaction=True)
 @override_settings(TELEGRAM_BOT=ON)
 def test_rows_the_database_refuses_one_at_a_time_are_counted(paused_writer, caplog):
     """A partial refusal was indistinguishable from a clean write.
