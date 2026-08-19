@@ -550,24 +550,33 @@ class EventRecorder:
     def _record_gap(self, dropped: int) -> None:
         """Put the gap in the feed, not only in the log: a silent hole reads as coverage.
 
-        Subtracts what it is about to report rather than assigning zero: the count
-        was snapshotted before the write, and anything dropped while that write was
-        in flight has to survive to be reported by the next one.
+        **Claimed, then written, and given back if the write fails.** Two flushes can be
+        in progress at once — the writer thread's and a ``drain_once()`` on somebody
+        else's — and both snapshot the drop count before their batch. Subtracting after
+        the write let each of them report the same hole and take it off twice, which
+        drives the count negative; subtracting before the write, which is where this
+        started, lost the hole whenever the gap row itself was refused. Taking the count
+        out of the counter first makes the claim exclusive, and putting it back on failure
+        keeps it for the next flush. Both properties, one lock.
 
-        Subtracted *after* the write, and added back when it fails. Taken off first, a
-        gap row the database refused took the hole with it — the count was already zero,
-        so no later flush would ever report those events and the feed would read as
-        complete coverage of a period that lost rows. The failure itself stays suppressed:
-        the batch this follows did land, and a gap row that cannot be written must not
-        turn a successful flush into a failed one.
+        Claims no more than is there: a count that another flush has already taken leaves
+        nothing to report, and this returns rather than writing a row about zero events.
+        Anything a producer drops while the write is in flight stays for the next one.
+
+        The failure stays suppressed either way: the batch this follows did land, and a
+        gap row that cannot be written must not turn a successful flush into a failed one.
         """
-        try:
-            self._deliver([Event(kind=EventKind.LOG_DROPPED.value, detail={'dropped': dropped})])
-        except Exception:
-            logger.exception('could not record the gap; keeping the count for the next flush')
-            return
         with self._counter:
-            self._dropped -= dropped
+            claimed = min(dropped, self._dropped)
+            self._dropped -= claimed
+        if not claimed:
+            return
+        try:
+            self._deliver([Event(kind=EventKind.LOG_DROPPED.value, detail={'dropped': claimed})])
+        except Exception:
+            with self._counter:
+                self._dropped += claimed
+            logger.exception('could not record the gap; keeping the count for the next flush')
 
     @staticmethod
     def _write(batch: list[Event]) -> int:

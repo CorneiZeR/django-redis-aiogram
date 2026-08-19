@@ -755,3 +755,47 @@ def test_a_receiver_django_cannot_name_costs_the_receivers_behind_it(redis_serve
     assert failures == 0, 'a receiver was counted as a failed write'
     assert blocked == 0.0
     assert seen == [], 'Django named the receiver after all; the docstring needs updating'
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'EVENT_LOG': True})
+def test_two_overlapping_flushes_report_one_gap_between_them(redis_server, monkeypatch):
+    """`drain_once()` runs on the caller's thread while the writer runs its own.
+
+    Both snapshot the drop count before their batch, so with the subtraction *after* the
+    write each of them reported the same hole and took it off — one gap counted twice in
+    the feed and a count driven negative, which then swallowed the next real gap. The
+    count is claimed under the lock before the write now, so the second flush finds
+    nothing left to report.
+
+    The overlap is arranged rather than raced: the first write blocks until the second has
+    been through, which is the interleaving that makes the defect certain.
+    """
+    inside = threading.Event()
+    release = threading.Event()
+    rows: list[int] = []
+
+    def blocking_write(batch):
+        """Hold the first gap row open, so the second flush runs beside it."""
+        for event in batch:
+            if event.kind == 'log.dropped':
+                rows.append(event.detail['dropped'])
+                inside.set()
+                release.wait(5)
+        return 0
+
+    monkeypatch.setattr(recorder, '_write', blocking_write)
+    recorder._dropped = 7
+    first = threading.Thread(target=recorder._record_gap, args=(7,), daemon=True)
+    first.start()
+
+    assert inside.wait(5), 'the first gap row never reached the write'
+    recorder._record_gap(7)
+    release.set()
+    first.join(timeout=5)
+
+    try:
+        assert rows == [7], f'the same hole was reported {len(rows)} times: {rows}'
+        assert recorder._dropped == 0, f'the count went to {recorder._dropped}'
+    finally:
+        recorder._touched_database = False
+        recorder._dropped = 0
