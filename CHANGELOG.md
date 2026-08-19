@@ -31,7 +31,7 @@ them, so it is not one per message.
 
   The count is now *claimed* under the counter's lock before the row is written, and given
   back if that row does not land — whether the write raised or the database refused the
-  row on its own. Claiming rather than subtracting afterwards is what keeps two flushes
+  row on its own. Claiming rather than subtracting afterward is what keeps two flushes
   from reporting the same hole: `drain_once()` runs on the caller's thread while the
   writer runs its own, both snapshot the count before their batch, and a subtraction after
   the write let each of them take it off. It claims no more than is there, so a drop

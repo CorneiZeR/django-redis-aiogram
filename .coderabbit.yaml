@@ -4,10 +4,7 @@
 # repositories. Install it once at https://github.com/apps/coderabbitai —
 # no workflow file and no API key are involved.
 
-# en-GB, because that is what the prose here already is: `behaviour` appears 19 times
-# across src/, docs/ and the changelog and `behavior` none. Declared en-US, every review
-# flagged the project's own consistent spelling as a mistake
-language: en-GB
+language: en-US
 
 reviews:
   profile: chill
