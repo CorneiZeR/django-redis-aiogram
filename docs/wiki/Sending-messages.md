@@ -21,7 +21,7 @@ bot.send('send_chat_action', chat_id=CHAT_ID, action='typing')
 
 ## Choosing the route yourself
 
-| Method | Behaviour |
+| Method | Behavior |
 | ------ | --------- |
 | `send()` | direct in the bot container, queued elsewhere |
 | `send_redis()` | always queue |

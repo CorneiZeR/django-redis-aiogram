@@ -89,7 +89,7 @@ them, so it is not one per message.
   practical difference is the exception — a send that fails after its retries
   raised into the view under `RAISE_EXCEPTION` and is now logged instead.
   A process that never serves the webhook is unaffected, and `send()`, which
-  queues, never had this behaviour. The Sending messages page says what to do
+  queues, never had this behavior. The Sending messages page says what to do
   when you need the answer.
 - In webhook mode `start_tgbot` runs the loop instead of blocking on an event, so
   a send the consumer schedules runs when it is scheduled rather than waiting for
@@ -99,7 +99,7 @@ them, so it is not one per message.
 - `close()` waits for the updates a webhook process is still answering before it
   stops that loop, and cancels what outlasts `DRAIN_TIMEOUT`. A request thread
   waits on its update with no deadline of its own, so stopping the loop under one
-  would hold that worker for the life of the process. A cancelled update is
+  would hold that worker for the life of the process. A canceled update is
   answered 503, the same as one refused on arrival — nothing handled it either
   way, so Telegram should redeliver it rather than be told to forget it.
 - **The webhook view answers 503 to an update it refused**, rather than 200. It
@@ -119,7 +119,7 @@ them, so it is not one per message.
   consumer drives the send to completion itself. A handler that accepts an
   `on_complete` keyword is now handed one and the message waits for it; one that
   does not — which is every documented recipe — keeps the old semantics exactly,
-  so nothing outside this package changes behaviour.
+  so nothing outside this package changes behavior.
 
   The teardown settles those reports after the drain, which is the step that makes a
   *graceful* stop different from a kill: `close()` is what finishes the sends still in
@@ -395,7 +395,7 @@ them, so it is not one per message.
   unreachable Redis is not mistaken for an old server.
 - `Delivery.crash_safe` reports which guarantee is actually in force.
 - Checks `E045` and `E046` for the two settings above.
-- `DRAIN_TIMEOUT` sets how long `close()` gives in-flight sends before cancelling
+- `DRAIN_TIMEOUT` sets how long `close()` gives in-flight sends before canceling
   them. It was hardcoded at five seconds and `start_tgbot` called `close()` bare,
   so a deployment could raise `stop_grace_period` all it liked and never buy the
   drain a second more. The Deployment page now has the arithmetic for sizing the
@@ -438,7 +438,7 @@ them, so it is not one per message.
   writes rows", `active` means "the table or a receiver is reading" and is what
   every producing seam now sits behind, and `wants_payload` guards only the
   summarising, which is the expensive part and no part of counting — so with the log
-  off a receiver gets `Event` objects without the *summarised arguments*, while still
+  off a receiver gets `Event` objects without the *summarized arguments*, while still
   getting what the seam measured itself: a send's `duration_ms`, a retry's
   `retry_after`, a queueing failure's `stage`, a gap's `dropped` count. Rows are what
   the table gets, and with the log off there are none. `EVENT_LOG_KINDS` filters
@@ -752,7 +752,7 @@ created whether or not you turn the log on.
   window would be a data-loss bug — and `W006` warns while it is unset. Two
   things the wiki page spells out and that bite after the fact: on PostgreSQL
   the space returns through autovacuum rather than immediately, so a large first
-  prune wants a plain `VACUUM` afterwards (never `FULL`, which takes an
+  prune wants a plain `VACUUM` afterward (never `FULL`, which takes an
   exclusive lock); and attaching a `ForeignKey` to `TelegramEvent` disables
   Django's fast-delete path, so every prune then has to fetch primary keys
   first.
@@ -768,7 +768,7 @@ created whether or not you turn the log on.
 
 - `ALLOW_PICKLE` is documented as what it is: the escape hatch for payloads JSON
   cannot describe, and not the 1.x upgrade window it was introduced as. Nothing
-  about its behaviour changed — it is still off by default, the reader still
+  about its behavior changed — it is still off by default, the reader still
   refuses pickled payloads without it, and a refused payload is still left in
   flight rather than destroyed — on Redis 6.2 and newer. Without `LMOVE` there
   is no in-flight list, so a refused pickle is lost rather than held; the
@@ -874,7 +874,7 @@ to `DEFAULT_BOT_PROPERTIES`. See the upgrade notes in the README.
   execution. If the queue holds 1.x messages when you deploy, set
   `ALLOW_PICKLE: True` for the upgrade window and remove it once drained.
 - Delivery defaults to `blpop` instead of keyspace expiry events. Set
-  `DELIVERY: 'keyspace'` for the old behaviour.
+  `DELIVERY: 'keyspace'` for the old behavior.
 - System check ids moved from `telegram_bot.EXXX` to `django_redis_aiogram.EXXX`.
 - `TelegramBot` moved from `telegram_bot.telegram_bot` to
   `django_redis_aiogram.client`, and the settings module is

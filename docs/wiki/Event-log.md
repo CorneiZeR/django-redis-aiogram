@@ -49,7 +49,7 @@ gives you `sent` rows with no `queued` rows to match. That is not a bug.
 | `outbound.sent` | Telegram accepted it |
 | `outbound.retried` | Telegram refused it with a rate limit; backing off |
 | `outbound.failed` | the call raised |
-| `outbound.dropped` | it never got sent: queueing refused it, retries were exhausted, or shutdown cancelled it. `detail.stage` says which |
+| `outbound.dropped` | it never got sent: queueing refused it, retries were exhausted, or shutdown canceled it. `detail.stage` says which |
 | `inbound.received` | an update arrived, by polling or webhook |
 | `inbound.handled` | the handlers finished |
 | `inbound.failed` | a handler raised |
@@ -67,7 +67,7 @@ under that one kind, they are not equally recoverable, and `detail` together wit
 | `detail.stage: serialising` | the payload could not be encoded, so it never left the process | yes — Redis never saw it |
 | `detail.stage: queueing` | the write to Redis raised | **not certainly** — an `RPUSH` that raised may have been applied and only its reply lost |
 | `detail.max_retries: N` | Telegram refused it with a rate limit N times over | it was delivered nowhere and nothing will retry it, so yes — but expect the same refusal |
-| `error_code: NotScheduled` | it was never scheduled, or was cancelled at shutdown; `error` says which | **usually not** — see below |
+| `error_code: NotScheduled` | it was never scheduled, or was canceled at shutdown; `error` says which | **usually not** — see below |
 
 `NotScheduled` is the one that will bite an operator. A send that came off the
 queue is *deliberately* left in the worker's in-flight list when shutdown cancels
@@ -181,7 +181,7 @@ events still arrive. Turn the log on as well and both happen.
 **Payload summaries are the only part of `detail` the log gates.** With the log
 off, `detail` still carries whatever the recording seam measured itself: a send's
 `duration_ms`, a retry's `retry_after`, a queueing failure's `stage`, a gap's
-`dropped` count. What is missing is the *summarised arguments* — redacting
+`dropped` count. What is missing is the *summarized arguments* — redacting
 credentials out of a payload, walking it and bounding it costs tens of
 microseconds, and a counter keyed on `kind` and `function` needs none of it. If
 your receiver needs message bodies, it needs the log on too, and then
@@ -407,7 +407,7 @@ before it is dropped. Work all three out for your data before running anything.
 
 Retention then becomes `DROP TABLE` on a whole partition — instant, no dead
 tuples. All of this is **unsupported**: `migrate` must not touch this app on
-that database afterwards. Django's migrations have no representation for
+that database afterward. Django's migrations have no representation for
 `PARTITION BY`, and both PostgreSQL and MySQL require every unique key to
 contain the partition column, which an auto-incrementing primary key cannot
 express.

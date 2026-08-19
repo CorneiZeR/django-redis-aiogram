@@ -78,7 +78,7 @@ before the consumer thread starts — a failure inside it would kill the thread 
 leave the process polling updates with nothing draining the queue.
 
 Older servers lack `LMOVE`; the consumer says so in the log and falls back to
-plain pops, which is the 1.x at-most-once behaviour: a kill between the pop
+plain pops, which is the 1.x at-most-once behavior: a kill between the pop
 and the send loses that one message.
 
 The in-flight list is **per worker**: `<REDIS_MESSAGES_KEY>:processing:<name>`,
@@ -132,7 +132,7 @@ already popped before it was refused, so `False` and `True` come to the same
 thing and it is gone. Three cases return `False` today. A pickled payload
 refused because `ALLOW_PICKLE` is off, which is the one failure a change of
 configuration can undo; a handler that accepted `on_complete`, where the
-acknowledgement is not withheld but deferred to the send; and a send cancelled
+acknowledgement is not withheld but deferred to the send; and a send canceled
 rather than failed, which reached nothing and is left for a reclaim. Everything
 else — undecodable bytes, a method that is not Telegram API, a handler that
 raised before it scheduled anything — returns `True`, because redelivering it

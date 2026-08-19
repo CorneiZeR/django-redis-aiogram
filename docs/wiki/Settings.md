@@ -30,7 +30,7 @@ matters because the environment can only give you a string, so `'false'` under a
 bare truthiness test would mean the opposite of what it says. `RAISE_EXCEPTION`
 was the last setting read that way, and no longer is. See **[[Deployment]]**.
 
-## Bot behaviour
+## Bot behavior
 
 | Setting | Default | Description |
 | ------- | ------- | ----------- |
@@ -82,7 +82,7 @@ which carries outbound messages in both modes — see **[[Webhook]]**.
 | `REDIS_MESSAGES_KEY` | `'TELEGRAM_BOT_MESSAGE'` | List holding queued calls |
 | `WORKER_NAME` | hostname | Names this worker's in-flight list — see **[[Delivery]]** |
 | `BLPOP_TIMEOUT` | `5` | How often the consumer checks for shutdown; capped just below `REDIS_TIMEOUT` |
-| `DRAIN_TIMEOUT` | `5` | Seconds `close()` gives in-flight sends to finish before cancelling them |
+| `DRAIN_TIMEOUT` | `5` | Seconds `close()` gives in-flight sends to finish before canceling them |
 | `MAX_IN_FLIGHT` | `0` | Sends the consumer leaves in flight before it stops taking messages; `0` is no bound |
 | `REQUIRE_CRASH_SAFE` | `False` | Refuse to start where a message cannot survive the worker being killed mid-send |
 | `REDIS_TIMEOUT` | `10` | Seconds a single Redis call may take before the server counts as gone |

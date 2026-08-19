@@ -160,7 +160,7 @@ soon as step 2 holds.
 
 Ids moved from `telegram_bot.EXXX` to `django_redis_aiogram.EXXX`.
 
-## Behaviour that changed by itself
+## Behavior that changed by itself
 
 | | 1.x | 2.0 |
 | --- | --- | --- |

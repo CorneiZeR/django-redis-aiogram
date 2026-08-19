@@ -170,7 +170,7 @@ TELEGRAM_BOT = {
 }
 ```
 
-Two behaviours make the mixed case work:
+Two behaviors make the mixed case work:
 
 - **Reads sniff the format per message.** A queue holding both formats drains
   without being stopped, so switching `SERIALIZER` needs no downtime.

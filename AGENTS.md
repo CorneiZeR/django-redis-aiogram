@@ -34,7 +34,7 @@ src/django_redis_aiogram/
     instrumentation.py  the update middleware and the storage wrapper
     envelope.py     what a queued payload looks like, both shapes
     context.py      the correlation id a handler's replies inherit
-    payloads.py     summarise, redact, cap — in that order, and never lossless
+    payloads.py     summarize, redact, cap — in that order, and never lossless
 docs/wiki/          the wiki, published from master
 tests/              pytest, fakeredis, no network
 ```
