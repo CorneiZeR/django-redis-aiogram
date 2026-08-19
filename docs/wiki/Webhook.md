@@ -153,9 +153,10 @@ was lost and Telegram was told not to try again. There redelivery is the point â
 during a rolling restart it is the difference between the update moving to the next
 instance and disappearing into a 200 nobody acted on.
 
-The full set the view returns: **200** handled, or a handler raised; **503** refused,
-so redeliver; **403** the secret does not match, including one that is not ASCII;
-**400** the body is not an update Telegram could have sent.
+What a POST gets back: **200** handled, or a handler raised; **503** refused, so
+redeliver â€” a disabled process, the wrong `MODE`, or a loop that is closing or closed;
+**403** the secret does not match, including one that is not ASCII; **400** the body is
+not an update Telegram could have sent. Anything that is not a POST gets **405**.
 
 **Updates are not queued through Redis.** They go straight from the request to
 the dispatcher. Redis carries outbound messages only, in both modes.

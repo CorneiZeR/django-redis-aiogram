@@ -998,14 +998,17 @@ def test_a_loop_thread_that_outlives_the_join_is_kept_so_close_can_retry(monkeyp
     asyncio.run_coroutine_threadsafe(hold(), instance.loop)
     assert blocked.wait(5), 'the loop never reached the blocking coroutine'
 
-    instance.close()
+    try:
+        instance.close()
 
-    assert instance._runner is not None, 'the orphan was forgotten, so nothing can stop it'
-    assert instance._runner.is_alive()
-    assert instance._runner_ready.is_set(), 'a cleared event refuses every update for the timeout'
+        assert instance._runner is not None, 'the orphan was forgotten, so nothing can stop it'
+        assert instance._runner.is_alive()
+        assert instance._runner_ready.is_set(), 'a cleared event refuses every update for the timeout'
+    finally:
+        released.set()
+        if instance._runner is not None:
+            instance._runner.join(timeout=5)
 
-    released.set()
-    instance._runner.join(timeout=5)
     instance.close()
     assert instance._loop is None or instance._loop.is_closed(), 'the retry closed nothing'
 
@@ -1095,19 +1098,24 @@ def test_a_close_that_gave_up_still_cancels_what_arrived_after_it(monkeypatch):
         """Stand in for an update submitted after the give-up."""
         await asyncio.sleep(30)
 
-    assert instance._ensure_loop_runs()
-    asyncio.run_coroutine_threadsafe(hold(), instance.loop)
-    assert blocked.wait(5)
-    instance.close()
-    assert instance._runner is not None, 'the orphan was forgotten'
+    try:
+        assert instance._ensure_loop_runs()
+        asyncio.run_coroutine_threadsafe(hold(), instance.loop)
+        assert blocked.wait(5)
+        instance.close()
+        assert instance._runner is not None, 'the orphan was forgotten'
 
-    arrived = asyncio.run_coroutine_threadsafe(later(), instance.loop)
-    instance._updates.add(arrived)
-    assert not arrived.done()
+        arrived = asyncio.run_coroutine_threadsafe(later(), instance.loop)
+        instance._updates.add(arrived)
+        assert not arrived.done()
 
-    instance.close()
+        instance.close()
 
-    assert arrived.cancelled(), 'a request submitted after the give-up would wait for ever'
-    assert instance._runner is not None, 'the retry forgot the orphan it could still not stop'
-    released.set()
-    instance._runner.join(timeout=5)
+        assert arrived.cancelled(), 'a request submitted after the give-up would wait for ever'
+        assert instance._runner is not None, 'the retry forgot the orphan it could still not stop'
+    finally:
+        # whatever failed above, the thread must not outlive this test: left blocked it
+        # keeps turning a loop beside the next one and hides which assertion broke
+        released.set()
+        if instance._runner is not None:
+            instance._runner.join(timeout=5)
