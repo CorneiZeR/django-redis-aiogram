@@ -46,7 +46,7 @@ DEFAULTS: dict[str, Any] = {
     'BLPOP_TIMEOUT': 5,
     # seconds close() gives in-flight sends to finish before cancelling them. An
     # int so the environment can set it; settings may hold a float
-    'DRAIN_TIMEOUT': 5,
+    'DRAIN_TIMEOUT': 5.0,
     # how many sends the consumer will leave in flight before it stops taking
     # messages. 0 means no bound, which is what shipped before the consumer
     # waited for a send to finish. Acknowledging scans the in-flight list, so an

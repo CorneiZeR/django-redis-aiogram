@@ -68,8 +68,19 @@ def processing_pattern() -> str:
     scans for these, and a probe that re-wrote the scheme by hand would keep scanning the
     old one after a rename — silently reporting no stranded messages for ever, with the
     suite green because the tests that hold the literal would have been updated.
+
+    The key is escaped because ``SCAN MATCH`` takes a glob, and a queue key is an operator's
+    string: ``REDIS_MESSAGES_KEY = 'tg[staging]'`` turned into a character class that
+    matches nothing this package ever writes, so the sweep reported zero stranded lists —
+    and reported the scan as *complete*, which is the one answer a wrong pattern must not
+    give. Only the key is escaped; the ``*`` is the wildcard this function exists for.
     """
-    return processing_key('*')
+    return f'{_escaped(queue_key())}:processing:*'
+
+
+def _escaped(literal: str) -> str:
+    """Quote the glob metacharacters Redis honours in a ``MATCH`` pattern."""
+    return ''.join(f'\\{character}' if character in '*?[]^\\' else character for character in literal)
 
 
 def heartbeat_key(worker: str | None = None) -> str:

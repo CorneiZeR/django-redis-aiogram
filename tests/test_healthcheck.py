@@ -793,3 +793,22 @@ def test_the_sweep_matches_the_keys_workers_actually_write(redis_server):
     assert report.ok, report.message
     assert len(report.warnings) == 1, report.warnings
     assert '1 message(s) are in flight' in report.warnings[0], report.warnings
+
+
+@pytest.mark.parametrize('key', ['TG_OK', 'TG[prod]', 'TG?one', 'TG*all'])
+def test_a_queue_key_with_glob_characters_is_still_swept(redis_server, key):
+    """`SCAN MATCH` takes a glob and a queue key is an operator's string.
+
+    `REDIS_MESSAGES_KEY = 'tg[staging]'` became a character class matching nothing this
+    package writes, so the sweep found zero stranded lists — and called the scan
+    *complete*, which is the one answer a wrong pattern must not give. Every shape is
+    checked, not only the bracket: `?` and `*` happen to match their own literal, so a
+    test that used them alone would have passed against the unescaped version.
+    """
+    with override_settings(TELEGRAM_BOT={**SETTINGS, 'WORKER_NAME': 'mine', 'REDIS_MESSAGES_KEY': key}):
+        from django_redis_aiogram.healthcheck import _stranded
+        from django_redis_aiogram.redis import processing_key
+
+        redis_server.rpush(processing_key('gone'), b'{}')
+
+        assert _stranded(redis_server) == (1, True), f'the sweep missed a stranded list under {key!r}'

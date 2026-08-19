@@ -81,6 +81,17 @@ def _from_env(key: str, default: object) -> object:
         except ValueError:
             msg = f'{name} must be an integer, got {raw!r}.'
             raise ImproperlyConfigured(msg) from None
+    if isinstance(default, float):
+        # a setting whose check accepts a number has to accept one from here too. Without
+        # this branch a float-defaulted setting fell through to `_MISSING` and the variable
+        # was *silently ignored*, and while `DRAIN_TIMEOUT` defaulted to an int the same
+        # value raised out of `apps.ready()` — so `DRAIN_TIMEOUT: 0.5` was valid in
+        # settings and stopped every `manage.py` command from the environment
+        try:
+            return float(raw)
+        except ValueError:
+            msg = f'{name} must be a number, got {raw!r}.'
+            raise ImproperlyConfigured(msg) from None
     if isinstance(default, str):
         return raw
     return _MISSING
