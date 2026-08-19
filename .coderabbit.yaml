@@ -25,6 +25,35 @@ reviews:
     - '!**/__pycache__/**'
     - '!dist/**'
 
+  pre_merge_checks:
+    # the built-in check counts every definition in the pull request, and the schema
+    # gives it `mode` and `threshold` only — there is no way to scope it to a path.
+    # Unscoped it measures test naming: `tests/` holds ~576 undocumented definitions,
+    # almost all two-line fakes inside test bodies, and `pyproject.toml` ignores `D`
+    # there on purpose — "test names are the documentation". So the 80% it reported was
+    # a number about the suite's style, and the only way to satisfy it was to pad the
+    # suite. Replaced below by the same question asked about `src/`, where the answer
+    # means something. Do not narrow this with `path_filters`: those drive a sparse
+    # checkout, so excluding `tests/` would take them out of review entirely.
+    docstrings:
+      # quoted: YAML 1.1 reads a bare `off` as the boolean false, and the schema wants
+      # one of the strings off/warning/error — so unquoted it is a config error, silently
+      mode: 'off'
+
+    custom_checks:
+      - name: Docstrings in src
+        mode: warning
+        instructions: >-
+          Consider only files under src/. Every module, class, function and
+          method there must have a docstring, including nested functions and
+          private helpers — those two categories are invisible to ruff's
+          pydocstyle rules and were the entire gap when this check was written.
+          Ignore everything under tests/: that exclusion is deliberate and
+          recorded in pyproject.toml. A docstring that only restates the name is
+          a finding, not a pass. tests/test_docstring_coverage.py enforces the
+          same rule deterministically in CI and names the offending definition,
+          so treat a disagreement between the two as a reason to read that test.
+
   path_instructions:
     - path: 'src/django_redis_aiogram/**'
       instructions: >-

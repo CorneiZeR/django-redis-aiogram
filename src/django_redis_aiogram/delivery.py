@@ -240,6 +240,12 @@ class Delivery(ABC):
         latch = threading.Lock()
 
         def once() -> None:
+            """Report the first finish and drop every later one.
+
+            The acquire is never released: the lock is a one-way latch here, not a
+            critical section, and the first caller through it is the only one that
+            should reach the in-flight count.
+            """
             if latch.acquire(blocking=False):
                 self._finished.put(handle)
 

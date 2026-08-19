@@ -45,6 +45,12 @@ class Command(BaseCommand):
             bot.close()
 
     def _set(self, options: dict[str, Any]) -> None:
+        """Register the webhook Telegram should deliver to, warning if MODE disagrees.
+
+        Setting one is what makes ``getUpdates`` start refusing, so a project still
+        configured for polling is told plainly rather than left to read that from
+        Telegram's error later.
+        """
         if current_mode() != UpdateMode.WEBHOOK:
             self.stdout.write(
                 self.style.WARNING(
@@ -59,10 +65,21 @@ class Command(BaseCommand):
         self.stdout.write('polling will refuse to start until this is deleted')
 
     def _delete(self, options: dict[str, Any]) -> None:
+        """Unregister the webhook, which is what polling needs before it can start.
+
+        ``drop_pending_updates`` decides whether Telegram forgets what it queued while
+        the webhook was down; the caller chooses, because that is a decision about
+        duplicate work rather than about the webhook.
+        """
         bot.loop.run_until_complete(bot.bot.delete_webhook(drop_pending_updates=options['drop_pending']))
         self.stdout.write(self.style.SUCCESS('webhook deleted; polling can start again'))
 
     def _info(self, _options: dict[str, Any]) -> None:
+        """Report what Telegram thinks the webhook is, which is the only authority on it.
+
+        ``last_error_message`` is the field worth the command: a webhook can be
+        registered and rejected on every delivery, and nothing local shows that.
+        """
         info = bot.loop.run_until_complete(bot.bot.get_webhook_info())
         if not info.url:
             self.stdout.write('no webhook registered; this bot is polled')

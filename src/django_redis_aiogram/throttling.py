@@ -151,6 +151,12 @@ class RateLimiter:
         self._lock = threading.Lock()
 
     def _bucket(self, rate: float, capacity: float | None = None) -> TokenBucket | None:
+        """Build a bucket, or None when this limit is switched off.
+
+        ``None`` for a zero rate is what lets every caller treat *unlimited* as *no
+        bucket* and skip the wait entirely, rather than each one repeating the check
+        against the setting.
+        """
         if not rate:
             return None
         return TokenBucket(rate, capacity, clock=self._clock, sleep=self._sleep)
@@ -162,6 +168,14 @@ class RateLimiter:
         rate: float,
         capacity: float | None = None,
     ) -> TokenBucket | None:
+        """Return this key's bucket, creating it on first use, and mark it as used.
+
+        The ``move_to_end`` is the whole reason this is one method rather than a
+        ``setdefault``: the map is bounded, and eviction draws its candidates from the
+        least recently used end — so a lookup that did not record itself would leave a
+        busy chat sitting at the front of that queue, and be thrown away while it is
+        still owed a wait.
+        """
         bucket = chats.get(key)
         if bucket is None:
             created = self._bucket(rate, capacity)
@@ -299,6 +313,12 @@ def _reset_on_setting_change(
     setting: str,
     **kwargs: Any,
 ) -> None:
+    """Forget the shared limiters when the setting they were built from changes.
+
+    The registry is keyed by token and outlives any one bot, so without this a test or a
+    runtime change of the rates would keep pacing against the numbers a previous
+    configuration was built with.
+    """
     if setting == SETTINGS_NAME:
         reset_rate_limiters()
 

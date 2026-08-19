@@ -111,6 +111,12 @@ class Command(BaseCommand):
         shutting_down = threading.Event()
 
         def start_consuming() -> None:
+            """Start the consumer thread on the loop, unless the shutdown got there first.
+
+            Queued with ``call_soon`` so the thread begins once the loop is turning, and
+            gated because the callback can still be pending when the teardown runs — see
+            the comment above for what an ungated one starts, and how late.
+            """
             if shutting_down.is_set():
                 logger.info('not starting the consumer: the shutdown had already begun')
                 return
@@ -171,6 +177,13 @@ class Command(BaseCommand):
         loop = bot.loop
 
         def wait_then_stop() -> None:
+            """Wait for the idle event on this thread, then stop the loop from it.
+
+            The main thread is inside ``run_forever`` and cannot wait for anything, so
+            the wait lives here and reaches the loop through ``call_soon_threadsafe`` —
+            the only safe way in from another thread. A loop already closed raises
+            ``RuntimeError``, which is a race with the teardown and not a fault.
+            """
             stop.wait()
             with contextlib.suppress(RuntimeError):
                 loop.call_soon_threadsafe(loop.stop)
@@ -222,6 +235,12 @@ class Command(BaseCommand):
         """
 
         def raise_interrupt(_signum: int, _frame: FrameType | None) -> None:
+            """Raise where the signal arrived, which is inside whatever was blocking.
+
+            That is the whole trick: ``KeyboardInterrupt`` unwinds ``start_polling`` and
+            ``run_forever`` through the same path a Ctrl-C takes, so one teardown covers
+            both an operator and ``docker stop``.
+            """
             raise KeyboardInterrupt
 
         try:

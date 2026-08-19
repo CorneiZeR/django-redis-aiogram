@@ -123,6 +123,12 @@ def _completion(on_complete: Callable[[], None]) -> 'Callable[[asyncio.Task[None
     """
 
     def done(task: 'asyncio.Task[None]') -> None:
+        """Settle unless the task was cancelled, which is the one case that must not.
+
+        A cancelled send never reached Telegram, so settling here would acknowledge a
+        message the worker still owes — and cancellation is exactly what a shutdown that
+        ran out of drain time does to the sends it could not finish.
+        """
         if task.cancelled():
             return
         _settle(on_complete)
@@ -476,6 +482,11 @@ class TelegramBot:
         self._attach_router()
 
         async def poll() -> None:
+            """Long-poll Telegram, with ``_polling`` true only while this is running.
+
+            A coroutine rather than a straight call, so the flag is raised and lowered
+            on the loop itself — see the comment below for what setting it earlier cost.
+            """
             # marked from inside the loop: setting it before run_until_complete
             # left a window where send() chose send_raw while the loop was not
             # running yet, and a consumer thread would then drive it from the
@@ -596,6 +607,13 @@ class TelegramBot:
                 self._runner_ready.clear()
 
                 def run() -> None:
+                    """Own this loop on this thread, and say so before blocking in it.
+
+                    The readiness signal is queued *on the loop* rather than set here:
+                    scheduled with ``call_soon`` it can only fire once ``run_forever``
+                    is actually turning, so a caller that waits for it cannot find a
+                    loop that exists but is not running yet.
+                    """
                     asyncio.set_event_loop(loop)
                     loop.call_soon(self._runner_ready.set)
                     loop.run_forever()
@@ -788,6 +806,15 @@ class TelegramBot:
             return identifier
 
         async def send() -> None:
+            """Make the call, and keep making it while Telegram asks for a wait.
+
+            The loop owns three things the caller cannot see: the rate limiter's wait,
+            which is per attempt rather than per message; the ``retry_after`` sleeps,
+            which are Telegram's number and not ours; and the decision that a refusal is
+            final. Returning is therefore the only definition of *finished* this package
+            has — sent, refused or out of retries alike — which is what the done-callback
+            on the task is watching for.
+            """
             last_error: exceptions.TelegramRetryAfter | None = None
             retries = 0
             started = time.monotonic()
@@ -1015,6 +1042,13 @@ class TelegramBot:
         """Create the task on the loop thread, so it is registered before it runs."""
 
         def start() -> None:
+            """Turn the coroutine into a registered task, or refuse it and say so.
+
+            Runs on the loop thread, which is the point: creating the task here means it
+            is in ``_sends`` before it can run, so a drain that comes next cannot miss
+            it. The refusal below is what stops a coroutine queued a moment before
+            ``close()`` from being garbage-collected unmentioned.
+            """
             if self._closing and not self._draining:
                 # close() began after this was queued; the loop will not run it.
                 # _draining is the exception: close() runs one turn of the loop on
@@ -1369,6 +1403,11 @@ class TelegramBot:
         """Build the decorator every observer method above returns."""
 
         def wrapper(callback: CallbackType) -> CallbackType:
+            """Register the handler and hand it back unchanged.
+
+            Returning the callback rather than a wrapper is what lets these decorators
+            stack, and what keeps the handler directly callable from a test.
+            """
             observer = self._router.observers[event_name]
             observer.register(callback, *args, **kwargs)
             return callback

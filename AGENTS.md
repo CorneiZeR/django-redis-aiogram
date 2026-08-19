@@ -150,6 +150,13 @@ Packaging-only work does not need the Redis suite, and vice versa.
 - Code, comments, docstrings and documentation are in English.
 - Comment what is not obvious from the code, one line by default. Explain *why*,
   not *what*.
+- **Everything in `src/` has a docstring, nested closures and private helpers
+  included.** Those two are what ruff's `D` rules cannot see, and they are where
+  this package keeps its retry loop, its acknowledgement callback and its loop
+  thread — so `tests/test_docstring_coverage.py` walks the syntax tree and names
+  the definition that is missing one. Write the *why*: a docstring restating the
+  name passes the test and helps nobody. `tests/` is exempt, which
+  `pyproject.toml` records as `"D", # test names are the documentation`.
 - Public API is annotated; the package ships `py.typed` and mypy runs on it.
 - No new runtime dependencies without a reason that survives being questioned.
 
