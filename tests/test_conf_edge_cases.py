@@ -26,6 +26,32 @@ def test_string_settings_are_reported_clearly():
         _ = conf['TOKEN']
 
 
+@pytest.mark.parametrize('value', [[], (), '', 0])
+def test_an_empty_non_mapping_is_reported_too(value):
+    """The two tests above pick non-empty values, which is how this went unnoticed.
+
+    `_resolve` used to fold every falsy setting into `{}` before the mapping check, so
+    `TELEGRAM_BOT = []` reached none of it: the token and every other value came from the
+    environment or the defaults, silently, and a project that had configured the bot ran
+    as though it had not. An empty mistaken assignment is the likelier one, and it was the
+    only shape that got through.
+    """
+    with override_settings(TELEGRAM_BOT=value), pytest.raises(ImproperlyConfigured, match='must be a mapping'):
+        _ = conf['TOKEN']
+
+
+@pytest.mark.parametrize('value', [None, {}])
+def test_an_absent_setting_is_still_absent_rather_than_wrong(value):
+    """The other side of that fix: not configured is not the same as misconfigured.
+
+    `TELEGRAM_BOT = None` and an unset one both mean *take everything from the environment
+    and the defaults*, which is what the lazy-boot tests and `tests/bare_settings.py` rely
+    on. An empty dict is a mapping and means the same.
+    """
+    with override_settings(TELEGRAM_BOT=value):
+        assert conf['TOKEN'] == ''
+
+
 @pytest.mark.parametrize(
     ('module', 'uid'),
     [

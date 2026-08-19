@@ -125,9 +125,14 @@ def _completion(on_complete: Callable[[], None]) -> 'Callable[[asyncio.Task[None
     def done(task: 'asyncio.Task[None]') -> None:
         """Settle unless the task was cancelled, which is the one case that must not.
 
-        A cancelled send never reached Telegram, so settling here would acknowledge a
-        message the worker still owes — and cancellation is exactly what a shutdown that
-        ran out of drain time does to the sends it could not finish.
+        Cancellation says the task did not finish, and nothing about what Telegram saw:
+        the request may already have been sent, or even acted on, when the cancel landed
+        on the await. So the message stays unacknowledged and will be redelivered — which
+        can duplicate it, and is the trade this release makes deliberately, because the
+        alternative is acknowledging a send whose outcome nobody ever learned.
+
+        This is not a rare path: it is what ``_drain`` does to whatever outlasts
+        ``DRAIN_TIMEOUT`` at shutdown.
         """
         if task.cancelled():
             return

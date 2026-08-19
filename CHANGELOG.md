@@ -469,6 +469,16 @@ them, so it is not one per message.
 
 ### Documentation
 
+- **A `TELEGRAM_BOT` that is empty and not a mapping is refused rather than ignored.**
+  Found while writing the docstring for `_resolve`, which claimed the opposite of what the
+  code did. `getattr(django_settings, 'TELEGRAM_BOT', None) or {}` folded every falsy value
+  into an empty mapping *before* the check meant to catch a wrong type, so `[]`, `()`, `''`
+  and `0` reached none of it: the setting was silently discarded and every value — the token
+  included — came from the environment or the defaults. A project that had configured the
+  bot then ran as though it had not. Only `None` and an absent setting mean *not
+  configured* now. The two tests that covered this used `['not', 'a', 'mapping']` and
+  `'TOKEN=abc'`, both truthy, which is how the hole survived three releases.
+
 - **Everything in `src/` has a docstring, and a test keeps it that way.** Eighteen
   definitions were missing one, and they were not an even scattering: every single one
   was a nested closure or a private helper, which is exactly what ruff cannot ask about.
@@ -485,7 +495,11 @@ them, so it is not one per message.
   and `if TYPE_CHECKING`, where a definition can also hide — and reports `line:qualified.name`
   rather than a percentage, because one number over a threshold does not say which
   definition is missing. Its own control asserts that a nested definition *is* seen, since
-  a walker that stopped descending would report 100% for ever.
+  a walker that stopped descending would report 100% for ever. A second check refuses the
+  degenerate restatement — a summary whose every word is filler or a word of the name, so
+  `def _bucket(): """Return the bucket."""` fails — measured against all 511 definitions
+  in `src/` and reporting none of them, because a false positive there would fail the build
+  on a docstring somebody wrote on purpose.
 
 - **The review's docstring check now asks about the library rather than about test
   naming.** It had been the one failing pre-merge warning for most of this release, at

@@ -58,6 +58,11 @@ dev = [
     # queryset.filter() trips no-any-return under strict. Manager methods are unaffected,
     # which is why only admin.py sees it. Lift the ceiling once upstream fixes it.
     "django-stubs[compatible-mypy]>=5.1,<6.1",
+    # tests/test_docstring_coverage.py reads `.coderabbit.yaml`, and that file's meaning
+    # turns on YAML's own rules: a bare `off` is the boolean false, so the review policy
+    # can be silently invalid. Asserting on the text cannot tell an active setting from
+    # the same words in a comment either. Test-time only; mypy runs on `src` alone
+    "pyyaml>=6",
 ]
 
 [project.urls]

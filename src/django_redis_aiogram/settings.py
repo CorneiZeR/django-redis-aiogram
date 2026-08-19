@@ -110,8 +110,15 @@ class Settings(Mapping[str, Any]):
         without it the whole setting would be *silently* ignored and every value taken
         from the environment or the defaults, including the token. A misconfiguration that
         loudly refuses is worth more than one that runs as though unconfigured.
+
+        Only ``None`` and an absent setting mean *not configured*. Folding every falsy
+        value into ``{}`` first, which is what ``or {}`` did, let ``[]``, ``()`` and ``''``
+        past the check that exists to catch them — the empty ones, which are exactly what
+        a mistaken assignment produces.
         """
-        overrides = getattr(django_settings, SETTINGS_NAME, None) or {}
+        overrides = getattr(django_settings, SETTINGS_NAME, None)
+        if overrides is None:
+            overrides = {}
         if not isinstance(overrides, Mapping):
             msg = f'{SETTINGS_NAME} must be a mapping, got {type(overrides).__name__}.'
             raise ImproperlyConfigured(msg)

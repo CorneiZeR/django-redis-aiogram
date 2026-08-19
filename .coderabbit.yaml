@@ -50,9 +50,11 @@ reviews:
           pydocstyle rules and were the entire gap when this check was written.
           Ignore everything under tests/: that exclusion is deliberate and
           recorded in pyproject.toml. A docstring that only restates the name is
-          a finding, not a pass. tests/test_docstring_coverage.py enforces the
-          same rule deterministically in CI and names the offending definition,
-          so treat a disagreement between the two as a reason to read that test.
+          a finding, not a pass — and that judgement is the half asked of you
+          here. tests/test_docstring_coverage.py already fails CI for a missing
+          docstring and for the degenerate restatement, where every word of the
+          summary is filler or a word of the name; it cannot judge whether a
+          longer docstring earns its length, which is why you are asked.
 
   path_instructions:
     - path: 'src/django_redis_aiogram/**'
