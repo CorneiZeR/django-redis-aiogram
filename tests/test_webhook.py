@@ -1119,3 +1119,6 @@ def test_a_close_that_gave_up_still_cancels_what_arrived_after_it(monkeypatch):
         released.set()
         if instance._runner is not None:
             instance._runner.join(timeout=5)
+        # and the loop itself: the close under test gave up while the thread still held
+        # it, so nothing had closed it by the time that thread finally exited
+        instance.close()

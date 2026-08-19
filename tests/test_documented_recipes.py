@@ -403,6 +403,29 @@ def test_every_reason_the_webhook_refuses_is_catalogued(fragment):
     assert fragment in catalogued_refusals(), 'Troubleshooting does not name a reason the view answers 503'
 
 
+#: what each of the four 503 branches is called on Webhook.md, where the causes are prose
+#: rather than log lines. Ordered as the view checks them, which is what the page claims
+WEBHOOK_CAUSES = ('`ENABLED` is off', '`MODE` is not `webhook`', 'cannot be built', 'nothing ran the update')
+
+
+def test_the_other_page_names_the_same_four_causes():
+    """The helpers above read Troubleshooting, and Webhook.md carries the causes too.
+
+    Dropping one from that page left every assertion here true — the same gap this file was
+    just fixed for on the other side. Asserted in the page's own order, because the
+    sentence claims to list them in the order the view checks them.
+    """
+    root = pathlib.Path(__file__).resolve().parent.parent
+    page = (root / 'docs' / 'wiki' / 'Webhook.md').read_text(encoding='utf-8')
+    paragraph = page.split('All four reasons for a 503')[1].split('\n\n')[0]
+    positions = [paragraph.find(cause) for cause in WEBHOOK_CAUSES]
+    absent = [cause for cause, position in zip(WEBHOOK_CAUSES, positions, strict=True) if position < 0]
+
+    assert not absent, f'Webhook.md no longer names {absent}'
+    assert positions == sorted(positions), 'the causes are no longer in the order the view checks them'
+    assert len(WEBHOOK_CAUSES) == len(WEBHOOK_REFUSALS), 'the two pages describe a different number of causes'
+
+
 def test_the_catalogue_and_the_view_agree_on_how_many_refusals_there_are():
     """The list above is written by hand, so on its own it cannot notice a fifth reason.
 
