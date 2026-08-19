@@ -126,6 +126,11 @@ def test_sigterm_unwinds_polling(monkeypatch):
         def stop(self):
             events.append('stopped')
 
+        def collect(self):
+            # the teardown settles the sends close() drained; a double that omits it
+            # only proves the command still runs, not that it finishes the job
+            events.append('collected')
+
     monkeypatch.setattr(
         'django_redis_aiogram.management.commands.start_tgbot.get_delivery',
         lambda handler: Delivery(),
@@ -146,7 +151,8 @@ def test_sigterm_unwinds_polling(monkeypatch):
     finally:
         signal.signal(signal.SIGTERM, previous)
 
-    assert events == ['polling', 'stopped', 'closed']
+    # `collected` after `closed`, because close() is what drains the sends being settled
+    assert events == ['polling', 'stopped', 'closed', 'collected']
 
 
 @override_settings(TELEGRAM_BOT=SETTINGS)

@@ -35,6 +35,11 @@ class RecordingDelivery:
     def stop(self):
         self.events.append('stopped')
 
+    def collect(self):
+        # part of the contract since the command started settling the sends that
+        # close() drains: without it a graceful stop left them in the in-flight list
+        self.events.append('collected')
+
 
 @override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost:6379/0'})
 def test_consumer_starts_only_after_the_loop_is_running(monkeypatch):
@@ -78,7 +83,9 @@ def test_shutdown_is_safe_when_the_consumer_never_started(monkeypatch):
     call_command('start_tgbot')
 
     assert 'consumer-started' not in events
-    assert events == ['stopped', 'closed']
+    # collected on this path too: a consumer that never started has nothing in flight,
+    # and a teardown that settled only on the happy path is the one easiest to get wrong
+    assert events == ['stopped', 'closed', 'collected']
 
 
 @override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost:6379/0'})
@@ -112,6 +119,9 @@ class _NoDelivery:
     def stop(self):
         pass
 
+    def collect(self):
+        pass
+
 
 @override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost:6379/0', 'MODE': 'webhook'})
 def test_webhook_mode_consumes_without_calling_telegram(monkeypatch):
@@ -128,6 +138,9 @@ def test_webhook_mode_consumes_without_calling_telegram(monkeypatch):
 
         def stop(self):
             events.append('stopped')
+
+        def collect(self):
+            events.append('collected')
 
     handlers = []
     monkeypatch.setattr(
@@ -153,7 +166,9 @@ def test_webhook_mode_consumes_without_calling_telegram(monkeypatch):
 
     assert handlers == [bot.send_raw], 'the consumer was given the wrong handler'
     assert 'POLLED' not in events, 'it polled Telegram in webhook mode'
-    assert events == ['consumer-started', 'stopped', 'closed'], events
+    # `collected` last, and after `closed`: close() is what drains the in-flight sends,
+    # so collecting before it would settle nothing and leave them to be redelivered
+    assert events == ['consumer-started', 'stopped', 'closed', 'collected'], events
     assert 'Updates arrive by webhook.' in out.getvalue()
     assert 'Consuming the queue' in out.getvalue()
 
@@ -171,6 +186,9 @@ def run_start_command(**options):
 
         def stop(self):
             events.append('stopped')
+
+        def collect(self):
+            events.append('collected')
 
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(

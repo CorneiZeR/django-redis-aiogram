@@ -94,8 +94,11 @@ or park it:
 ## Health and shutdown
 
 `SIGTERM` unwinds cleanly: polling stops, the consumer thread is joined, the
-aiogram session and FSM storage are closed. Give the container enough grace
-period to finish an in-flight send:
+in-flight sends are drained, whatever the drain delivered is acknowledged, and the
+aiogram session and FSM storage are closed. The acknowledgement is what keeps a
+graceful stop from duplicating: the drain is what finishes those sends, and the loop
+that acknowledges them has stopped by then. Give the container enough grace period to
+finish an in-flight send:
 
 ```yaml
     stop_grace_period: 30s

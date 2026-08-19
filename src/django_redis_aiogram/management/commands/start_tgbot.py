@@ -153,10 +153,19 @@ class Command(BaseCommand):
             try:
                 bot.close()
             finally:
-                # after close(), never before: closing drains in-flight sends,
-                # and those are what produce the final rows. In its own finally
-                # because a close() that raises must not also lose the rows
-                recorder.stop()
+                # the sends close() just drained reported themselves finished into a
+                # queue whose only reader is the consumer loop, and that returned before
+                # the join above — so without this every message the drain delivered
+                # stays in the in-flight list and the next start sends it again. A
+                # graceful stop duplicated whatever the drain had time to finish, which
+                # is the one thing `Delivery.md` says a *kill* is needed for
+                try:
+                    delivery.collect()
+                finally:
+                    # after close(), never before: closing drains in-flight sends,
+                    # and those are what produce the final rows. In its own finally
+                    # because a close() that raises must not also lose the rows
+                    recorder.stop()
             if previous is not None:
                 # the command may be called in-process; leaving our handler
                 # installed would turn a later SIGTERM into a stray interrupt

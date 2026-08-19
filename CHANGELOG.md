@@ -72,6 +72,12 @@ them, so it is not one per message.
   `on_complete` keyword is now handed one and the message waits for it; one that
   does not — which is every documented recipe — keeps the old semantics exactly,
   so nothing outside this package changes behaviour.
+
+  The teardown settles those reports after the drain, which is the step that makes a
+  *graceful* stop different from a kill: `close()` is what finishes the sends still in
+  flight, and the loop that would have acknowledged them has already returned by then.
+  Without it every message the drain delivered stayed in the in-flight list and the next
+  start sent it again — a duplicate per restart, rather than per crash.
 - **`manage.py check` no longer imports aiogram.** `DEFAULT_BOT_PROPERTIES`
   defaults to `{}`, and the check that validates it reached for
   `DefaultBotProperties` before noticing there was nothing to validate — so

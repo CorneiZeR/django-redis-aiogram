@@ -893,3 +893,72 @@ def test_an_unconfigured_project_gets_the_old_behaviour():
     assert without_lmove.crash_safe is False
     # unasked, the command starts anyway; the refusal is opt-in
     Command._require_crash_safety(without_lmove)
+
+
+@override_settings(
+    TELEGRAM_BOT={
+        **SETTINGS,
+        'TOKEN': '42:x',
+        'MODE': 'webhook',
+        'FSM_STORAGE': 'memory',
+        'RATE_LIMIT': None,
+        'MAX_RETRIES': 0,
+        'REDIS_TIMEOUT': 2,
+        'DRAIN_TIMEOUT': 10,
+    }
+)
+def test_a_send_the_drain_finishes_is_acknowledged_before_the_command_returns(redis_server, monkeypatch):
+    """A graceful stop must not duplicate. Driven through the command, not around it.
+
+    `on_complete` only queues the handle; the `LREM` happens in `collect()`, which runs
+    inside the consumer loop — and the loop returns *before* `close()` drains the sends
+    still in flight. So everything the drain delivered stayed in the in-flight list and
+    the next start reclaimed and sent it again: a duplicate per graceful restart, where
+    `Delivery.md` promises one only after a kill.
+
+    The send outlasts the consumer's exit on purpose. Without the settle after the drain
+    this fails whatever the timing, because the acknowledgement never happens at all;
+    the margin only guards against the reverse, a send that finishes early enough for
+    the loop's own last `collect()` to catch it and hide the defect.
+    """
+    started = threading.Event()
+
+    class SlowTelegram:
+        async def send_message(self, **kwargs):
+            """Still in flight when the consumer thread is joined."""
+            started.set()
+            await asyncio.sleep(2.0)
+            sent.append(kwargs['chat_id'])
+
+        class session:
+            @staticmethod
+            async def close():
+                """aiogram's session, reduced to what `close()` calls."""
+
+    sent: list[int] = []
+    instance = TelegramBot()
+    instance._bot = SlowTelegram()
+    monkeypatch.setattr('django_redis_aiogram.management.commands.start_tgbot.bot', instance)
+    monkeypatch.setattr(
+        'django_redis_aiogram.management.commands.start_tgbot.get_delivery',
+        lambda handler: BlpopDelivery(handler=handler),
+    )
+    release = threading.Event()
+    monkeypatch.setattr(Command, 'idle_event', release)
+    redis_server.rpush(QUEUE, payload(7))
+
+    finished = threading.Event()
+
+    def run():
+        call_command('start_tgbot', stdout=StringIO())
+        finished.set()
+
+    threading.Thread(target=run, daemon=True).start()
+    assert started.wait(5), 'the send never began, so the drain has nothing to finish'
+    assert redis_server.llen(PROCESSING) == 1, 'the message was not taken in flight'
+    release.set()
+
+    assert finished.wait(20), 'the command never returned'
+    assert sent == [7], f'the drain did not finish the send: {sent}'
+    assert redis_server.llen(PROCESSING) == 0, 'a delivered message was left to be sent again'
+    assert redis_server.llen(QUEUE) == 0
