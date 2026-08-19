@@ -17,8 +17,8 @@ import time
 from argparse import ArgumentParser
 from typing import Any, NamedTuple
 
-from django.core.management import BaseCommand
-from django.db import models, transaction
+from django.core.management import BaseCommand, CommandError
+from django.db import connections, models, transaction
 from django.utils import timezone
 
 from django_redis_aiogram.eventlog import log_alias
@@ -82,6 +82,11 @@ class Command(BaseCommand):
             return
 
         alias = options['database'] or log_alias()
+        if alias not in connections:
+            # E041 guards the setting; the flag bypasses it, in the one command that runs
+            # from cron — where a Django traceback is the least useful thing to wake up to
+            msg = f'no database is configured under the alias {alias!r}; DATABASES has {sorted(connections)}.'
+            raise CommandError(msg)
         cutoff = timezone.now() - datetime.timedelta(days=days)
         rows = TelegramEvent.objects.using(alias)
 

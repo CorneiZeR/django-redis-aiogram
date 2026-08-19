@@ -261,7 +261,10 @@ def _a_url_pickle_can_survive(key: str) -> list[Problem]:
     for it. Pickle is the exception, and it fails in the one place nothing can
     recover from: redis-py decodes inside its own parser, so a blocking pop raises
     `UnicodeDecodeError` *after* the server has moved the message to the in-flight
-    list, and every later reclaim trips over the same message for ever.
+    list, and each later start trips over it once before carrying on — measured on
+    Redis 8: one error per restart, then the queue drains around it. Not a wedged
+    consumer, which is what the wording used to imply, and the difference matters:
+    an operator who believes the queue is dead drains it by hand.
     """
     try:
         allowed = coerce_bool(conf.get('ALLOW_PICKLE'), f"{SETTINGS_NAME}['ALLOW_PICKLE']")
@@ -279,7 +282,8 @@ def _a_url_pickle_can_survive(key: str) -> list[Problem]:
         Problem(
             'sets decode_responses while ALLOW_PICKLE is True. A pickled payload is not '
             'valid text, so the consumer raises inside redis-py after the message has '
-            'already left the queue, and no restart can get past it.',
+            'already left the queue: that message is stranded in the in-flight list, and '
+            'each restart trips over it once more before carrying on.',
             hint=(
                 'Drop decode_responses from the URL, or turn ALLOW_PICKLE off and use the '
                 "'json' serializer. Give the cache its own URL if it needs decoding."

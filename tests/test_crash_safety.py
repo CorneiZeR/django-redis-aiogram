@@ -962,3 +962,33 @@ def test_a_send_the_drain_finishes_is_acknowledged_before_the_command_returns(re
     assert sent == [7], f'the drain did not finish the send: {sent}'
     assert redis_server.llen(PROCESSING) == 0, 'a delivered message was left to be sent again'
     assert redis_server.llen(QUEUE) == 0
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'WORKER_NAME': 'alive'})
+def test_reclaim_works_on_a_server_older_than_lmove(redis_server, monkeypatch):
+    """The one path that can still recover a list stranded on a pre-6.2 server.
+
+    `reclaim()` gives up there and the consumer runs at-most-once, so nothing else will
+    ever come back for those messages — while `--dry-run` counted them with `LLEN`, which
+    works on every server, and promised a requeue the real run then failed to perform with
+    `unknown command LMOVE`. `RPOPLPUSH` is the same move as `LMOVE ... RIGHT LEFT` and has
+    existed since 1.2.
+    """
+    redis_server.rpush(f'{QUEUE}:processing:gone', payload(1), payload(2))
+    old = OldRedis(redis_server)
+    targets = (
+        'django_redis_aiogram.redis.get_redis',
+        'django_redis_aiogram.management.commands.tgbot_reclaim.get_redis',
+    )
+    for target in targets:
+        monkeypatch.setattr(target, lambda *args, **kwargs: old, raising=False)
+    out = StringIO()
+
+    call_command('tgbot_reclaim', worker='gone', stdout=out)
+
+    assert redis_server.llen(f'{QUEUE}:processing:gone') == 0, 'the messages were left stranded'
+    assert redis_server.llen(QUEUE) == 2
+    assert 'Requeued 2' in out.getvalue()
+    # oldest first, the same order LMOVE RIGHT->LEFT produces
+    queued = [JsonSerializer().loads(raw)['chat_id'] for raw in redis_server.lrange(QUEUE, 0, -1)]
+    assert queued == [1, 2], f'the order was reversed: {queued}'

@@ -752,6 +752,11 @@ class TelegramBot:
         identifier = resolve_correlation_id(correlation_id)
         if self.is_worker:
             return self.send_raw(function, correlation_id=identifier, **kwargs)
+        # named here as well as in `send_redis`, and before delegating, because the twin a
+        # caller should hear about is the twin of the method they called: `send` pairs with
+        # `asend`, and `send_redis` — which this is about to call — pairs with `asend_redis`.
+        # The latch means whichever entry point the caller used is the one that speaks
+        _mention_asend('asend')
         return self.send_redis(function, correlation_id=identifier, **kwargs)
 
     async def asend(
@@ -1220,7 +1225,7 @@ class TelegramBot:
         if not accepted:
             return identifier
 
-        _mention_asend('asend')
+        _mention_asend('asend_redis')
         with queueing(function, [(identifier, kwargs)]) as write:
             get_redis().rpush(write.key, *write.payloads)
         return identifier

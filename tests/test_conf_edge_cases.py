@@ -132,3 +132,26 @@ def test_the_flush_interval_is_read_the_way_its_check_demands():
 
     with override_settings(TELEGRAM_BOT={'EVENT_LOG_FLUSH_INTERVAL': 3}):
         assert EventRecorder.flush_interval() == 3
+
+
+@pytest.mark.parametrize('key', ['RATE_LIMIT', 'EVENT_LOG_KINDS', 'DEFAULT_KWARGS'])
+def test_an_environment_variable_for_a_settings_only_key_says_it_is_ignored(monkeypatch, caplog, key):
+    """Silence was the worst of the three possible answers.
+
+    A container or a callable has no textual form, so the variable cannot be honoured —
+    but the Settings page promises an environment twin for every scalar, and an operator
+    throttling the bot with `DJANGO_REDIS_AIOGRAM_RATE_LIMIT` got the default rate and no
+    word about it. Honoured, refused or reported: this is the third.
+    """
+    monkeypatch.setenv(f'DJANGO_REDIS_AIOGRAM_{key}', 'anything')
+    conf.reset()
+
+    with caplog.at_level('WARNING', logger='django_redis_aiogram'):
+        _ = conf[key]
+
+    assert 'ignoring an environment variable' in caplog.text
+    # in `extra`, not interpolated into the message: the rule this package logs by, and
+    # the reason the first version of this assertion looked for it in the text and failed
+    reported = [record for record in caplog.records if getattr(record, 'tg_setting', None) == key]
+    assert reported, f'the warning did not name {key}'
+    assert reported[0].tg_variable == f'DJANGO_REDIS_AIOGRAM_{key}'

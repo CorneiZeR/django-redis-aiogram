@@ -9,6 +9,7 @@ the whole project down — its test suite included — whenever the token or Red
 was absent.
 """
 
+import logging
 import os
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
@@ -19,6 +20,8 @@ from django.core.exceptions import ImproperlyConfigured
 from django.core.signals import setting_changed
 
 from django_redis_aiogram.defaults import DEFAULTS
+
+logger = logging.getLogger('django_redis_aiogram')
 
 SETTINGS_NAME = 'TELEGRAM_BOT'
 ENV_PREFIX = 'DJANGO_REDIS_AIOGRAM_'
@@ -94,6 +97,14 @@ def _from_env(key: str, default: object) -> object:
             raise ImproperlyConfigured(msg) from None
     if isinstance(default, str):
         return raw
+    # a container or a callable has no textual form, so the variable cannot be honoured —
+    # and being silently ignored is the worst of the three answers. An operator throttling
+    # the bot with DJANGO_REDIS_AIOGRAM_RATE_LIMIT got the default rate and no word about
+    # it, from a page that promises an environment twin for every scalar
+    logger.warning(
+        'ignoring an environment variable for a setting that has no textual form',
+        extra={'tg_setting': key, 'tg_variable': name},
+    )
     return _MISSING
 
 

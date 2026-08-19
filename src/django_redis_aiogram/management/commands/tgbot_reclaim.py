@@ -17,6 +17,8 @@ from argparse import ArgumentParser
 from typing import Any
 
 from django.core.management import BaseCommand, CommandError
+from redis import Redis
+from redis.exceptions import ResponseError
 
 from django_redis_aiogram.events import worker_identity
 from django_redis_aiogram.redis import get_redis, processing_key, queue_key
@@ -44,6 +46,24 @@ class Command(BaseCommand):
             help='stop after this many messages, so one run has a bounded blast radius. 0 means no limit',
         )
         parser.add_argument('--dry-run', action='store_true', help='report what is there, and move nothing')
+
+    @staticmethod
+    def _move_one(connection: Redis, source: str, destination: str) -> object:
+        """Move one message back to the front of the queue, oldest first.
+
+        ``LMOVE ... RIGHT LEFT`` is what ``reclaim()`` uses, so the order a real run
+        produces is the order a dry run promises. On a Redis older than 6.2 that command
+        does not exist, and this is the one path that can still recover those messages:
+        the consumer's own ``reclaim()`` gives up there and runs at-most-once, so a list
+        stranded before the downgrade would have nothing else to come back through.
+        ``RPOPLPUSH`` is the same move, and has been there since 1.2.
+        """
+        try:
+            return connection.lmove(source, destination, 'RIGHT', 'LEFT')
+        except ResponseError as error:
+            if 'unknown command' not in str(error).lower():
+                raise
+            return connection.rpoplpush(source, destination)
 
     def handle(self, *args: Any, **options: Any) -> None:
         """Walk the named worker's in-flight list back onto the queue."""
@@ -95,9 +115,7 @@ class Command(BaseCommand):
         moved = 0
         while not limit or moved < limit:
             try:
-                # RIGHT->LEFT, like reclaim(): it puts them back at the front of
-                # the queue in the order they were taken
-                if not connection.lmove(source, destination, 'RIGHT', 'LEFT'):
+                if not self._move_one(connection, source, destination):
                     break
             except Exception as error:
                 msg = f'moved {moved} message(s), then failed: {error}'

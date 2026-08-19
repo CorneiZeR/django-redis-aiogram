@@ -72,9 +72,7 @@ class Command(BaseCommand):
                 )
             )
             if options['idle']:
-                self.stdout.write('Idling. Send SIGINT or SIGTERM to stop.')
-                with contextlib.suppress(KeyboardInterrupt):
-                    (self.idle_event or threading.Event()).wait()
+                self._idle_until_signalled()
             return
 
         configured = current_mode()
@@ -200,6 +198,25 @@ class Command(BaseCommand):
 
         threading.Thread(target=wait_then_stop, name='tgbot-idle', daemon=True).start()
         loop.run_forever()
+
+    def _idle_until_signalled(self) -> None:
+        """Hold a disabled container open, and unwind it the way the enabled path does.
+
+        The same SIGTERM handler, so `docker stop` exits 0 rather than 143: without it the
+        signal kills the process outright and a container idling on purpose looked like one
+        that crashed. And `recorder.stop()`, because a disabled process with the log on
+        still has a writer thread holding a database connection.
+        """
+        self.stdout.write('Idling. Send SIGINT or SIGTERM to stop.')
+        previous = self._install_sigterm_handler()
+        try:
+            with contextlib.suppress(KeyboardInterrupt):
+                (self.idle_event or threading.Event()).wait()
+        finally:
+            recorder.stop()
+            if previous is not None:
+                with contextlib.suppress(ValueError):
+                    signal.signal(signal.SIGTERM, previous)
 
     def _preflight(self, delivery: Delivery) -> None:
         """Everything worth saying or refusing before a thread exists."""

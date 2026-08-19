@@ -270,7 +270,9 @@ def test_send_off_a_loop_says_nothing(redis_server, caplog, monkeypatch):
 @override_settings(TELEGRAM_BOT=SETTINGS)
 @pytest.mark.parametrize(
     ('producer', 'alternative'),
-    [('send', 'asend'), ('send_redis', 'asend'), ('send_many', 'asend_many')],
+    # each names its *own* twin: the test used to expect `send_redis` to name `asend`,
+    # which is the twin of the method the caller did not call
+    [('send', 'asend'), ('send_redis', 'asend_redis'), ('send_many', 'asend_many')],
 )
 def test_every_synchronous_route_that_writes_names_its_own_twin(
     redis_server, caplog, monkeypatch, producer, alternative
