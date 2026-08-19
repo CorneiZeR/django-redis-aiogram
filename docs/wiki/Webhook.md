@@ -147,9 +147,15 @@ because a handler that failed once will fail the same way on redelivery — that
 is a loop, not a retry. Failures are logged; see **[[Logging]]**.
 
 It answers **503** for the other case: an update that was *refused* rather than
-handled, because the process is shutting down and nothing ran. There redelivery
-is the point — during a rolling restart it is the difference between the update
-moving to the next instance and disappearing into a 200 nobody acted on.
+handled, because nothing ran it. Shutting down is one reason; a loop already closed
+by an earlier `close()` is another, and that one used to answer 200 — so the update
+was lost and Telegram was told not to try again. There redelivery is the point —
+during a rolling restart it is the difference between the update moving to the next
+instance and disappearing into a 200 nobody acted on.
+
+The full set the view returns: **200** handled, or a handler raised; **503** refused,
+so redeliver; **403** the secret does not match, including one that is not ASCII;
+**400** the body is not an update Telegram could have sent.
 
 **Updates are not queued through Redis.** They go straight from the request to
 the dispatcher. Redis carries outbound messages only, in both modes.

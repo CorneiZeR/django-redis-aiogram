@@ -1065,3 +1065,49 @@ def test_no_loop_thread_is_started_on_a_closed_loop(monkeypatch):
 
     assert instance._ensure_loop_runs() is False, 'it claimed to own a loop it cannot run'
     assert instance._runner is None, 'a thread was started on a closed loop'
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'DRAIN_TIMEOUT': 0.2})
+def test_a_close_that_gave_up_still_cancels_what_arrived_after_it(monkeypatch):
+    """The half of keeping the orphan that matters to a request thread.
+
+    A request waits on `future.result()` with no deadline, and `_stop_runner` is the only
+    code that cancels `_updates`. With the orphan forgotten it was never reached again, so
+    an update submitted after a give-up `close()` held its worker until SIGKILL. Keeping
+    the runner is what makes the retry cancel it.
+    """
+    monkeypatch.setattr('django_redis_aiogram.client.RUNNER_TIMEOUT', 0.1)
+    instance = TelegramBot()
+    blocked = threading.Event()
+    released = threading.Event()
+
+    async def hold():
+        """Block the loop thread for longer than both closes take.
+
+        Its first version waited five seconds, which the second close's own drain
+        outlasted — so the thread died mid-teardown, the join succeeded, and the test
+        failed on a state the code was right to be in.
+        """
+        blocked.set()
+        released.wait(30)
+
+    async def later():
+        """Stand in for an update submitted after the give-up."""
+        await asyncio.sleep(30)
+
+    assert instance._ensure_loop_runs()
+    asyncio.run_coroutine_threadsafe(hold(), instance.loop)
+    assert blocked.wait(5)
+    instance.close()
+    assert instance._runner is not None, 'the orphan was forgotten'
+
+    arrived = asyncio.run_coroutine_threadsafe(later(), instance.loop)
+    instance._updates.add(arrived)
+    assert not arrived.done()
+
+    instance.close()
+
+    assert arrived.cancelled(), 'a request submitted after the give-up would wait for ever'
+    assert instance._runner is not None, 'the retry forgot the orphan it could still not stop'
+    released.set()
+    instance._runner.join(timeout=5)

@@ -126,6 +126,22 @@ that part rather than fail the container over it:
 - `could not scan for stranded in-flight lists`
 - `could not establish which delivery guarantee is in force`
 
+## The webhook answers 503, or every update 403s
+
+**503** means the view refused the update rather than handling it, so Telegram will
+redeliver — which is what you want. Two reasons: the process is shutting down, or its
+event loop was already closed by an earlier `close()`. The second is worth knowing about
+in a web worker that stays up: something closed the bot and requests kept arriving. The
+log line is `webhook refused an update`.
+
+**403** means the `X-Telegram-Bot-Api-Secret-Token` header did not match
+`WEBHOOK_SECRET`. Check that the value you registered with `manage.py tgbot_webhook set`
+is the one the process now reads — rotating the setting without re-registering gives
+exactly this. A header that is not ASCII also lands here rather than in a traceback.
+
+**400** means the body did not parse as an update. Something other than Telegram is
+posting to that URL.
+
 ## Handlers never fire
 
 ```python
