@@ -366,6 +366,33 @@ PROBE_REFUSALS = (
 )
 
 
+#: the four reasons the webhook view answers 503, each quoted on Troubleshooting so an
+#: operator can grep the line they have. Same bidirectional pin as the probe's refusals
+WEBHOOK_REFUSALS = (
+    'webhook received an update while the bot is disabled',
+    'webhook received an update while this deployment polls',
+    'webhook cannot build the bot',
+    'webhook refused an update',
+)
+
+
+@pytest.mark.parametrize('fragment', WEBHOOK_REFUSALS)
+def test_every_reason_the_webhook_refuses_is_catalogued(fragment):
+    """A 503 is the one answer that makes Telegram try again, so its causes are read.
+
+    The page listed two of the four, and the audit that found this also found the same
+    shape twice elsewhere: prose quoting a message the code no longer emits, or omitting
+    one it does. Asserted in both directions, so a reworded line cannot leave the
+    catalogue describing something that never happens.
+    """
+    root = pathlib.Path(__file__).resolve().parent.parent
+    source = (root / 'src' / 'django_redis_aiogram' / 'webhook.py').read_text(encoding='utf-8')
+    page = (root / 'docs' / 'wiki' / 'Troubleshooting.md').read_text(encoding='utf-8')
+
+    assert fragment in source, 'the view no longer logs this; the page and this list still do'
+    assert fragment in page, 'Troubleshooting does not name a reason the view answers 503'
+
+
 @pytest.mark.parametrize('fragment', PROBE_REFUSALS)
 def test_every_line_the_probe_prints_is_catalogued(fragment):
     """An operator greps the line out of `docker inspect`; the page has to have it.

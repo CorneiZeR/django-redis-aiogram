@@ -154,9 +154,14 @@ during a rolling restart it is the difference between the update moving to the n
 instance and disappearing into a 200 nobody acted on.
 
 What a POST gets back: **200** handled, or a handler raised; **503** refused, so
-redeliver — a disabled process, the wrong `MODE`, or a loop that is closing or closed;
-**403** the secret does not match, including one that is not ASCII; **400** the body is
-not an update Telegram could have sent. Anything that is not a POST gets **405**.
+redeliver; **403** the secret does not match, including one that is not ASCII; **400** the
+body is not an update Telegram could have sent. Anything that is not a POST gets **405**.
+
+All four reasons for a 503, in the order the view checks them: `ENABLED` is off in this
+process; `MODE` is not `webhook`, so a worker is polling and two sources of updates would
+be one too many; the bot cannot be built, which in practice means `TOKEN` is missing or
+malformed; and nothing ran the update — the process is shutting down, its loop is closed,
+or the loop's own thread had not started yet.
 
 **Updates are not queued through Redis.** They go straight from the request to
 the dispatcher. Redis carries outbound messages only, in both modes.
