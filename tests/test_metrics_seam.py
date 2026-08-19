@@ -711,3 +711,47 @@ def test_a_gap_row_that_lands_clears_its_count(redis_server, monkeypatch):
 
     assert recorder._dropped == 0, 'a reported gap was reported twice'
     recorder._touched_database = False
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_a_receiver_django_cannot_name_costs_the_receivers_behind_it(redis_server, monkeypatch):
+    """Django's limit, pinned as a limit rather than described as one.
+
+    `send_robust` logs a failing receiver with `receiver.__qualname__`, unguarded. A
+    callable *instance* — an ordinary shape for a metrics collector — has no such
+    attribute, so raising inside one makes `send_robust` itself raise and abandon its own
+    loop: every receiver connected after it misses that batch. The containment here keeps
+    the write and the earlier receivers whole, and cannot reach past a dispatch that has
+    already stopped.
+
+    If a Django release guards that logging, this test fails — which is the moment the
+    docstring saying otherwise has to change too.
+    """
+    seen = []
+
+    class Unnameable:
+        """A collector with no `__qualname__`, which is what breaks the naming."""
+
+        def __call__(self, sender, events, **kwargs):
+            """Raise, so Django reaches for a name it cannot find."""
+            message = 'the collector is broken'
+            raise RuntimeError(message)
+
+    def behind(sender, events, **kwargs):
+        """Connected after it, and therefore never reached for that batch."""
+        seen.append(len(events))
+
+    unnameable = Unnameable()
+    assert not hasattr(unnameable, '__qualname__'), 'the premise no longer holds'
+    events_recorded.connect(unnameable, dispatch_uid='unnameable')
+    events_recorded.connect(behind, dispatch_uid='behind')
+    try:
+        monkeypatch.setattr(recorder, '_write', lambda batch: 0)
+        failures, blocked = recorder._flush([Event(kind='outbound.sent')], failures=0)
+    finally:
+        events_recorded.disconnect(dispatch_uid='unnameable')
+        events_recorded.disconnect(dispatch_uid='behind')
+
+    assert failures == 0, 'a receiver was counted as a failed write'
+    assert blocked == 0.0
+    assert seen == [], 'Django named the receiver after all; the docstring needs updating'

@@ -602,6 +602,16 @@ class EventRecorder:
         The upshot is a method that **cannot raise**, which is the property the rest
         of the writer needs from it rather than a defensive habit.
 
+        One limit worth stating, because it is Django's and not ours: when
+        ``send_robust`` raises on that unnamed receiver it abandons **its own loop**, so
+        receivers connected after the offending one do not run for that batch at all.
+        Containing it here keeps the write and every earlier receiver whole; it cannot
+        reach past Django into a dispatch that already stopped. Calling receivers
+        ourselves would need ``Signal._live_receivers``, a private API, which is a worse
+        trade than one documented sentence. A collector written as a callable instance
+        can close the gap on its side by defining ``__qualname__``; one written as a
+        function or a bound method has it already, and is the shape every recipe uses.
+
         A tuple rather than the list itself: receivers run one after another with
         the same argument, so one of them sorting or clearing a list would decide
         what the next one sees.
@@ -611,9 +621,7 @@ class EventRecorder:
         # the reporting loop is inside the guard as well as the dispatch, because
         # `getattr(..., None)` absorbs only `AttributeError` — a receiver whose
         # `__getattr__` raises anything else makes naming it raise, and the whole
-        # point is that nothing about a receiver reaches `_flush`'s failure counter.
-        # A raise partway through does leave the remaining outcomes unlogged, which
-        # is a worse log and not a worse batch
+        # point is that nothing about a receiver reaches `_flush`'s failure counter
         try:
             for receiver, outcome in events_recorded.send_robust(sender=self, events=tuple(batch)):
                 if isinstance(outcome, BaseException):

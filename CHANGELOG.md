@@ -11,6 +11,46 @@ them, so it is not one per message.
 
 ### Fixed
 
+- **Logging an event could still destroy the caller's writes.** The guard that stops the
+  log recycling a connection mid-transaction tested `in_atomic_block`, which is half of
+  what an open transaction means — and the worse half. With autocommit off
+  (`transaction.set_autocommit(False)`, or `AUTOCOMMIT: False` on the alias) the server
+  holds one from the first statement and no block exists anywhere:
+  `close_if_unusable_or_obsolete` then closes because `get_autocommit()` disagrees with
+  the configured value, while `close()` skips `needs_rollback` *because* the block flag is
+  False. So the caller's writes were rolled back by the server and nothing raised.
+  Measured on PostgreSQL 16: the row was gone after a `commit()` that reported success.
+  The suite could not see it — `tests/db_settings.py` is sqlite `:memory:` — so the test
+  pins the rule rather than the consequence, with a control that still recycles a
+  connection past its `CONN_MAX_AGE`.
+
+- **A gap row the database refused took the gap with it.** `_record_gap` subtracted the
+  count before writing and suppressed the write's failure, so the hole it could not
+  describe was forgotten: no later flush would report those events and the feed read as
+  complete coverage of a period that had lost rows. Subtracted after the write now.
+
+- **Rows the database refused one at a time were counted nowhere.** The ladder under
+  `write_batch` knew how many landed and used it only to decide whether to raise, so a
+  batch of forty that lost one left the drop counter at zero with no `log.dropped` row —
+  against this release's own promise that "what cannot is counted". `write_batch` reports
+  the loss and the recorder counts it, which the next successful flush turns into a gap
+  row.
+
+- **`sortable_by` never stopped a sort.** Django reads it in one place, the template tag
+  that decides whether a column header is a link, while `ChangeList` maps `?o=` straight
+  onto `list_display`. A bookmark, a shared link or a query string kept from before the
+  restriction still ordered the whole table by `function`, `worker` or `error_code`. The
+  changelist drops an `?o=` naming a column no index can serve, and renders the page with
+  the default ordering rather than refusing an old link.
+
+- **The failure filter's bounded count was not bounded.** `BoundedPaginator` promised "one
+  query the index can serve", and an `IN` over the seven failure kinds cannot yield a
+  global `id DESC` from `(kind, -id)` — so the database sorted every match before the
+  `LIMIT` could bite, which is the defect the index was added to remove, surviving in the
+  filter that needs it most. The count is unordered now: which rows the cap admits does
+  not change how many there are. Verified on the query plan, which names the index and no
+  longer sorts.
+
 - **`RAISE_EXCEPTION='false'` no longer re-raises.** `client.py` tested this setting with
   a bare `if`, the only boolean in the package still read that way, so the string
   `'false'` — which is what `DJANGO_REDIS_AIOGRAM_RAISE_EXCEPTION=false` arrives as, and

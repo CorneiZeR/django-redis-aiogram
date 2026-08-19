@@ -124,6 +124,12 @@ class BoundedPaginator(Paginator):  # type: ignore[type-arg]
         # the changelist always paginates a queryset; the base class is typed
         # for anything sliceable, which has no count()
         rows = cast('QuerySet[TelegramEvent]', self.object_list)
+        # unordered on purpose. Which rows the cap admits does not change how many
+        # there are, and the ordering is what stopped the index serving this: an `IN`
+        # over the failure kinds cannot yield a global `id DESC` from `(kind, -id)`, so
+        # the database sorted every match before the LIMIT could bite — the same defect
+        # the index was added to remove, surviving in the filter that needs it most
+        rows = rows.order_by()
         # one row past the cap, so the difference between "exactly ten thousand"
         # and "more than we will count" is knowable rather than assumed
         found = int(rows[: COUNT_LIMIT + 1].count())

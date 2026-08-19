@@ -502,3 +502,36 @@ def test_an_o_param_for_an_unindexed_column_does_not_sort(client, index, column)
     for sql in touched:
         assert f'"{column}" ASC' not in sql, f'ordered by {column}: {sql}'
         assert f'"{column}" DESC' not in sql, f'ordered by {column}: {sql}'
+
+
+@pytest.mark.django_db
+@override_settings(TELEGRAM_BOT=ON)
+def test_the_outcome_filters_count_is_served_by_the_index(client):
+    """`BoundedPaginator` promised "one query the index can serve" and the failure
+    filter was the one place it was not.
+
+    An `IN` over the seven failure kinds cannot yield a global `id DESC` from
+    `(kind, -id)`, so the database sorted every match before the `LIMIT` could bite —
+    the same defect the index was added to remove, surviving in the filter that needs it
+    most. The count is unordered now, because which rows the cap admits does not change
+    how many there are.
+
+    The plan is asserted to *name the index* as well as to be free of a sort: an
+    assertion on the sort alone passes with no index at all, which is how the sibling
+    test missed a deleted one.
+    """
+    for kind in (EventKind.OUTBOUND_FAILED.value, EventKind.OUTBOUND_SENT.value):
+        an_event(kind=kind)
+    client.force_login(a_reader('outcome', 'view_telegramevent'))
+
+    with CaptureQueriesContext(connection) as queries:
+        assert client.get(f'{CHANGELIST}?outcome=failed').status_code == 200
+
+    counts = [q['sql'] for q in queries if 'COUNT(' in q['sql'].upper() and 'django_redis_aiogram_event' in q['sql']]
+    assert counts, 'the changelist counted nothing, so this proves nothing'
+    with connection.cursor() as cursor:
+        for sql in counts:
+            cursor.execute(f'EXPLAIN QUERY PLAN {sql}')
+            plan = ' '.join(str(row) for row in cursor.fetchall())
+            assert 'TEMP B-TREE' not in plan.upper(), f'the bounded count still sorts: {plan}'
+            assert 'drai_event_kind_id' in plan, f'the count no longer uses the kind index: {plan}'
