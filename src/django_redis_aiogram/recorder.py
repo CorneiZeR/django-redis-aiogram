@@ -258,7 +258,16 @@ class EventRecorder:
                 # consumer knew its own name before
                 event = replace(event, worker=self.worker)
             if self._write_here():
-                self._deliver([event])
+                # counted, which it was not: under EVENT_LOG_SYNC the row is written on
+                # this thread, and a database that refuses it raises `EventLogRefusedError`
+                # — which the broad `except` below logged and did not count, so the row
+                # vanished with no gap marker. A one-row batch either lands or raises, so
+                # there is no partial case to weigh here, only this one
+                try:
+                    self._deliver([event])
+                except Exception:
+                    self._drop(1)
+                    logger.exception('could not record an event on the calling thread', extra={'tg_kind': event.kind})
                 return
             buffer = self._buffer()
             buffer.put_nowait(event)
@@ -329,6 +338,11 @@ class EventRecorder:
         stop() draining what the writer left. `+=` is a read and a write, so
         without this a drop is silently swallowed by a concurrent one.
         """
+        if not count:
+            # callers pass the refused count straight through, and that is zero on every
+            # successful write — reporting "the event log is falling behind" for a batch
+            # that landed in full is a false alarm on the line people watch for real ones
+            return
         with self._counter:
             self._dropped += count
             dropped = self._dropped
@@ -465,8 +479,15 @@ class EventRecorder:
         _acknowledge(wakes)
         if not leftover:
             return
-        with contextlib.suppress(Exception):
-            self._deliver(leftover)
+        try:
+            # the refused count, not only the raise: a database that takes some of these
+            # rows and refuses others leaves a hole exactly as large as what it refused,
+            # and ignoring the return counted that hole as zero
+            refused = self._deliver(leftover)
+        except Exception:
+            logger.exception('could not write the events a stopping writer left behind')
+        else:
+            self._drop(refused)
             return
         # counted, not silent: the next flush that succeeds turns this into a
         # log.dropped row, which is the only place the gap becomes visible

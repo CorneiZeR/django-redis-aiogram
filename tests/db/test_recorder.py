@@ -7,6 +7,7 @@ for the rate limiter.
 
 import asyncio
 import os
+import queue
 import threading
 import time
 
@@ -847,3 +848,61 @@ def test_rows_the_database_refuses_one_at_a_time_are_counted(paused_writer, capl
     gap = TelegramEvent.objects.get(kind=EventKind.LOG_DROPPED.value)
     assert gap.detail == {'dropped': 1}
     assert recorder._dropped == 0
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT={**ON, 'EVENT_LOG_SYNC': True})
+def test_a_row_refused_on_the_callers_thread_is_counted(monkeypatch):
+    """`EVENT_LOG_SYNC` writes on the caller's thread, and the loss was not counted.
+
+    Found by asking who else reads what `write_batch` now returns, after review caught the
+    gap-row path ignoring it. The answer here was sharper than the question: a one-row batch
+    either lands or raises `EventLogRefusedError`, and the broad `except` in `record()`
+    logged that and moved on — so a synchronous row the database refused vanished with no
+    counter and no `log.dropped`, which is the same hole this branch exists to close.
+    """
+    recorder = EventRecorder()
+    saved = TelegramEvent.save
+
+    def refuse_one_row(self, *args, **kwargs):
+        if self.chat_id == 999:
+            msg = 'not this one'
+            raise DatabaseError(msg)
+        return saved(self, *args, **kwargs)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(QuerySet, 'bulk_create', lambda *a, **k: (_ for _ in ()).throw(DatabaseError('no')))
+        patch.setattr(TelegramEvent, 'save', refuse_one_row)
+        recorder.record(an_event(chat_id=999))
+
+    assert recorder._dropped == 1, f'the refused row was counted as {recorder._dropped}'
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT=ON)
+def test_rows_a_stopping_writer_leaves_that_are_refused_are_counted(monkeypatch):
+    """The other site the same question found.
+
+    A database that takes some of the leftover rows and refuses others leaves a hole
+    exactly as large as what it refused. The `suppress` around the write reported that as
+    nothing at all — only a raise was counted, and a partial refusal does not raise.
+    """
+    recorder = EventRecorder()
+    saved = TelegramEvent.save
+
+    def refuse_the_second(self, *args, **kwargs):
+        if self.chat_id == 2:
+            msg = 'not this one'
+            raise DatabaseError(msg)
+        return saved(self, *args, **kwargs)
+
+    buffer = queue.Queue()
+    for chat_id in (1, 2):
+        buffer.put_nowait(an_event(chat_id=chat_id))
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(QuerySet, 'bulk_create', lambda *a, **k: (_ for _ in ()).throw(DatabaseError('no')))
+        patch.setattr(TelegramEvent, 'save', refuse_the_second)
+        recorder._abandon(buffer)
+
+    assert recorder._dropped == 1, f'the refused row was counted as {recorder._dropped}'
