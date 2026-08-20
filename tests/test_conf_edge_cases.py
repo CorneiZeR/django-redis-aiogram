@@ -158,7 +158,8 @@ def test_a_writer_dial_that_cannot_be_read_falls_back_instead_of_ending_the_thre
     `int(float('inf'))` raises `OverflowError`, which is not a cast error the reader was
     catching — so a settings dict holding `inf` ended the writer and took the buffer with
     it. The environment cannot deliver these; it refuses them at resolution. A settings
-    dict can, and `E044` only reports it where `manage.py check` runs.
+    dict can, and `E038` — the check that owns this setting — only reports it where
+    `manage.py check` runs.
     """
     from django_redis_aiogram.defaults import DEFAULTS
     from django_redis_aiogram.recorder import EventRecorder

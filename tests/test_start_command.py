@@ -195,11 +195,28 @@ def test_a_disabled_container_idling_still_unwinds_like_the_enabled_path(monkeyp
     released.set()  # so the wait returns at once and the finally runs here
     monkeypatch.setattr(Command, 'idle_event', released)
     before = signal.getsignal(signal.SIGTERM)
+    # the installs are recorded, because comparing the handler afterwards proves nothing on
+    # its own: it also matches when nothing was ever installed, which is the state a
+    # container idling without a handler is in — `docker stop` kills it and it exits 143
+    installed = []
+    real_signal = signal.signal
+
+    def recording_signal(number, handler):
+        installed.append(handler)
+        return real_signal(number, handler)
+
+    monkeypatch.setattr(signal, 'signal', recording_signal)
 
     out = StringIO()
     call_command('start_tgbot', idle=True, stdout=out)
 
     assert stopped == ['stopped'], 'the writer thread was left holding a connection'
+    assert len(installed) == 2, f'expected an install and a restore, got {installed}'
+    with pytest.raises(KeyboardInterrupt):
+        # what SIGTERM does once the handler is in place, which is how the enabled path
+        # unwinds through the same route a Ctrl-C takes
+        installed[0](signal.SIGTERM, None)
+    assert installed[-1] is before, 'the handler it replaced was not the one put back'
     assert signal.getsignal(signal.SIGTERM) is before, 'a later SIGTERM would hit our handler'
     assert 'Idling' in out.getvalue()
 
