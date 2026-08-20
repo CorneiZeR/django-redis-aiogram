@@ -160,6 +160,22 @@ def test_the_released_entries_keep_the_words_they_shipped_with():
     assert not rewritten, f'a released entry was reworded: {rewritten}'
 
 
+def test_the_upgrade_page_covers_the_version_being_shipped():
+    """`Upgrading.md` had no 3.1 section while `__version__` already said 3.1.0.
+
+    Nothing pointed it out, because the page is prose and the version is code — so the
+    release that changed the acknowledgement point, added a migration and moved the
+    shutdown arithmetic shipped with an upgrade page whose newest entry was the release
+    before it. Read from `__version__`, so the next release inherits the same demand.
+    """
+    from django_redis_aiogram import __version__
+
+    series = '.'.join(__version__.split('.')[:2])
+    page = (WIKI / 'Upgrading.md').read_text(encoding='utf-8')
+
+    assert f'to {series}\n' in page, f'no section upgrading to {series}: {page.splitlines()[:8]}'
+
+
 def test_home_and_sidebar_exist():
     assert (WIKI / 'Home.md').is_file()
     assert (WIKI / '_Sidebar.md').is_file()
