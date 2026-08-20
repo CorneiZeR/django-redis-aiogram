@@ -415,9 +415,13 @@ def test_a_handoff_the_loop_never_stepped_is_drained_not_destroyed():
     loop.call_soon_threadsafe(ready.set)
     runner = threading.Thread(target=loop.run_forever, daemon=True)
     runner.start()
-    assert ready.wait(5), 'the event loop never started'
-    loop.call_soon_threadsafe(loop.stop)
-    runner.join(timeout=5)
+    try:
+        assert ready.wait(5), 'the event loop never started'
+    finally:
+        # stopped in a finally: a loop that never started leaves this thread blocked in
+        # `run_forever`, and the next test inherits a second thread on its own loop
+        loop.call_soon_threadsafe(loop.stop)
+        runner.join(timeout=5)
     assert not runner.is_alive(), 'the loop is still running'
 
     instance._hand_off(instance.bot.send_message(chat_id=1, text='drained'), loop, an_outbound())

@@ -14,6 +14,9 @@ from types import SimpleNamespace
 
 import pytest
 from django.test import override_settings
+from redis.exceptions import (
+    ConnectionError,  # noqa: A004 - shadowing the builtin is the point: this is what redis-py raises
+)
 
 from django_redis_aiogram import TelegramBot
 from django_redis_aiogram.context import correlation_scope

@@ -230,6 +230,12 @@ def test_running_the_system_checks_does_not_import_aiogram():
 
     Under tests.bare_settings, because tests/settings.py installs an app whose router
     imports aiogram at django.setup() and would answer this question for the checks.
+
+    The absence is asserted only after something proves the checks ran. On its own this
+    is a test that passes when nothing happens: replacing `register(check_settings)` with
+    `_ = check_settings` makes `check` print `no issues`, import no aiogram because it
+    imports nothing, and satisfy every line below. So the subprocess first drives a
+    configuration one of our rules must refuse, and requires our id in the failure.
     """
     script = textwrap.dedent("""
         import sys
@@ -238,8 +244,19 @@ def test_running_the_system_checks_does_not_import_aiogram():
 
         django.setup()
         from django.core.management import call_command
+        from django.core.management.base import SystemCheckError
+        from django.test import override_settings
 
         call_command('check')
+
+        # the positive control: our rules reached this run through Django's registry
+        try:
+            with override_settings(TELEGRAM_BOT={'TOKEN': 42}):
+                call_command('check')
+        except SystemCheckError as refused:
+            assert 'django_redis_aiogram.E004' in str(refused), f'someone else refused it: {refused}'
+        else:
+            raise AssertionError('manage.py check accepted a TOKEN of the wrong type')
 
         FORBIDDEN = {'aiogram', 'pydantic'}
         loaded = {name.split('.')[0] for name in sys.modules} & FORBIDDEN

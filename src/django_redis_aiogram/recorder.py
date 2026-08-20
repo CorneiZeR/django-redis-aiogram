@@ -443,7 +443,14 @@ class EventRecorder:
             # again: without this, everything still in it disappears with no row
             # and no counter, and the gap reads as quiet traffic
             self._abandon(buffer)
-            if self._touched_database:
+            # read and cleared together, because the flag describes *this* writer: left
+            # set it outlived the thread that earned it, and a later writer with only
+            # receivers would close a connection it never opened — importing `eventlog`,
+            # and with it `django.db`, into the one process this module exists to keep it
+            # out of. Only a fork cleared it before, so any process that wrote once and
+            # then had the log turned off carried the flag for good
+            touched, self._touched_database = self._touched_database, False
+            if touched:
                 # a process that only has receivers never opened one, and importing
                 # `eventlog` to close it would pull in `django.db` — the one import
                 # this module exists to keep out of a process that does not need it

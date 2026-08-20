@@ -8,6 +8,9 @@ import re
 import pytest
 from django.core.checks import WARNING, Error
 from django.core.checks import Warning as CheckWarning
+from django.core.checks.registry import registry
+from django.core.management import call_command
+from django.core.management.base import SystemCheckError
 from django.test import override_settings
 
 from django_redis_aiogram.checks import CHECKS, check_settings, worker_name_problems
@@ -746,3 +749,33 @@ def test_every_read_deadline_the_check_admits_leaves_room_for_the_pop(timeout):
     ):
         assert errors(check_settings()) == [], 'the check refuses a value the consumer can work with'
         assert blpop_ceiling().seconds < read_timeout(), 'the pop cannot outlast the socket it reads through'
+
+
+@override_settings(TELEGRAM_BOT={'TOKEN': 42, 'REDIS_URL': 'r://x'})
+def test_manage_py_check_surfaces_these_ids():
+    """Every test above calls `check_settings()` directly, and none goes through Django.
+
+    So the registration itself was unpinned: replacing `register(check_settings)` with
+    `_ = check_settings` left the whole suite green, 1068 tests and 129 database tests,
+    while `manage.py check` reported nothing at all. Two headline claims of this release
+    rest on that path — that `check` no longer imports aiogram, and that the boolean rules
+    stopped refusing configuration that works — and neither could be verified end to end.
+
+    A wrong-typed `TOKEN` is `E004`, which needs no Redis, no token and no database.
+    """
+    with pytest.raises(SystemCheckError) as raised:
+        call_command('check')
+
+    assert 'django_redis_aiogram.E004' in str(raised.value)
+
+
+def test_the_checks_are_registered_with_django():
+    """The same invariant asked directly, so a failure says which half broke.
+
+    `manage.py check` failing to report our ids has two possible causes — the rule stopped
+    finding the problem, or nothing registered the rule. The test above cannot tell them
+    apart; this one can.
+    """
+    registered = [check for check in registry.get_checks() if check is check_settings]
+
+    assert registered, 'apps.ready() no longer registers check_settings with Django'

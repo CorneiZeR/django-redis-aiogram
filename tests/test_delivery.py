@@ -150,14 +150,17 @@ def test_schedule_hops_to_the_loop_thread():
         ran_on.append(threading.get_ident())
         done.set()
 
-    instance._schedule(coroutine(), an_outbound())
-    assert done.wait(5), 'coroutine never ran on the loop thread'
-    assert ran_on == [thread.ident]
-
-    loop.call_soon_threadsafe(loop.stop)
-    thread.join(timeout=5)
-    loop.close()
-    instance._loop = None
+    try:
+        instance._schedule(coroutine(), an_outbound())
+        assert done.wait(5), 'coroutine never ran on the loop thread'
+        assert ran_on == [thread.ident]
+    finally:
+        # in a finally: either assertion failing would otherwise leave this thread running
+        # `run_forever` on a loop nothing closes, for the rest of the session
+        loop.call_soon_threadsafe(loop.stop)
+        thread.join(timeout=5)
+        loop.close()
+        instance._loop = None
 
 
 def test_schedule_runs_inline_when_no_loop_is_running():

@@ -14,7 +14,11 @@ from aiogram import exceptions
 from aiogram.methods import SendMessage
 from django.core.management import CommandError, call_command
 from django.test import override_settings
-from redis.exceptions import ResponseError
+
+# ConnectionError shadows the builtin deliberately: this is the one redis-py raises, and a
+# fake raising the builtin proved nothing — `redis.exceptions.ConnectionError` is a
+# `RedisError` and not an `OSError`, so a guard narrowed to either would stay green
+from redis.exceptions import ConnectionError, ResponseError  # noqa: A004
 
 from django_redis_aiogram import TelegramBot
 from django_redis_aiogram.api import API_METHODS, check_function
@@ -477,14 +481,19 @@ def test_a_finished_send_leaves_the_in_flight_list(redis_server):
             break
         threading.Event().wait(0.01)
 
-    assert delivery.finish, 'the handler was never called'
-    delivery.finish[0]()  # what the send's done-callback does
-    for _ in range(500):
-        if redis_server.llen(PROCESSING) == 0:
-            break
-        threading.Event().wait(0.01)
-    delivery.stop()
-    thread.join(timeout=5)
+    try:
+        assert delivery.finish, 'the handler was never called'
+        delivery.finish[0]()  # what the send's done-callback does
+        for _ in range(500):
+            if redis_server.llen(PROCESSING) == 0:
+                break
+            threading.Event().wait(0.01)
+    finally:
+        # in a finally, because the assertion above can fail: the consumer would then keep
+        # polling Redis beside whatever ran next, and the report would show that test's
+        # confusion rather than this one's failure
+        delivery.stop()
+        thread.join(timeout=5)
 
     assert redis_server.llen(PROCESSING) == 0
     assert redis_server.llen(QUEUE) == 0

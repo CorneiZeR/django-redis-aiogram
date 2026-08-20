@@ -196,6 +196,24 @@ def test_every_package_attribute_a_snippet_uses_exists(snippet):
     assert not missing, f'the page uses what no longer exists: {missing}'
 
 
+def test_the_page_binds_names_the_attribute_check_can_read():
+    """The check above is a scan for absences, so an empty resolver passes it.
+
+    `imported_from_the_package` walks imports and factory assignments; if it ever
+    stopped resolving — a renamed package prefix, an import form it does not
+    handle — every snippet would report no missing attributes and the page could
+    rot freely. This pins both halves: something is bound, and a name that does
+    not exist on the bound object is actually reported.
+    """
+    bound = [imported_from_the_package(ast.parse(snippet)) for snippet in SNIPPETS]
+    assert any(bound), 'no snippet on the page binds anything from the package'
+
+    tree = ast.parse('from django_redis_aiogram import bot\nbot.no_such_attribute\n')
+    resolved = imported_from_the_package(tree)
+    assert 'bot' in resolved, 'a plain package import is no longer resolved'
+    assert not hasattr(resolved['bot'], 'no_such_attribute')
+
+
 def test_the_page_documents_every_recipe_here():
     """A recipe that leaves the page should leave this file with it."""
     text = PAGE.read_text(encoding='utf-8')
