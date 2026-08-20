@@ -9,6 +9,7 @@ empty. Each of these fails against a gate left on `recorder.enabled`.
 import asyncio
 import queue
 import threading
+import time
 import uuid
 
 import pytest
@@ -21,7 +22,13 @@ from django.test import override_settings
 from django_redis_aiogram import TelegramBot
 from django_redis_aiogram import recorder as recorder_module
 from django_redis_aiogram.instrumentation import install_instrumentation, instrumented
-from django_redis_aiogram.recorder import WRITER_THREAD, Event, EventRecorder, recorder
+from django_redis_aiogram.recorder import (
+    DROP_REPORT_INTERVAL,
+    WRITER_THREAD,
+    Event,
+    EventRecorder,
+    recorder,
+)
 from django_redis_aiogram.signals import events_recorded
 
 
@@ -827,3 +834,24 @@ def test_a_gap_row_the_database_refuses_one_at_a_time_keeps_its_count(redis_serv
     finally:
         recorder._touched_database = False
         recorder._dropped = 0
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_dropping_nothing_says_nothing(redis_server, caplog):
+    """Callers pass the refused count straight through, and it is zero on every good write.
+
+    Without the guard, a batch that landed in full still reached the once-a-minute report
+    and logged `the event log is falling behind` — a false alarm on the one line an
+    operator watches for real ones, emitted by the successful path.
+
+    `_reported_at` is pushed into the past on purpose: the interval is what would otherwise
+    hide the defect, and a test that relied on it would pass either way.
+    """
+    recorder._dropped = 0
+    recorder._reported_at = time.monotonic() - DROP_REPORT_INTERVAL - 1
+
+    with caplog.at_level('ERROR', logger='django_redis_aiogram'):
+        recorder._drop(0)
+
+    assert recorder._dropped == 0
+    assert 'falling behind' not in caplog.text, 'a batch that lost nothing reported a backlog'
