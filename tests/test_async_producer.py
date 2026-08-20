@@ -267,6 +267,31 @@ def test_send_off_a_loop_says_nothing(redis_server, caplog, monkeypatch):
     assert MENTION not in caplog.text
 
 
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_a_refused_method_does_not_spend_the_mention(caplog, monkeypatch):
+    """The line is latched once per process, so whoever emits it takes it from everyone else.
+
+    `send()` named the twin before delegating, and `send_redis` validates the method after
+    that — so a call that was about to raise `UnknownApiMethodError` emitted the advice and
+    left the first caller who could have acted on it in silence.
+
+    Asserted on the refusal alone. Counting mentions across a refusal *and* a good send
+    gives one either way: without the fix the refusal spends it, with the fix the good
+    send does.
+    """
+    monkeypatch.setattr('django_redis_aiogram.client._asend_mentioned', threading.Event())
+    instance = TelegramBot()
+
+    async def only_the_refusal():
+        with pytest.raises(UnknownApiMethodError):
+            instance.send('no_such_method', chat_id=1)
+
+    with caplog.at_level('WARNING', logger='django_redis_aiogram'):
+        asyncio.run(only_the_refusal())
+
+    assert MENTION not in caplog.text
+
+
 @override_settings(TELEGRAM_BOT={**SETTINGS, 'ENABLED': False})
 def test_a_disabled_send_from_a_loop_says_nothing(caplog, monkeypatch):
     """Nothing was written, so there is no better way to have written it.

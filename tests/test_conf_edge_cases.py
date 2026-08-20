@@ -151,6 +151,37 @@ def test_the_flush_interval_is_read_the_way_its_check_demands():
         assert EventRecorder.flush_interval() == 3
 
 
+def test_the_writer_waits_the_interval_its_reader_returns():
+    """The accessor above is only worth having if `_collect` is what calls it.
+
+    Asserting `flush_interval()` alone leaves the call site free: a `_collect` that went
+    back to reading the setting as a float would restore the fractional wait `E038`
+    refuses and keep that test green. So this one measures the wait itself, through a
+    buffer that records the timeout it is asked for.
+    """
+    import queue
+
+    from django_redis_aiogram.recorder import EventRecorder
+
+    class RecordingBuffer:
+        """Answers `_collect` the way an empty queue does, and remembers the deadline."""
+
+        def __init__(self):
+            self.timeouts = []
+
+        def get(self, timeout=None):
+            self.timeouts.append(timeout)
+            raise queue.Empty
+
+    buffer = RecordingBuffer()
+    with override_settings(TELEGRAM_BOT={'EVENT_LOG_FLUSH_INTERVAL': 0.5}):
+        batch, wakes = EventRecorder()._collect(buffer)  # type: ignore[arg-type]  # a stand-in for the queue
+
+    assert (batch, wakes) == ([], [])
+    assert buffer.timeouts, 'the writer never waited on the queue'
+    assert buffer.timeouts[0] == pytest.approx(1, abs=0.05), 'the fractional interval reached the wait'
+
+
 @pytest.mark.parametrize('key', ['RATE_LIMIT', 'EVENT_LOG_KINDS', 'DEFAULT_KWARGS'])
 def test_an_environment_variable_for_a_settings_only_key_says_it_is_ignored(monkeypatch, caplog, key):
     """Silence was the worst of the three possible answers.

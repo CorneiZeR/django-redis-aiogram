@@ -508,6 +508,10 @@ def test_a_log_database_nothing_routes_to_is_reported():
     reported = routing_warnings()
 
     assert reported, 'a log pointed at an unrouted alias was not reported'
+    # the level, not only the id: a router of your own returning this alias is equally
+    # correct, so this cannot be allowed to fail `check --fail-level WARNING`. Reported as
+    # information is the whole reason it stopped being W011
+    assert reported[0].level < WARNING, 'a check that cannot see inside a router warned'
     assert 'cannot see a router that sends this app there' in reported[0].msg
     assert 'TelegramEventLogRouter' in (reported[0].hint or '')
 

@@ -760,6 +760,11 @@ class TelegramBot:
         # bot is off — advice about the async twin of a call that does nothing is noise,
         # and it would burn the once-per-process latch for whoever does write later
         if self.enabled:
+            # validated here as well as in `send_redis`, and before the mention: the latch
+            # fires once per process, so a call that is about to raise `check_function`
+            # would otherwise emit the line and take it from the first caller who could
+            # have acted on it. Two membership tests on the happy path is the whole cost
+            check_function(function)
             _mention_asend('asend')
         return self.send_redis(function, correlation_id=identifier, **kwargs)
 
