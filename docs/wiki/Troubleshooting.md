@@ -118,7 +118,7 @@ Two lines are not refusals and do not change the exit code:
 | The line | What it is telling you |
 | --- | --- |
 | `N message(s) are in flight under other worker names …` | Written to stderr while still exiting 0, and only with `--stranded`. Another worker may be sending them this second; if it is gone, `manage.py tgbot_reclaim --worker <name>` requeues them. `at least N` means the bounded sweep stopped early, so the count is a floor |
-| `disabled in this process; nothing to check` | `ENABLED` is off here, so nothing is meant to be running and nothing is wrong. Exit 0, and deliberately not coloured as a success |
+| `disabled in this process; nothing to check` | `ENABLED` is off here, so nothing is meant to be running and nothing is wrong. Exit 0, and deliberately not colored as a success |
 
 Two more reach the log rather than the output — both mean the probe declined to answer
 that part rather than fail the container over it:

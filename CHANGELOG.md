@@ -355,14 +355,14 @@ them, so it is not one per message.
   twins, so a monitor stops reproducing `<REDIS_MESSAGES_KEY>:processing:<worker>`
   by hand — a scheme that is this package's to change. Troubleshooting used to
   send people to `redis-cli` for it.
-- Both producers now share one write body: serialisation, the key and both event
+- Both producers now share one write body: serialization, the key and both event
   rows live in a single context manager, and each transport is the one line that
   writes. The `await` is the only thing the two cannot share, so it is the only
   thing they do not.
 
 - **`manage.py tgbot_reclaim --worker <name>`** puts a dead worker's in-flight
   messages back on the queue. Crash safety rests on a restarted worker
-  recognising its own list, and a container started without `hostname:` gets a
+  recognizing its own list, and a container started without `hostname:` gets a
   fresh name from Docker for each container it creates — so every replacement,
   which is what a redeploy does, stranded whatever the last one was sending where
   nothing would look again. The command is deliberately
@@ -437,7 +437,7 @@ them, so it is not one per message.
   silently empty. So the one gate became three: `enabled` still means "this process
   writes rows", `active` means "the table or a receiver is reading" and is what
   every producing seam now sits behind, and `wants_payload` guards only the
-  summarising, which is the expensive part and no part of counting — so with the log
+  summarizing, which is the expensive part and no part of counting — so with the log
   off a receiver gets `Event` objects without the *summarized arguments*, while still
   getting what the seam measured itself: a send's `duration_ms`, a retry's
   `retry_after`, a queueing failure's `stage`, a gap's `dropped` count. Rows are what

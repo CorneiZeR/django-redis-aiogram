@@ -84,7 +84,7 @@ same thread the loop is running on; it just yields while waiting instead of
 holding that thread, so under ASGI the thread goes on serving other requests
 rather than sitting on a socket. Reach for these from an async view or an async
 task. Note that only the waiting yields: `asend_many` iterates the chats and
-serialises each chunk between its awaits, and that part is ordinary CPU work on
+serializes each chunk between its awaits, and that part is ordinary CPU work on
 the loop's thread. A fan-out large enough to matter belongs in a task, not in a
 request.
 

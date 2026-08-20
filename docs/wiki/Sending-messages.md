@@ -72,9 +72,9 @@ ids, the rows and the routing are identical.
 `send_many` queues one message per chat, a chunk of them per round trip, and
 returns an id per message in the order the chats were given. `asend_many` is its
 loop-friendly twin, and the case for it is stronger than for `asend`: a fan-out
-writes once per chunk and serialises every payload, so the synchronous one holds
+writes once per chunk and serializes every payload, so the synchronous one holds
 the calling thread that much longer. What `asend_many` moves off the way is the
-waiting, not the work — it still serialises each chunk on the loop's own thread
+waiting, not the work — it still serializes each chunk on the loop's own thread
 between its awaits, so a broadcast big enough to notice belongs in a task rather
 than in a request.
 
