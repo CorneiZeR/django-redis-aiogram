@@ -332,6 +332,32 @@ def test_the_documented_floor_is_the_floor_the_check_enforces():
         assert reported is refused, f'REDIS_TIMEOUT={value} is {"accepted" if refused else "refused"}'
 
 
+def test_no_test_asserts_on_a_check_id_the_registry_no_longer_has():
+    """A half-done rename leaves assertions that are true of every configuration.
+
+    W010 became I001 and three assertions here kept the old spelling. Once an id is gone,
+    asking that the prefixed form of it be absent from `ids(...)` holds whatever the
+    settings are — so the fixed hostname, the padded name and the named worker were each
+    pinned by nothing. The grep that found the documentation found those lines too, which
+    is why the guard has to be executable rather than a habit.
+
+    Spelled without the package prefix on purpose: this scan reads every file under
+    `tests/`, its own docstring included, and an example written in full would be the
+    only thing it ever found.
+
+    Retired ids are exempt by name, not by pattern: their absence is the point, and
+    `RETIRED_IDS` is where that decision is written down.
+    """
+    live = {check.code for check in CHECKS} | RETIRED_IDS
+    stale = {}
+    for path in sorted(pathlib.Path(__file__).resolve().parent.rglob('*.py')):
+        named = set(re.findall(r'django_redis_aiogram\.([EWI]\d{3})', path.read_text(encoding='utf-8')))
+        if named - live:
+            stale[path.name] = sorted(named - live)
+
+    assert not stale, f'assertions naming ids the registry does not have: {stale}'
+
+
 def test_every_registry_row_reports_under_its_own_id():
     """Two rows sharing an id would make the docs entry ambiguous."""
     codes = [check.code for check in CHECKS]
@@ -467,7 +493,7 @@ ROUTED_LOG = {'EVENT_LOG': True, 'EVENT_LOG_DATABASE': 'events', 'TOKEN': '1:x',
 
 
 def routing_warnings():
-    """The W011 messages the current settings produce."""
+    """The I002 messages the current settings produce."""
     return [message for message in check_settings() if str(message.id).endswith('I002')]
 
 
