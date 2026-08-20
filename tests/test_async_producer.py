@@ -277,6 +277,13 @@ def test_a_disabled_send_from_a_loop_says_nothing(caplog, monkeypatch):
     path spent the one line the first real caller should have got.
     """
     monkeypatch.setattr('django_redis_aiogram.client._asend_mentioned', threading.Event())
+
+    def refuse():
+        raise AssertionError('a disabled send reached Redis')
+
+    # the silence is only worth having if nothing was written: a regression that wrote and
+    # suppressed the line would satisfy every other assertion here
+    monkeypatch.setattr('django_redis_aiogram.client.get_redis', refuse)
     instance = TelegramBot()
 
     async def one_send():

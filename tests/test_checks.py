@@ -621,7 +621,7 @@ def test_a_fixed_hostname_is_not_warned_about(monkeypatch):
     everywhere; warning about it as such would fire on every install."""
     monkeypatch.setenv('HOSTNAME', 'bot-worker-1')
 
-    assert 'django_redis_aiogram.W010' not in ids(check_settings())
+    assert 'django_redis_aiogram.I001' not in ids(check_settings())
 
 
 @override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost', 'WORKER_NAME': '   '})
@@ -630,19 +630,19 @@ def test_a_padded_name_is_judged_the_way_the_worker_judges_it(monkeypatch):
 
     A check that stripped first would call this empty, look at the hostname, and
     warn about a name the worker never uses. Poor as that name is, it is stable,
-    and stability is the only thing W010 is about.
+    and stability is the only thing I001 is about.
     """
     monkeypatch.setenv('HOSTNAME', 'ba333cb79e00')
 
     assert worker_identity() == '   ', 'the runtime stopped taking a padded name'
-    assert 'django_redis_aiogram.W010' not in ids(check_settings())
+    assert 'django_redis_aiogram.I001' not in ids(check_settings())
 
 
 @override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost', 'WORKER_NAME': 'bot-1'})
 def test_a_named_worker_is_not_warned_about(monkeypatch):
     monkeypatch.setenv('HOSTNAME', 'ba333cb79e00')
 
-    assert 'django_redis_aiogram.W010' not in ids(check_settings())
+    assert 'django_redis_aiogram.I001' not in ids(check_settings())
 
 
 @override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost:6379/0'})
