@@ -274,6 +274,13 @@ class EventRecorder:
                 except Exception:
                     self._drop(1)
                     logger.exception('could not record an event on the calling thread', extra={'tg_kind': event.kind})
+                finally:
+                    # this thread wrote, and this thread is not the one that closes: the
+                    # mark exists for the writer's exit, and a caller's mark left behind
+                    # outlives the caller. Thread idents are reused, so a receiver-only
+                    # writer could inherit one and close a connection it never opened —
+                    # importing `eventlog`, and `django.db` with it
+                    self._forget_touch()
                 return
             buffer = self._buffer()
             buffer.put_nowait(event)
@@ -451,6 +458,16 @@ class EventRecorder:
                 # `eventlog` to close it would pull in `django.db` — the one import
                 # this module exists to keep out of a process that does not need it
                 self._close_connections()
+
+    def _forget_touch(self) -> None:
+        """Drop this thread's mark without acting on it, for a thread that does not close.
+
+        Only the writer's exit closes connections. `record()` under ``EVENT_LOG_SYNC`` and
+        `drain_once()` write on their caller's thread, and Django owns that thread's
+        connection — so their marks are bookkeeping nobody reads, and idents get reused.
+        """
+        with self._counter:
+            self._touched_database.discard(threading.get_ident())
 
     def _took_the_touch(self) -> bool:
         """Whether *this* thread handed a batch to the ORM, clearing the mark as it answers.
@@ -790,6 +807,9 @@ class EventRecorder:
             if batch:
                 self._flush(batch, failures=0)
         finally:
+            # same reason as the synchronous `record()` path: this thread wrote, and it is
+            # not the thread whose exit closes connections
+            self._forget_touch()
             _acknowledge(wakes)
         return len(batch)
 

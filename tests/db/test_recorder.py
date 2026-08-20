@@ -444,6 +444,27 @@ def test_a_batch_too_big_to_save_one_by_one_is_bisected(paused_writer):
 
 @pytest.mark.django_db(transaction=True)
 @override_settings(TELEGRAM_BOT={**ON, 'EVENT_LOG_SYNC': True})
+def test_a_caller_that_wrote_does_not_stay_marked():
+    """Only the writer's exit closes connections, so only the writer's mark is read.
+
+    Under `EVENT_LOG_SYNC` the row is written on the caller's thread, where Django owns
+    the connection — so the mark is bookkeeping nobody reads, and thread idents get
+    reused. Left behind, a request thread's mark could be inherited by a later
+    receiver-only writer, which would close a connection it never opened: importing
+    `eventlog`, and `django.db` with it, on the one path that must not need them.
+    """
+    recorder = EventRecorder()
+    with recorder._counter:
+        recorder._touched_database.discard(threading.get_ident())
+
+    recorder.record(an_event(chat_id=99))
+
+    assert TelegramEvent.objects.filter(chat_id=99).exists(), 'nothing was written, so nothing is on trial'
+    assert threading.get_ident() not in recorder._touched_database, 'the calling thread stayed marked'
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT={**ON, 'EVENT_LOG_SYNC': True})
 def test_recording_does_not_doom_the_transaction_it_runs_inside(monkeypatch):
     """The one bug here that destroyed the caller's own data.
 

@@ -89,12 +89,16 @@ def test_an_idle_bucket_cannot_bank_the_silence_as_credit():
 
     async def scenario():
         attempts = 0
-        while not clock.slept:
+        # bounded well above the 1831 an unclamped bucket reaches: a regression that
+        # stopped sleeping at all would otherwise spin here until CI's own timeout, where
+        # a hang says far less than a failure
+        while not clock.slept and attempts < 3000:
             # counted before the await, because the call that finally sleeps is counted
             # too: what this measures is which call is the first to wait, not how many
             # went through without waiting
             attempts += 1
             await bucket.acquire()
+        assert clock.slept, f'the bucket admitted {attempts} calls without ever pacing'
         return attempts
 
     attempts = run(scenario())

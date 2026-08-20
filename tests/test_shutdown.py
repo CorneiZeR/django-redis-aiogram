@@ -419,9 +419,13 @@ def test_a_handoff_the_loop_never_stepped_is_drained_not_destroyed():
         assert ready.wait(5), 'the event loop never started'
     finally:
         # stopped in a finally: a loop that never started leaves this thread blocked in
-        # `run_forever`, and the next test inherits a second thread on its own loop
+        # `run_forever`, and the next test inherits a second thread on its own loop.
+        # Closed here too, because the `instance.close()` that would have done it is
+        # further down and unreachable when the assertion above fails
         loop.call_soon_threadsafe(loop.stop)
         runner.join(timeout=5)
+        if not ready.is_set():
+            loop.close()
     assert not runner.is_alive(), 'the loop is still running'
 
     instance._hand_off(instance.bot.send_message(chat_id=1, text='drained'), loop, an_outbound())
@@ -505,3 +509,53 @@ def test_a_finished_send_is_acknowledged_once():
     instance.close()
 
     assert acknowledged == [True]
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_close_publishes_the_drain_before_it_publishes_the_shutdown(monkeypatch):
+    """`start()` refuses on `_closing and not _draining`, so the order is the guard.
+
+    Two assignments cannot be made atomic without a lock every send would have to take.
+    They can be ordered, and then the state between them is harmless: a hand-off callback
+    landing mid-transition sees a bot that is not closing yet. Set `_closing` first and
+    that same callback is refused and its coroutine closed — a send dropped at shutdown,
+    and only sometimes, which is why it survived a release that claimed to have fixed it.
+
+    Asserted on the order of the writes rather than by racing a thread against them: a
+    test that has to lose a race to fail is a test that passes on a fast machine.
+    """
+    written = []
+    original = TelegramBot.__setattr__
+
+    def record(self, name, value):
+        if name in {'_closing', '_draining'} and value is True:
+            written.append(name)
+        original(self, name, value)
+
+    monkeypatch.setattr(TelegramBot, '__setattr__', record)
+    TelegramBot().close()
+
+    assert written[:2] == ['_draining', '_closing'], f'the shutdown was published first: {written}'
+
+
+@override_settings(TELEGRAM_BOT=SETTINGS)
+def test_a_runner_that_will_not_stop_still_leaves_the_bot_usable(monkeypatch):
+    """`_stop_runner` joins a thread, and `Thread.join` raises on its own thread.
+
+    Whatever the cause, an exception there used to escape before the `finally` that
+    resets the two flags — leaving a bot that refuses every later send as *closing*, for
+    the life of the process, with no way back. The teardown is inside the try now.
+    """
+    instance = TelegramBot()
+
+    def refuse(_timeout):
+        msg = 'cannot join'
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(type(instance), '_stop_runner', staticmethod(refuse))
+
+    with pytest.raises(RuntimeError, match='cannot join'):
+        instance.close()
+
+    assert instance._closing is False, 'a bot that failed to close can never send again'
+    assert instance._draining is False

@@ -805,18 +805,25 @@ class TelegramBot:
         """
         if drain_timeout is None:
             drain_timeout = drain_budget()
-        self._closing = True
-        # draining from here, not only inside `_drain`: the runner is still stepping the
-        # loop while it is being stopped, so a hand-off queued a moment before this call
-        # becomes a task *there* — and with `_draining` still False `_hand_off.start`
-        # refused it and closed the coroutine, dropping the one send the drain exists to
-        # settle. Timing-dependent, which is why it survived: pause between the send and
-        # the close and the callback has already run
+        # draining first, then closing, and the order is the whole guard. `start()` runs on
+        # the loop thread and refuses on `_closing and not _draining`; two assignments
+        # cannot be made atomic without a lock every send would have to take, but they can
+        # be ordered so the state *between* them is harmless — with `_draining` already set
+        # a callback landing mid-transition sees a bot that is not closing yet, and one
+        # landing after sees a drain in progress. Neither refuses.
+        #
+        # The window is real: the runner is still stepping the loop while it is being
+        # stopped, so a hand-off queued a moment before this call becomes a task there.
+        # Setting `_closing` first dropped it, and only sometimes — pause between the send
+        # and the close and the callback has already run
         self._draining = True
-        # before anything else: close() refuses on a running loop, so a process
-        # that gave the loop a thread could otherwise never close its bot
-        self._stop_runner(drain_timeout)
+        self._closing = True
         try:
+            # inside the try, so a join that raises still reaches the finally below: with
+            # both flags left set the bot could never send again. Before the teardown
+            # because close() refuses on a running loop, so a process that gave the loop a
+            # thread could otherwise never close its bot
+            self._stop_runner(drain_timeout)
             if self._loop is not None or self._bot is not None or self._dispatcher is not None:
                 loop = self.loop
                 if loop.is_running():
@@ -839,7 +846,9 @@ class TelegramBot:
                         loop.close()
             self._loop = None
         finally:
-            # a closed bot can be built again, so neither of these must stick
+            # a closed bot can be built again, so neither of these may stick, and they are
+            # cleared in the mirror order: `_closing` first, so nothing sees
+            # closing-without-draining on the way out either
             self._closing = False
             self._draining = False
 

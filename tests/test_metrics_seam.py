@@ -114,13 +114,15 @@ def clean_counters():
     reported_at = recorder._reported_at
     with recorder._counter:
         recorder._dropped = 0
-    recorder._touched_database.clear()
+        # under the same lock `_deliver` and `_took_the_touch` use: clearing outside it
+        # can erase a live writer's mark, or lose one it adds mid-clear
+        recorder._touched_database.clear()
     try:
         yield
     finally:
         with recorder._counter:
             recorder._dropped = 0
-        recorder._touched_database.clear()
+            recorder._touched_database.clear()
         recorder._reported_at = reported_at
 
 
