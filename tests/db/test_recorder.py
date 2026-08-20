@@ -779,13 +779,16 @@ def test_an_obsolete_connection_is_still_recycled(monkeypatch):
     monkeypatch.setattr(connection, 'is_in_memory_db', lambda: False)
     monkeypatch.setattr(connection, '_close', lambda: closed.append('closed'))
     # obsolete by age: `close_if_unusable_or_obsolete` closes once `close_at` has passed
+    # saved, not cleared: under `CONN_MAX_AGE` there is a real deadline here, and putting
+    # `None` back would hand the next test this one's idea of the connection
+    close_at = connection.close_at
     connection.close_at = time.monotonic() - 1
     recorder = EventRecorder()
 
     try:
         recorder.record(an_event(chat_id=8765))
     finally:
-        connection.close_at = None
+        connection.close_at = close_at
         connection.closed_in_transaction = False
 
     assert closed == ['closed'], 'a connection past its CONN_MAX_AGE was kept'
