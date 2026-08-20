@@ -443,6 +443,33 @@ def test_a_batch_too_big_to_save_one_by_one_is_bisected(paused_writer):
 
 
 @pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT=ON)
+def test_stopping_the_writer_does_not_leave_the_stopper_marked():
+    """`stop()` drains the queue it just detached, on whoever called it.
+
+    That write goes through `_deliver`, so the caller gets marked — and `stop()` is the
+    one path that never cleared it. A management command or `atexit` ends that thread,
+    Python reuses its ident for a later writer that only has receivers, and the writer
+    closes a connection it never opened: `eventlog` imported, and `django.db` with it, on
+    the path that exists to keep them out.
+
+    Not cleared when `stop()` is called *from* the writer, because `_run` is still below
+    on the stack with that mark to consume — asserted separately, since clearing it there
+    would trade this leak for the one it replaced.
+    """
+    recorder = EventRecorder()
+    recorder.record(an_event(chat_id=41))  # starts the writer and gives it something
+    recorder.flush()
+    with recorder._counter:
+        recorder._touched_database.add(threading.get_ident())  # as `_abandon` would leave it
+
+    recorder.stop()
+
+    assert threading.get_ident() not in recorder._touched_database, 'the thread that stopped it stayed marked'
+    assert TelegramEvent.objects.filter(chat_id=41).exists(), 'nothing was written, so nothing is on trial'
+
+
+@pytest.mark.django_db(transaction=True)
 @override_settings(TELEGRAM_BOT={**ON, 'EVENT_LOG_SYNC': True})
 def test_a_caller_that_wrote_does_not_stay_marked():
     """Only the writer's exit closes connections, so only the writer's mark is read.

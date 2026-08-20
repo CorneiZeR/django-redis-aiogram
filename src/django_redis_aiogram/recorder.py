@@ -856,7 +856,21 @@ class EventRecorder:
         # Draining after the join is what keeps those events; the few instructions
         # between this drain and the producer's put stay a gap, because closing it
         # would mean a lock on the one path that may never wait
-        self._abandon(buffer)
+        try:
+            self._abandon(buffer)
+        finally:
+            # the same rule as the synchronous `record()` and `drain_once()`: this ran on
+            # whoever called `stop()`, and that thread is not the one whose exit closes
+            # connections. Left behind, its mark can be inherited by a later
+            # receiver-only writer through a reused ident.
+            #
+            # Unless `stop()` was called *from* the writer, where `_run` is still on the
+            # stack below and has that mark to consume on its way out. Not covered by a
+            # test: reaching it means a receiver calling `stop()`, and doing that leaves
+            # the writer alive — measured, a 10 second join and it never exits — so the
+            # test would pin a hang rather than this branch. Tracked in #136
+            if threading.current_thread() is not thread:
+                self._forget_touch()
 
     def reset(self) -> None:
         """Re-read the settings next time; used by override_settings.

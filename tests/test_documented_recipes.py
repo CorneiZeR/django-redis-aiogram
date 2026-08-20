@@ -114,10 +114,12 @@ def test_a_catch_all_registered_earlier_swallows_the_update():
     # is free, and give it back to whoever had it
     parent = bot.router.parent_router
     bot.router._parent_router = None  # the public setter refuses None
-    dispatcher.include_router(bot.router)
-
     observers = bot.router.observers['message'].handlers
     try:
+        # inside the try, because it can raise: attaching is the step that fails when the
+        # router is already held, and failing it above the `finally` left the singleton
+        # detached and this handler registered for every test after
+        dispatcher.include_router(bot.router)
         asyncio.run(dispatcher.feed_update(Bot(token='42:x'), types.Update(update_id=2, message=a_message('/late'))))
 
         assert seen == [], 'a later handler received an update the catch-all should have taken'
