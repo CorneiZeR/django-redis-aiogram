@@ -239,7 +239,8 @@ def test_send_from_a_loop_mentions_asend_once(redis_server, caplog, monkeypatch)
     an exception and not a line per message: a warning on a working path, repeated,
     is how people learn to filter our logger out.
     """
-    monkeypatch.setattr('django_redis_aiogram.client._asend_mentioned', threading.Event())
+    latch = threading.Event()
+    monkeypatch.setattr('django_redis_aiogram.client._asend_mentioned', latch)
     bot = TelegramBot()
 
     async def three_sends():
@@ -251,6 +252,9 @@ def test_send_from_a_loop_mentions_asend_once(redis_server, caplog, monkeypatch)
 
     mentions = [record for record in caplog.records if MENTION in record.getMessage()]
     assert len(mentions) == 1, f'said it {len(mentions)} times'
+    # the latch is *why* it is once: without asserting it, a logger that happened to
+    # de-duplicate would satisfy the count and leave the mechanism unpinned
+    assert latch.is_set(), 'the line was emitted without the latch that makes it once'
     assert mentions[0].tg_alternative == 'asend', 'the line has to name the method to move to'
     assert redis_server.llen(QUEUE) == 3, 'the send itself must be unaffected'
 
@@ -259,12 +263,16 @@ def test_send_from_a_loop_mentions_asend_once(redis_server, caplog, monkeypatch)
 def test_send_off_a_loop_says_nothing(redis_server, caplog, monkeypatch):
     """Most callers are synchronous — Celery, a management command, a view — and
     there is nothing for them to do about a message aimed at async code."""
-    monkeypatch.setattr('django_redis_aiogram.client._asend_mentioned', threading.Event())
+    latch = threading.Event()
+    monkeypatch.setattr('django_redis_aiogram.client._asend_mentioned', latch)
 
     with caplog.at_level('WARNING', logger='django_redis_aiogram'):
         TelegramBot().send(chat_id=1, text='hi')
 
     assert MENTION not in caplog.text
+    # and the latch with it: the line is the symptom, the latch is the state, and a caller
+    # who never needed the advice must not be the one who spends it
+    assert not latch.is_set(), 'a synchronous send spent the line an async caller needs'
 
 
 @override_settings(TELEGRAM_BOT=SETTINGS)
@@ -305,7 +313,8 @@ def test_a_disabled_send_from_a_loop_says_nothing(caplog, monkeypatch):
     nothing. Worse than noise: the mention is latched once per process, so the disabled
     path spent the one line the first real caller should have got.
     """
-    monkeypatch.setattr('django_redis_aiogram.client._asend_mentioned', threading.Event())
+    latch = threading.Event()
+    monkeypatch.setattr('django_redis_aiogram.client._asend_mentioned', latch)
 
     def refuse():
         raise AssertionError('a disabled send reached Redis')
@@ -322,6 +331,7 @@ def test_a_disabled_send_from_a_loop_says_nothing(caplog, monkeypatch):
         asyncio.run(one_send())
 
     assert MENTION not in caplog.text
+    assert not latch.is_set(), 'a disabled send spent the line a real send needs'
 
 
 @override_settings(TELEGRAM_BOT=SETTINGS)
@@ -341,7 +351,8 @@ def test_every_synchronous_route_that_writes_names_its_own_twin(
     every payload between round trips. Both were silent, so the async methods this
     release adds went unmentioned to exactly the callers who needed them.
     """
-    monkeypatch.setattr('django_redis_aiogram.client._asend_mentioned', threading.Event())
+    latch = threading.Event()
+    monkeypatch.setattr('django_redis_aiogram.client._asend_mentioned', latch)
     bot = TelegramBot()
 
     async def once():
@@ -355,6 +366,7 @@ def test_every_synchronous_route_that_writes_names_its_own_twin(
 
     mentions = [record for record in caplog.records if MENTION in record.getMessage()]
     assert len(mentions) == 1, f'{producer} said it {len(mentions)} times'
+    assert latch.is_set(), f'{producer} emitted the line without spending the latch'
     assert mentions[0].tg_alternative == alternative, f'{producer} pointed at the wrong method'
 
 
