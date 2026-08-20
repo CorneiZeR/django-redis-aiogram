@@ -130,8 +130,12 @@ Packaging-only work does not need the Redis suite, and vice versa.
   Such a process writes no rows, so `EventRecorder._run` must not call
   `_close_connections()` on its way out: that imports `eventlog.py`, which imports
   `django.db`, to close a connection nothing ever opened. It is gated on
-  `_touched_database`, set only where a batch is actually handed to the ORM, and
-  `tests/test_metrics_seam.py` pins both directions.
+  `_touched_database`, set only where a batch is actually handed to the ORM and
+  **read and cleared when the writer stops** — the recorder is a process-wide
+  singleton, so a flag left set outlives the writer that set it and the next one
+  closes a connection it never opened. `tests/test_metrics_seam.py` pins both
+  directions, and pins them in either order: run that file reversed before
+  believing it.
 - **The feed is append-only.** No updates, no foreign keys, no
   `Meta.constraints`, no index on the JSON column. Fast pruning, shardability
   and two processes writing one message's history without coordination all rest

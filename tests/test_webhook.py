@@ -664,12 +664,14 @@ def test_send_raw_stops_waiting_once_the_loop_has_a_thread():
             instance.close()
 
     drove, drove_called = measure(with_runner=False)
-    handed, handed_called = measure(with_runner=True)
+    _, handed_called = measure(with_runner=True)
 
     assert drove_called is True, 'without a thread it must drive the send to completion'
     assert drove >= 0.25, f'it returned in {drove:.2f}s, so it did not wait'
     assert handed_called is False, 'with a thread it must hand off, not wait'
-    assert handed < 0.1, f'it took {handed:.2f}s, so it waited after all'
+    # the hand-off's own duration is discarded: the send not having completed *is* not
+    # having waited for it, and an upper bound on it was the suite's only wall-clock
+    # ceiling — a shared CI runner losing its slice for 100 ms failed a correct package
 
 
 @override_settings(TELEGRAM_BOT=SETTINGS)

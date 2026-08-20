@@ -472,6 +472,10 @@ def test_recording_does_not_doom_the_transaction_it_runs_inside(monkeypatch):
         connection.needs_rollback = False
         connection.closed_in_transaction = False
 
+    # the row first: a flag that stayed False because nothing touched the database says
+    # nothing. Forcing `_write_here()` to False sends the event to the queue instead, and
+    # the assertion below would pass having tested the queue
+    assert TelegramEvent.objects.filter(chat_id=321).exists(), 'the event was queued, not written here'
     assert doomed is False
 
 
@@ -572,10 +576,18 @@ def test_the_writer_suspends_itself_after_repeated_refusals(paused_writer, monke
     monkeypatch.setattr(TelegramEvent, 'save', refuse)
     recorder = EventRecorder()
 
+    # five is documented twice — Logging.md's table of messages and Troubleshooting.md's
+    # walkthrough — so moving the constant means moving them
+    assert FAILURE_LIMIT == 5, 'the documented number of refusals changed'
+
     failures = 0
     blocked_until = 0.0
-    for _ in range(FAILURE_LIMIT):
+    for attempt in range(1, FAILURE_LIMIT + 1):
         failures, blocked_until = recorder._flush([an_event(chat_id=5)], failures=failures)
+        if attempt < FAILURE_LIMIT:
+            # the boundary, not just the end state: without this the test passes with
+            # FAILURE_LIMIT lowered to 1, proving `eventually` where it promises `after five`
+            assert blocked_until <= time.monotonic(), f'suspended after {attempt} of {FAILURE_LIMIT}'
 
     assert blocked_until > time.monotonic()
 

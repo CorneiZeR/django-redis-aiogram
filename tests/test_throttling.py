@@ -74,6 +74,31 @@ def test_bucket_paces_once_the_burst_is_spent():
     assert clock.total_slept == pytest.approx(0.5, abs=1e-6)
 
 
+def test_an_idle_bucket_cannot_bank_the_silence_as_credit():
+    """A minute of quiet must not become a minute's worth of sends at one instant.
+
+    The claim starts no further back than the burst allows. Without that clamp the
+    slot walks backwards with the clock, so a bucket at Telegram's own 30/s, idle
+    for a minute, admits **1831** calls before it pauses — measured, not reasoned —
+    against the 31 the burst permits. Both existing burst tests start from a fresh
+    bucket, where the clamp and its absence agree, so neither could see it.
+    """
+    clock = FakeClock()
+    bucket = TokenBucket(rate=30, capacity=30, clock=clock.time, sleep=clock.sleep)
+    clock.now += 60  # what a quiet bot looks like between two conversations
+
+    async def scenario():
+        admitted = 0
+        while not clock.slept:
+            await bucket.acquire()
+            admitted += 1
+        return admitted
+
+    admitted = run(scenario())
+
+    assert admitted == 31, f'the silence was banked as credit: {admitted} calls admitted at once'
+
+
 def test_bucket_rejects_a_nonpositive_rate():
     with pytest.raises(ValueError, match='rate must be positive'):
         TokenBucket(rate=0)
@@ -438,6 +463,15 @@ def test_a_backlog_wakes_once_per_admitted_call():
 
     On a real loop, not `FakeClock`: its `sleep` advances the clock by the whole
     wait, so the herd never forms and the count comes out right on either design.
+
+    What this pins is the wakeup count, which is what the reservation design buys.
+    Falsified by giving `acquire` a recompute-and-re-sleep tail, which is what the
+    token counter did: 120 251 wakeups for these forty sends, against 35.
+
+    It does not pin the *order* admissions come out in — the
+    changelog's "admission becomes strict FIFO" follows from claiming under the lock
+    in call order, and no edit to this module makes it observably false, so a test
+    asserting it would be one that cannot fail.
     """
     waits = []
 
