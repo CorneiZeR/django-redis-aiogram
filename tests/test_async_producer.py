@@ -279,7 +279,8 @@ def test_a_refused_method_does_not_spend_the_mention(caplog, monkeypatch):
     gives one either way: without the fix the refusal spends it, with the fix the good
     send does.
     """
-    monkeypatch.setattr('django_redis_aiogram.client._asend_mentioned', threading.Event())
+    latch = threading.Event()
+    monkeypatch.setattr('django_redis_aiogram.client._asend_mentioned', latch)
     instance = TelegramBot()
 
     async def only_the_refusal():
@@ -290,6 +291,9 @@ def test_a_refused_method_does_not_spend_the_mention(caplog, monkeypatch):
         asyncio.run(only_the_refusal())
 
     assert MENTION not in caplog.text
+    # the latch itself, not only its output: this is the process-wide state the validation
+    # order exists to protect, and a handler that swallowed the record would hide the leak
+    assert not latch.is_set(), 'the refusal spent the line a valid call needs'
 
 
 @override_settings(TELEGRAM_BOT={**SETTINGS, 'ENABLED': False})

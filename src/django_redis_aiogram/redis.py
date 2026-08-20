@@ -79,7 +79,15 @@ def processing_pattern() -> str:
 
 
 def _escaped(literal: str) -> str:
-    """Quote the glob metacharacters Redis honours in a ``MATCH`` pattern."""
+    """Quote the glob metacharacters Redis honours in a ``MATCH`` pattern.
+
+    ``^`` is in the set and cannot change an outcome here, which is worth writing down
+    rather than rediscovering: it is special only as the first character inside an
+    *unescaped* ``[...]``, and ``[`` is always escaped one line above. Measured both ways
+    against ``TG[^x]`` and ``TG^x`` — same match, escaped or not. Kept because the set is
+    the one Redis documents, and a future caller that builds a class deliberately would
+    want it; not covered by a test, because no test could fail.
+    """
     return ''.join(f'\\{character}' if character in '*?[]^\\' else character for character in literal)
 
 

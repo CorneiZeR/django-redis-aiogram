@@ -121,8 +121,11 @@ def _number(key: str, cast: Callable[[Any], float]) -> float:
     """
     try:
         return cast(conf[key])
-    except (ImproperlyConfigured, KeyError, TypeError, ValueError):
-        # ImproperlyConfigured from resolving the settings, the rest from the cast
+    except (ImproperlyConfigured, KeyError, TypeError, OverflowError, ValueError):
+        # ImproperlyConfigured from resolving the settings, the rest from the cast.
+        # OverflowError is the one that is not a typo: `int(float('inf'))` raises it, and a
+        # settings dict can hold `inf` directly — the environment cannot, it is refused
+        # there — so without this the writer thread ends on a value E044 only reports
         return cast(DEFAULTS[key])
 
 
