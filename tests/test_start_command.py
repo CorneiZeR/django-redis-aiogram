@@ -173,6 +173,57 @@ def test_webhook_mode_consumes_without_calling_telegram(monkeypatch):
     assert 'Consuming the queue' in out.getvalue()
 
 
+@override_settings(TELEGRAM_BOT={'ENABLED': False, 'EVENT_LOG': True})
+def test_a_disabled_container_idling_still_unwinds_like_the_enabled_path(monkeypatch):
+    """`--idle` keeps a switched-off container alive; it must still exit cleanly.
+
+    Two things the enabled path does and this one used to skip. The SIGTERM handler, so
+    `docker stop` unwinds through `KeyboardInterrupt` and the container exits 0 rather
+    than 143 — a container idling on purpose looked like one that crashed. And
+    `recorder.stop()`, because a disabled process with the log on still has a writer
+    thread holding a database connection.
+
+    Run on the main thread deliberately: `signal.signal` refuses any other, so the
+    restore this asserts is unreachable from the helper below, which runs in a thread.
+    """
+    stopped = []
+    monkeypatch.setattr(
+        'django_redis_aiogram.management.commands.start_tgbot.recorder',
+        SimpleNamespace(stop=lambda: stopped.append('stopped')),
+    )
+    released = threading.Event()
+    released.set()  # so the wait returns at once and the finally runs here
+    monkeypatch.setattr(Command, 'idle_event', released)
+    before = signal.getsignal(signal.SIGTERM)
+
+    out = StringIO()
+    call_command('start_tgbot', idle=True, stdout=out)
+
+    assert stopped == ['stopped'], 'the writer thread was left holding a connection'
+    assert signal.getsignal(signal.SIGTERM) is before, 'a later SIGTERM would hit our handler'
+    assert 'Idling' in out.getvalue()
+
+
+@override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': 'redis://localhost:6379/0', 'MODE': 'webhook'})
+def test_an_ephemeral_worker_name_is_warned_about_where_the_process_is_known(monkeypatch, caplog):
+    """The check can only inform; here, being the consumer is known, so it warns.
+
+    A name that changes when the container is replaced strands whatever the old one was
+    sending, and this is the process that owns that list. Said before the thread exists,
+    so an operator reading the first lines of the log sees it.
+    """
+    monkeypatch.setattr('django_redis_aiogram.checks.socket.gethostname', lambda: 'ba333cb79e00')
+    monkeypatch.delenv('HOSTNAME', raising=False)
+
+    with caplog.at_level('WARNING', logger='django_redis_aiogram'):
+        printed, _ = run_start_command(mode='webhook')
+
+    assert 'WORKER_NAME' in printed, 'the operator was told nothing'
+    warnings = [record for record in caplog.records if 'will not survive' in record.getMessage()]
+    assert len(warnings) == 1, f'said it {len(warnings)} times'
+    assert warnings[0].tg_worker == 'ba333cb79e00', 'the line has to name the worker it is about'
+
+
 def run_start_command(**options):
     """Run the command with a consumer that records and an idle release."""
     events = []

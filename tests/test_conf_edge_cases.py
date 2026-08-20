@@ -116,6 +116,23 @@ def test_a_number_setting_the_environment_cannot_read_is_refused(monkeypatch):
         _ = conf['DRAIN_TIMEOUT']
 
 
+@pytest.mark.parametrize('raw', ['nan', 'inf', '-inf', 'Infinity', 'NaN'])
+def test_a_number_the_environment_cannot_bound_a_wait_with_is_refused(monkeypatch, raw):
+    """`float()` accepts these, and every setting read through this branch is a deadline.
+
+    `nan` compares false against everything, so a wait bounded by it never expires and a
+    graceful stop hangs where it promised five seconds; `sleep(nan)` raises instead, from
+    inside a thread nobody is watching. `E044` reports the value, but only where
+    `manage.py check` runs — and the environment reaches every process, the ones that
+    never run checks included, which is the case this branch exists for.
+    """
+    monkeypatch.setenv('DJANGO_REDIS_AIOGRAM_DRAIN_TIMEOUT', raw)
+    conf.reset()
+
+    with pytest.raises(ImproperlyConfigured, match='must be a finite number'):
+        _ = conf['DRAIN_TIMEOUT']
+
+
 def test_the_flush_interval_is_read_the_way_its_check_demands():
     """`E038` refuses a fraction and the writer used to honour one.
 

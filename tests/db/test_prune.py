@@ -4,7 +4,7 @@ import datetime
 from io import StringIO
 
 import pytest
-from django.core.management import call_command
+from django.core.management import CommandError, call_command
 from django.db import connection
 from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
@@ -45,6 +45,23 @@ def test_only_rows_past_the_window_go():
     remaining = set(TelegramEvent.objects.values_list('pk', flat=True))
     assert remaining == {recent.pk}, remaining
     assert not TelegramEvent.objects.filter(pk=old.pk).exists()
+
+
+@pytest.mark.django_db
+@override_settings(TELEGRAM_BOT={'EVENT_LOG': True, 'EVENT_LOG_RETENTION_DAYS': 30})
+def test_an_unknown_database_alias_is_refused_by_name():
+    """`E041` guards the setting; `--database` goes around it.
+
+    This is the one command that runs from cron, so the failure has to read as a
+    configuration mistake and say what the alternatives are — a Django traceback about a
+    missing connection is the least useful thing to be woken by. Asserted on the aliases
+    too: a message that refuses without naming what exists leaves the operator guessing.
+    """
+    with pytest.raises(CommandError, match='no database is configured under the alias') as refused:
+        call_command('tgbot_prune_events', database='nowhere')
+
+    assert 'nowhere' in str(refused.value)
+    assert 'default' in str(refused.value), 'the refusal has to name the aliases that do exist'
 
 
 @pytest.mark.django_db

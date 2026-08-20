@@ -267,6 +267,27 @@ def test_send_off_a_loop_says_nothing(redis_server, caplog, monkeypatch):
     assert MENTION not in caplog.text
 
 
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'ENABLED': False})
+def test_a_disabled_send_from_a_loop_says_nothing(caplog, monkeypatch):
+    """Nothing was written, so there is no better way to have written it.
+
+    `send()` named the async twin before delegating, and `send_redis` refuses a disabled
+    bot after that — so a process with the bot off was advised about a call that did
+    nothing. Worse than noise: the mention is latched once per process, so the disabled
+    path spent the one line the first real caller should have got.
+    """
+    monkeypatch.setattr('django_redis_aiogram.client._asend_mentioned', threading.Event())
+    instance = TelegramBot()
+
+    async def one_send():
+        assert instance.send(chat_id=1, text='hi') is not None, 'the id is still returned'
+
+    with caplog.at_level('WARNING', logger='django_redis_aiogram'):
+        asyncio.run(one_send())
+
+    assert MENTION not in caplog.text
+
+
 @override_settings(TELEGRAM_BOT=SETTINGS)
 @pytest.mark.parametrize(
     ('producer', 'alternative'),

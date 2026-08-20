@@ -10,6 +10,7 @@ was absent.
 """
 
 import logging
+import math
 import os
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
@@ -91,10 +92,19 @@ def _from_env(key: str, default: object) -> object:
         # value raised out of `apps.ready()` — so `DRAIN_TIMEOUT: 0.5` was valid in
         # settings and stopped every `manage.py` command from the environment
         try:
-            return float(raw)
+            number = float(raw)
         except ValueError:
             msg = f'{name} must be a number, got {raw!r}.'
             raise ImproperlyConfigured(msg) from None
+        if not math.isfinite(number):
+            # `float()` accepts 'nan', 'inf' and '-inf', and every consumer of these
+            # settings is a deadline: `nan` compares false against everything, so a wait
+            # bounded by it never expires, and `sleep(nan)` raises from inside a thread
+            # nobody is watching. E044 reports it, but only when `check` runs — and the
+            # environment reaches every process, including the ones that never run checks
+            msg = f'{name} must be a finite number, got {raw!r}.'
+            raise ImproperlyConfigured(msg)
+        return number
     if isinstance(default, str):
         return raw
     # a container or a callable has no textual form, so the variable cannot be honoured —

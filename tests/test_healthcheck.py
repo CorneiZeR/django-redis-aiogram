@@ -795,7 +795,10 @@ def test_the_sweep_matches_the_keys_workers_actually_write(redis_server):
     assert '1 message(s) are in flight' in report.warnings[0], report.warnings
 
 
-@pytest.mark.parametrize('key', ['TG_OK', 'TG[prod]', 'TG?one', 'TG*all'])
+# every metacharacter `_escaped` quotes, one key each: `?` and `*` match their own
+# literal so they pass unescaped too, `[` selects nothing, and a backslash quotes
+# whatever follows it — the branch that had no case until this line
+@pytest.mark.parametrize('key', ['TG_OK', 'TG[prod]', 'TG?one', 'TG*all', 'TG\\path'])
 def test_a_queue_key_with_glob_characters_is_still_swept(redis_server, key):
     """`SCAN MATCH` takes a glob and a queue key is an operator's string.
 

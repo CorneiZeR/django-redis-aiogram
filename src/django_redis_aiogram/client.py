@@ -755,8 +755,12 @@ class TelegramBot:
         # named here as well as in `send_redis`, and before delegating, because the twin a
         # caller should hear about is the twin of the method they called: `send` pairs with
         # `asend`, and `send_redis` — which this is about to call — pairs with `asend_redis`.
-        # The latch means whichever entry point the caller used is the one that speaks
-        _mention_asend('asend')
+        # The latch means whichever entry point the caller used is the one that speaks.
+        # Behind `enabled`, because `send_redis` refuses before writing anything when the
+        # bot is off — advice about the async twin of a call that does nothing is noise,
+        # and it would burn the once-per-process latch for whoever does write later
+        if self.enabled:
+            _mention_asend('asend')
         return self.send_redis(function, correlation_id=identifier, **kwargs)
 
     async def asend(
