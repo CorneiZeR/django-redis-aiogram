@@ -100,9 +100,14 @@ def clean_counters():
     `_touched_database`, which decides whether a stopping writer closes a database
     connection and is only otherwise cleared on a fork.
 
+    `_reported_at` goes with them: a test that pushes it into the past to reach the
+    once-a-minute report leaves the next drop reporting immediately, which is a log line
+    appearing where the code says it should be suppressed.
+
     The `collected` fixture above does this for its own users; this is for the tests that
     do not need a receiver.
     """
+    reported_at = recorder._reported_at
     with recorder._counter:
         recorder._dropped = 0
     recorder._touched_database = False
@@ -112,6 +117,7 @@ def clean_counters():
         with recorder._counter:
             recorder._dropped = 0
         recorder._touched_database = False
+        recorder._reported_at = reported_at
 
 
 def kinds(events):
