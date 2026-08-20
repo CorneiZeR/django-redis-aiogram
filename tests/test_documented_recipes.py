@@ -109,6 +109,11 @@ def test_a_catch_all_registered_earlier_swallows_the_update():
         seen.append(message.text)
 
     dispatcher = Dispatcher()
+    # any test that drove the webhook view built the real `bot.dispatcher`, which holds
+    # this same router for the rest of the session — so borrow it rather than assume it
+    # is free, and give it back to whoever had it
+    parent = bot.router.parent_router
+    bot.router._parent_router = None  # the public setter refuses None
     dispatcher.include_router(bot.router)
 
     observers = bot.router.observers['message'].handlers
@@ -121,7 +126,7 @@ def test_a_catch_all_registered_earlier_swallows_the_update():
         # answer updates in every test after this one, and a router left
         # attached makes the next include_router() raise
         observers[:] = [handler for handler in observers if handler.callback is not late]
-        bot.router._parent_router = None  # the public setter refuses None
+        bot.router._parent_router = parent
 
     assert observers == before, 'the recipe left the shared router changed'
 
