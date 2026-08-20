@@ -101,7 +101,8 @@ def clean_counters():
     set hands a real gap to whichever test runs next — which then correctly reports it, in
     the wrong place, and reads as a defect in something unrelated. The same for
     `_touched_database`, which decides whether a stopping writer closes a database
-    connection and is only otherwise cleared on a fork.
+    connection and is only otherwise cleared on a fork — a set of thread idents now, so a
+    test that wrote on this thread must not leave this thread marked.
 
     `_reported_at` goes with them: a test that pushes it into the past to reach the
     once-a-minute report leaves the next drop reporting immediately, which is a log line
@@ -113,13 +114,13 @@ def clean_counters():
     reported_at = recorder._reported_at
     with recorder._counter:
         recorder._dropped = 0
-    recorder._touched_database = False
+    recorder._touched_database.clear()
     try:
         yield
     finally:
         with recorder._counter:
             recorder._dropped = 0
-        recorder._touched_database = False
+        recorder._touched_database.clear()
         recorder._reported_at = reported_at
 
 
@@ -330,6 +331,31 @@ def test_one_broken_receiver_does_not_cost_the_others_their_batch(redis_server, 
     assert 'an events_recorded receiver raised' in caplog.text
     named = [record for record in caplog.records if 'broken' in getattr(record, 'tg_receiver', '')]
     assert named, 'the line did not name the receiver that raised'
+
+
+def test_one_writers_exit_does_not_clear_another_writers_mark():
+    """Two writers can overlap, and the mark has to survive the wrong one leaving.
+
+    `stop()` detaches the queue before it joins, so a join that times out leaves the old
+    writer running while a replacement starts. With one flag for the process, the old
+    writer's exit cleared the mark the replacement had earned, and the replacement then
+    skipped closing the connection it had opened — a leak that only appears when a
+    shutdown was already going badly.
+
+    Driven at the seam rather than through two real threads: what is being asserted is
+    that taking the mark takes only this thread's.
+    """
+    marks = recorder._touched_database
+    with recorder._counter:
+        marks.clear()
+        marks.update({threading.get_ident(), -1})  # -1 stands in for the other writer
+
+    assert recorder._took_the_touch() is True, 'this thread had written and was told otherwise'
+    assert -1 in marks, "the other writer's mark went with it"
+    assert recorder._took_the_touch() is False, 'the mark survived being taken'
+
+    with recorder._counter:
+        marks.clear()
 
 
 @override_settings(TELEGRAM_BOT=SETTINGS)

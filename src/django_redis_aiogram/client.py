@@ -806,6 +806,13 @@ class TelegramBot:
         if drain_timeout is None:
             drain_timeout = drain_budget()
         self._closing = True
+        # draining from here, not only inside `_drain`: the runner is still stepping the
+        # loop while it is being stopped, so a hand-off queued a moment before this call
+        # becomes a task *there* — and with `_draining` still False `_hand_off.start`
+        # refused it and closed the coroutine, dropping the one send the drain exists to
+        # settle. Timing-dependent, which is why it survived: pause between the send and
+        # the close and the callback has already run
+        self._draining = True
         # before anything else: close() refuses on a running loop, so a process
         # that gave the loop a thread could otherwise never close its bot
         self._stop_runner(drain_timeout)
@@ -832,8 +839,9 @@ class TelegramBot:
                         loop.close()
             self._loop = None
         finally:
-            # a closed bot can be built again, so this must not stick
+            # a closed bot can be built again, so neither of these must stick
             self._closing = False
+            self._draining = False
 
     def send_raw(
         self,

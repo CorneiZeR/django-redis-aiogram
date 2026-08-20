@@ -88,15 +88,18 @@ def test_an_idle_bucket_cannot_bank_the_silence_as_credit():
     clock.now += 60  # what a quiet bot looks like between two conversations
 
     async def scenario():
-        admitted = 0
+        attempts = 0
         while not clock.slept:
+            # counted before the await, because the call that finally sleeps is counted
+            # too: what this measures is which call is the first to wait, not how many
+            # went through without waiting
+            attempts += 1
             await bucket.acquire()
-            admitted += 1
-        return admitted
+        return attempts
 
-    admitted = run(scenario())
+    attempts = run(scenario())
 
-    assert admitted == 31, f'the silence was banked as credit: {admitted} calls admitted at once'
+    assert attempts == 31, f'the silence was banked as credit: the first wait came at call {attempts}'
 
 
 def test_bucket_rejects_a_nonpositive_rate():

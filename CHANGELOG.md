@@ -186,7 +186,11 @@ them, so it is not one per message.
   already set the flag its callback refuses on. The message was gone from the
   queue's in-flight list by then, so nothing would ever redeliver it. `close()`
   now runs one turn of the loop before draining, which is what turns those
-  callbacks into tasks it can wait for.
+  callbacks into tasks it can wait for — and counts itself as draining from the
+  moment it begins, not only during that turn. A webhook process gave the loop a
+  thread, so the callback ran on *that* thread while it was being stopped, in the
+  window after the closing flag was set and before the drain claimed it: the
+  coroutine was refused and closed there, one window over from where it was fixed.
 - **The consumer's join deadline is derived from the bound that governs it.** It
   was `BLPOP_TIMEOUT + 1` — six seconds at the defaults — while every call the
   consumer makes is bounded by `REDIS_TIMEOUT`, ten. A consumer that outlived the

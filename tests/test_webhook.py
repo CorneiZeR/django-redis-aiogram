@@ -635,12 +635,14 @@ def test_send_raw_stops_waiting_once_the_loop_has_a_thread():
     """
 
     class Slow:
-        def __init__(self, called):
+        def __init__(self, called, finished):
             self.called = called
+            self.finished = finished
 
         async def send_message(self, **kwargs):
             await asyncio.sleep(0.3)
             self.called.append(True)
+            self.finished.set()
 
         class session:
             @staticmethod
@@ -650,28 +652,33 @@ def test_send_raw_stops_waiting_once_the_loop_has_a_thread():
     def measure(*, with_runner):
         instance = TelegramBot()
         called = []
-        instance._bot = Slow(called)
+        finished = threading.Event()
+        instance._bot = Slow(called, finished)
         try:
             if with_runner:
                 instance._ensure_loop_runs()
             began = time.monotonic()
             instance.send_raw('send_message', chat_id=1, text='x')
-            return time.monotonic() - began, bool(called)
+            return time.monotonic() - began, bool(called), finished
         finally:
             # closed with the stub still installed: the handed-off send has only
             # been scheduled, and clearing it here would let the drain resolve
             # `self.bot` and build a real one — a unit test reaching the network
             instance.close()
 
-    drove, drove_called = measure(with_runner=False)
-    _, handed_called = measure(with_runner=True)
+    drove, drove_called, _ = measure(with_runner=False)
+    _, handed_called, handed_finished = measure(with_runner=True)
 
     assert drove_called is True, 'without a thread it must drive the send to completion'
     assert drove >= 0.25, f'it returned in {drove:.2f}s, so it did not wait'
+    # the two halves apart, because either alone is satisfied by the wrong thing: not
+    # having finished is also true of a coroutine that was dropped, and having finished is
+    # also true of a send that blocked the caller until it did
     assert handed_called is False, 'with a thread it must hand off, not wait'
-    # the hand-off's own duration is discarded: the send not having completed *is* not
-    # having waited for it, and an upper bound on it was the suite's only wall-clock
-    # ceiling — a shared CI runner losing its slice for 100 ms failed a correct package
+    assert handed_finished.is_set(), 'the handed-off send was dropped rather than delivered'
+    # the hand-off's own duration is discarded: an upper bound on it was the suite's only
+    # wall-clock ceiling — a shared CI runner losing its slice for 100 ms failed a correct
+    # package, and `handed_called` already says the caller did not wait
 
 
 @override_settings(TELEGRAM_BOT=SETTINGS)

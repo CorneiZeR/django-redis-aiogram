@@ -463,6 +463,10 @@ def test_recording_does_not_doom_the_transaction_it_runs_inside(monkeypatch):
     monkeypatch.setattr(connection, 'is_in_memory_db', lambda: False)
     monkeypatch.setattr(connection, '_close', lambda: None)
     recorder = EventRecorder()
+    # the premise, asserted rather than assumed: without it `record()` queues the event and
+    # `_buffer()` starts a writer that drains it, so the row below would exist having gone
+    # nowhere near this transaction — the regression this test exists for, passing
+    assert recorder._write_here(), 'the event would be queued, so nothing here is on trial'
 
     try:
         with transaction.atomic():
