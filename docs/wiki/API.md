@@ -138,10 +138,16 @@ bot.start_polling()  # attaches the router, then blocks on long polling
 bot.close()  # drains in-flight sends, releases the storage, session and loop
 ```
 
-`close(drain_timeout=5.0)` waits that long for sends still pacing behind the rate
-limiter, cancels whatever outlasts it with a warning, then releases the FSM
-storage's own Redis client, the bot's HTTP session and the loop. A closed
-instance builds itself again on next use.
+`close(drain_timeout=None)` waits for sends still pacing behind the rate limiter,
+cancels whatever outlasts the wait with a warning, then releases the FSM storage's
+own Redis client, the bot's HTTP session and the loop. A closed instance builds
+itself again on next use.
+
+The wait defaults to `DRAIN_TIMEOUT`, five seconds, and passing a number overrides
+it for that call. It was a hardcoded five before 3.1.0, which `start_tgbot` never
+passed — so a deployment could raise `stop_grace_period` all it liked and never buy
+the drain a second more. Set the setting rather than the argument: the arithmetic on
+**[[Deployment]]** adds it up for you.
 
 `start_tgbot` does both around the delivery consumer; you only need them when
 running the bot yourself.

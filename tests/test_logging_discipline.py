@@ -253,10 +253,21 @@ def test_every_structured_field_is_documented():
     emitted = set()
     for path in MODULES:
         # parsed rather than matched: a regex for one quote style lets the other
-        # through, and this test exists to catch what nobody noticed
+        # through, and this test exists to catch what nobody noticed.
+        #
+        # And read from the *keys of an `extra=` mapping*, not from any `tg_`-prefixed
+        # string in the file: taking every constant let `MODULE_NAME`'s default,
+        # `'tg_router'`, count as a field, which is how the page kept a row for a field
+        # nothing has ever logged while this test claimed to check both directions
         for node in ast.walk(ast.parse(path.read_text(encoding='utf-8'))):
-            if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value.startswith('tg_'):
-                emitted.add(node.value)
+            if not isinstance(node, ast.Call):
+                continue
+            for keyword in node.keywords:
+                if keyword.arg != 'extra' or not isinstance(keyword.value, ast.Dict):
+                    continue
+                for key in keyword.value.keys:
+                    if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                        emitted.add(key.value)
     page = (SOURCE.parent / 'docs' / 'wiki' / 'Logging.md').read_text(encoding='utf-8')
     documented = set(re.findall(r'`(tg_[a-z_]+)`', page))
 

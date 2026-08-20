@@ -42,7 +42,6 @@ All prefixed with `tg_`, to avoid colliding with `LogRecord` attributes.
 | `tg_update` | the update id being handled |
 | `tg_correlation_id` | the id every event about one message carries |
 | `tg_alternative` | the awaitable method a synchronous send from a loop should move to |
-| `tg_router` | a router module autodiscovery imported |
 | `tg_pending` | work still in flight at shutdown: sends, or the updates a webhook process is answering |
 | `tg_drain_timeout` | how long shutdown gave them |
 | `tg_kind` | the event log kind of a row |
