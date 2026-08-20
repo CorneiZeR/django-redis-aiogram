@@ -92,8 +92,8 @@ Docker invents a fresh twelve-character one for each container it creates — so
 whenever one is replaced rather than restarted in place, whatever the last one
 was sending is stranded in a list nothing will look at again. `docker compose up`
 after a change, a rescheduled pod, a redeploy: each is a new container. Set
-`WORKER_NAME`, or give the container a fixed `hostname:`; check `W010` reports
-the case it can detect.
+`WORKER_NAME`, or give the container a fixed `hostname:`; check `I001` reports
+the case it can detect, and `start_tgbot` warns for itself at startup.
 
 The list is keyed on the resolved name, so the other half is the collision: two
 workers that resolve to the *same* name share one in-flight list, and each will

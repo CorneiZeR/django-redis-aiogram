@@ -313,6 +313,25 @@ def test_every_check_id_is_documented():
     assert not missing, f'check ids missing from docs/wiki/Settings.md: {missing}'
 
 
+def test_the_documented_floor_is_the_floor_the_check_enforces():
+    """`E030` refuses a number, and the table has to name the same number.
+
+    The row said `below 1` while the registry had moved to 2, which is worse than
+    saying nothing: an operator reading it concludes `REDIS_TIMEOUT = 1` passes.
+    Read from the registry so the two cannot drift again — and pin the floor from
+    both sides, because a table naming a number no check enforces is the same
+    defect facing the other way.
+    """
+    floor = next(check for check in CHECKS if check.code == 'E030').validate.keywords['minimum']
+    row = next(line for line in SETTINGS_PAGE.read_text(encoding='utf-8').splitlines() if line.startswith('| `E030`'))
+    assert f'below {floor}' in row, f'the table does not name the floor the check enforces ({floor}): {row}'
+
+    for value, refused in ((floor - 1, True), (floor, False)):
+        with override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_TIMEOUT': value}):
+            reported = 'django_redis_aiogram.E030' in ids(errors(check_settings()))
+        assert reported is refused, f'REDIS_TIMEOUT={value} is {"accepted" if refused else "refused"}'
+
+
 def test_every_registry_row_reports_under_its_own_id():
     """Two rows sharing an id would make the docs entry ambiguous."""
     codes = [check.code for check in CHECKS]

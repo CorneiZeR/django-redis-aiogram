@@ -160,7 +160,7 @@ entry naming a retired one is dead but harmless.
 | `E027` | `WEBHOOK_URL` is set without a secret or is not https, or `MODE` is `webhook` with no URL |
 | `E028` | `MODE` is not `polling` or `webhook` |
 | `E029` | `WEBHOOK_ALLOWED_UPDATES` is not a list, or names an update type Telegram does not have |
-| `E030` | `REDIS_TIMEOUT` is wrong or below 1 |
+| `E030` | `REDIS_TIMEOUT` is wrong or below 2 — the pop has to sit one second inside it |
 | `E031`, `E042` | `EVENT_LOG` / `EVENT_LOG_SYNC` cannot be read as true or false. `EVENT_LOG` is read while the app loads, so it too refuses the boot first |
 | `E032`, `E035` | `EVENT_LOG_KINDS` / `EVENT_LOG_REDACT_KEYS` is not a list or tuple of strings |
 | `E033` | `EVENT_LOG_PAYLOAD` is not `none`, `summary` or `full` |

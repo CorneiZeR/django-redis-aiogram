@@ -19,7 +19,7 @@ src/django_redis_aiogram/
     delivery.py     BlpopDelivery, the one consumer
     serializers.py  tagged JSON, and pickle behind ALLOW_PICKLE
     throttling.py   token buckets, one budget per token
-    checks.py       system checks E001-E046, W001-W011
+    checks.py       system checks E001-E046, W001-W009, I001-I002
     settings.py     lazy settings with an environment fallback
     redis.py        lazy connection
     healthcheck.py  the container probe; must import nothing needing the app registry
