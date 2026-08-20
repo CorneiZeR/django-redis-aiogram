@@ -564,6 +564,28 @@ def test_reclaim_requeues_a_dead_workers_messages(redis_server):
 
 
 @override_settings(TELEGRAM_BOT={**SETTINGS, 'WORKER_NAME': 'alive'})
+def test_reclaim_by_hand_preserves_the_original_order(redis_server):
+    """`Delivery.reclaim` has this test; its manual twin had counts only.
+
+    `'RIGHT', 'LEFT'` to `'LEFT', 'LEFT'` left the whole suite green while the messages
+    came back reversed: measured here, `2, 1, 3` instead of `1, 2, 3` — and an operator
+    running this command is already having a bad day. Asserted by draining the queue
+    rather than by reading it, because the order that matters is the order a consumer
+    sees, and this is the same shape the `Delivery.reclaim` test uses.
+    """
+    for chat_id in (1, 2):
+        redis_server.rpush(f'{QUEUE}:processing:gone', payload(chat_id))
+    redis_server.rpush(QUEUE, payload(3))
+
+    call_command('tgbot_reclaim', worker='gone', stdout=StringIO())
+
+    survivor = Recording()
+    drain(survivor, expected_handled=3)
+
+    assert [item['chat_id'] for item in survivor.handled] == [1, 2, 3]
+
+
+@override_settings(TELEGRAM_BOT={**SETTINGS, 'WORKER_NAME': 'alive'})
 def test_reclaim_refuses_this_processs_own_worker(redis_server):
     """A running consumer reclaims its own list when it starts. Taking messages
     from underneath one that is mid-send is how you deliver them twice."""
