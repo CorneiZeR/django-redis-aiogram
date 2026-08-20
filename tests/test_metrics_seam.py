@@ -90,6 +90,30 @@ def collected():
             recorder._dropped = 0
 
 
+@pytest.fixture
+def clean_counters():
+    """Leave the process-wide recorder's counters as they were found.
+
+    `recorder` is a singleton, so a test that drives a failed write and leaves `_dropped`
+    set hands a real gap to whichever test runs next — which then correctly reports it, in
+    the wrong place, and reads as a defect in something unrelated. The same for
+    `_touched_database`, which decides whether a stopping writer closes a database
+    connection and is only otherwise cleared on a fork.
+
+    The `collected` fixture above does this for its own users; this is for the tests that
+    do not need a receiver.
+    """
+    with recorder._counter:
+        recorder._dropped = 0
+    recorder._touched_database = False
+    try:
+        yield
+    finally:
+        with recorder._counter:
+            recorder._dropped = 0
+        recorder._touched_database = False
+
+
 def kinds(events):
     """The kinds that arrived, in order, so a failure message names them."""
     return [event.kind for event in events]
@@ -684,7 +708,7 @@ def test_a_failure_while_reporting_a_receiver_costs_nobody_their_batch(redis_ser
 
 
 @override_settings(TELEGRAM_BOT={**SETTINGS, 'EVENT_LOG': True})
-def test_a_gap_row_that_cannot_be_written_keeps_its_count(redis_server, monkeypatch):
+def test_a_gap_row_that_cannot_be_written_keeps_its_count(redis_server, monkeypatch, clean_counters):
     """The hole outlives the row that failed to describe it.
 
     The count was subtracted *before* the write and the write's failure suppressed, so a
@@ -703,11 +727,10 @@ def test_a_gap_row_that_cannot_be_written_keeps_its_count(redis_server, monkeypa
     recorder._record_gap(7)
 
     assert recorder._dropped == 7, 'the gap was forgotten with the row that could not report it'
-    recorder._touched_database = False
 
 
 @override_settings(TELEGRAM_BOT={**SETTINGS, 'EVENT_LOG': True})
-def test_a_gap_row_that_lands_clears_its_count(redis_server, monkeypatch):
+def test_a_gap_row_that_lands_clears_its_count(redis_server, monkeypatch, clean_counters):
     """The control, so the fix above cannot be "never subtract"."""
     # 0 refused, which is what `write_batch` returns on a clean write: a double returning
     # None would be a shape no real path produces
@@ -717,7 +740,6 @@ def test_a_gap_row_that_lands_clears_its_count(redis_server, monkeypatch):
     recorder._record_gap(7)
 
     assert recorder._dropped == 0, 'a reported gap was reported twice'
-    recorder._touched_database = False
 
 
 @override_settings(TELEGRAM_BOT=SETTINGS)
@@ -765,7 +787,7 @@ def test_a_receiver_django_cannot_name_costs_the_receivers_behind_it(redis_serve
 
 
 @override_settings(TELEGRAM_BOT={**SETTINGS, 'EVENT_LOG': True})
-def test_two_overlapping_flushes_report_one_gap_between_them(redis_server, monkeypatch):
+def test_two_overlapping_flushes_report_one_gap_between_them(redis_server, monkeypatch, clean_counters):
     """`drain_once()` runs on the caller's thread while the writer runs its own.
 
     Both snapshot the drop count before their batch, so with the subtraction *after* the
@@ -800,16 +822,14 @@ def test_two_overlapping_flushes_report_one_gap_between_them(redis_server, monke
     release.set()
     first.join(timeout=5)
 
-    try:
-        assert rows == [7], f'the same hole was reported {len(rows)} times: {rows}'
-        assert recorder._dropped == 0, f'the count went to {recorder._dropped}'
-    finally:
-        recorder._touched_database = False
-        recorder._dropped = 0
+    assert rows == [7], f'the same hole was reported {len(rows)} times: {rows}'
+    assert recorder._dropped == 0, f'the count went to {recorder._dropped}'
 
 
 @override_settings(TELEGRAM_BOT={**SETTINGS, 'EVENT_LOG': True})
-def test_a_gap_row_the_database_refuses_one_at_a_time_keeps_its_count(redis_server, monkeypatch, caplog):
+def test_a_gap_row_the_database_refuses_one_at_a_time_keeps_its_count(
+    redis_server, monkeypatch, caplog, clean_counters
+):
     """A refusal is the same loss as a raise, and this was the path that ignored it.
 
     `write_batch` reports how many rows the database refused individually — a return this
@@ -828,16 +848,12 @@ def test_a_gap_row_the_database_refuses_one_at_a_time_keeps_its_count(redis_serv
     with caplog.at_level('ERROR', logger='django_redis_aiogram'):
         recorder._record_gap(5)
 
-    try:
-        assert recorder._dropped == 5, 'the gap was lost to a refusal nobody checked'
-        assert 'refused the gap row' in caplog.text
-    finally:
-        recorder._touched_database = False
-        recorder._dropped = 0
+    assert recorder._dropped == 5, 'the gap was lost to a refusal nobody checked'
+    assert 'refused the gap row' in caplog.text
 
 
 @override_settings(TELEGRAM_BOT=SETTINGS)
-def test_dropping_nothing_says_nothing(redis_server, caplog):
+def test_dropping_nothing_says_nothing(redis_server, caplog, clean_counters):
     """Callers pass the refused count straight through, and it is zero on every good write.
 
     Without the guard, a batch that landed in full still reached the once-a-minute report
@@ -847,7 +863,6 @@ def test_dropping_nothing_says_nothing(redis_server, caplog):
     `_reported_at` is pushed into the past on purpose: the interval is what would otherwise
     hide the defect, and a test that relied on it would pass either way.
     """
-    recorder._dropped = 0
     recorder._reported_at = time.monotonic() - DROP_REPORT_INTERVAL - 1
 
     with caplog.at_level('ERROR', logger='django_redis_aiogram'):
