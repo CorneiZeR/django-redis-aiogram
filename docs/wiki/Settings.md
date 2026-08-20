@@ -135,7 +135,14 @@ carry, and a string from it would be read one character per item.
 
 ## Check ids
 
-Errors are `django_redis_aiogram.EXXX`, warnings `django_redis_aiogram.WXXX`.
+Errors are `django_redis_aiogram.EXXX`, warnings `django_redis_aiogram.WXXX`,
+and information `django_redis_aiogram.IXXX`. An error refuses the boot; a warning
+fails `manage.py check --fail-level WARNING`, which is what a CI step or an
+entrypoint usually runs; information fails neither, and is there for conditions
+this package can see but cannot judge from inside a check — `I001` and `I002`
+below are both of that kind, because a system check cannot tell which process it
+is running in or look inside a database router.
+
 They moved from `telegram_bot.EXXX` in 2.0 — update `SILENCED_SYSTEM_CHECKS`
 if you silenced any. An id is never reused once its setting is gone, so an
 entry naming a retired one is dead but harmless.

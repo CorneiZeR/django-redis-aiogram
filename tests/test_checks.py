@@ -358,6 +358,24 @@ def test_no_test_asserts_on_a_check_id_the_registry_no_longer_has():
     assert not stale, f'assertions naming ids the registry does not have: {stale}'
 
 
+def test_the_page_explains_every_severity_the_registry_uses():
+    """The table gained `I001` and `I002` while its legend still said errors and warnings.
+
+    Documenting an id is not documenting what it does to a build, and the level is the
+    part an operator acts on: `--fail-level WARNING` is what a CI step runs, and whether
+    a row can fail it decides whether they can deploy. Read from the registry, so a
+    fourth prefix cannot arrive unexplained the way the third one did.
+    """
+    page = SETTINGS_PAGE.read_text(encoding='utf-8')
+    unexplained = sorted(
+        f'django_redis_aiogram.{check.code[0]}XXX'
+        for check in CHECKS
+        if f'django_redis_aiogram.{check.code[0]}XXX' not in page
+    )
+
+    assert not unexplained, f'the Check ids legend does not explain: {unexplained}'
+
+
 def test_every_registry_row_reports_under_its_own_id():
     """Two rows sharing an id would make the docs entry ambiguous."""
     codes = [check.code for check in CHECKS]
