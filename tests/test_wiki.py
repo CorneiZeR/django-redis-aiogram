@@ -133,6 +133,33 @@ def test_wiki_link_syntax_stays_in_the_wiki():
     assert not broken, f'wiki link syntax outside the wiki: {broken}'
 
 
+CHANGELOG = ROOT / 'CHANGELOG.md'
+#: the newest released heading. Everything below it describes what shipped, in the words
+#: it shipped with, and is not ours to edit — a spelling pass reached three lines under
+#: here and no test noticed
+HISTORY_BEGINS = '## 3.0.0 - 2026-08-09'
+#: words the released entries spell the way those releases spelled them
+HISTORICAL_SPELLINGS = ('`VACUUM` afterwards', 'about its behaviour changed', 'for the old behaviour.')
+
+
+def test_the_released_entries_keep_the_words_they_shipped_with():
+    """A changelog entry is a record of what was said, not prose to be improved.
+
+    The en-US pass for 3.1.0 rewrote three lines below `## 3.0.0` — `afterwards` and two
+    `behaviour` — while the pull request describing it said history was left alone. Nothing
+    failed, because no test reads down there.
+
+    Narrow on purpose: this pins the words a sweep would reach for, not the whole section,
+    so an entry can still be corrected on its facts if one is ever found to be wrong.
+    """
+    text = CHANGELOG.read_text(encoding='utf-8')
+    assert HISTORY_BEGINS in text, f'{HISTORY_BEGINS!r} is gone; this test no longer knows where history starts'
+    history = text[text.index(HISTORY_BEGINS) :]
+    rewritten = [phrase for phrase in HISTORICAL_SPELLINGS if phrase not in history]
+
+    assert not rewritten, f'a released entry was reworded: {rewritten}'
+
+
 def test_home_and_sidebar_exist():
     assert (WIKI / 'Home.md').is_file()
     assert (WIKI / '_Sidebar.md').is_file()

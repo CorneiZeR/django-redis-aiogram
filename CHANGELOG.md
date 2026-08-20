@@ -752,7 +752,7 @@ created whether or not you turn the log on.
   window would be a data-loss bug — and `W006` warns while it is unset. Two
   things the wiki page spells out and that bite after the fact: on PostgreSQL
   the space returns through autovacuum rather than immediately, so a large first
-  prune wants a plain `VACUUM` afterward (never `FULL`, which takes an
+  prune wants a plain `VACUUM` afterwards (never `FULL`, which takes an
   exclusive lock); and attaching a `ForeignKey` to `TelegramEvent` disables
   Django's fast-delete path, so every prune then has to fetch primary keys
   first.
@@ -768,7 +768,7 @@ created whether or not you turn the log on.
 
 - `ALLOW_PICKLE` is documented as what it is: the escape hatch for payloads JSON
   cannot describe, and not the 1.x upgrade window it was introduced as. Nothing
-  about its behavior changed — it is still off by default, the reader still
+  about its behaviour changed — it is still off by default, the reader still
   refuses pickled payloads without it, and a refused payload is still left in
   flight rather than destroyed — on Redis 6.2 and newer. Without `LMOVE` there
   is no in-flight list, so a refused pickle is lost rather than held; the
@@ -874,7 +874,7 @@ to `DEFAULT_BOT_PROPERTIES`. See the upgrade notes in the README.
   execution. If the queue holds 1.x messages when you deploy, set
   `ALLOW_PICKLE: True` for the upgrade window and remove it once drained.
 - Delivery defaults to `blpop` instead of keyspace expiry events. Set
-  `DELIVERY: 'keyspace'` for the old behavior.
+  `DELIVERY: 'keyspace'` for the old behaviour.
 - System check ids moved from `telegram_bot.EXXX` to `django_redis_aiogram.EXXX`.
 - `TelegramBot` moved from `telegram_bot.telegram_bot` to
   `django_redis_aiogram.client`, and the settings module is
