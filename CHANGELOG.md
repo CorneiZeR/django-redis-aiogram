@@ -253,15 +253,16 @@ them, so it is not one per message.
 
 - **The boolean checks no longer refuse configuration that works.**
   `{'ENABLED': 'true', 'EVENT_LOG': '1', 'ALLOW_PICKLE': 'no'}` is documented, boots
-  and sends — and failed `manage.py check` on five ids, because the rules demanded a
-  real `bool` while every one of those settings is coerced where it is used. They were
+  and sends — and failed `manage.py check` on one id per setting it names, because the
+  rules demanded a real `bool` while every one of those settings is coerced where it is
+  used. They were
   inverted twice: the values `coerce_bool` genuinely refuses raise
   `ImproperlyConfigured` out of `apps.ready()` before a check runs, so the errors could
   never fire on the case they were written for. E001, E002, E017, E031, E042 and E046
   now ask by trying the coercion and report the message the runtime would have raised.
-  E003 stays strict, because `client.py` reads `RAISE_EXCEPTION` on raw truthiness and
-  `'false'` there would re-raise — that is a defect in `client.py` and has its own
-  issue.
+  `E003` went with them once `client.py` stopped reading `RAISE_EXCEPTION` on raw
+  truthiness — see the entry above — so no boolean in this package is tested for
+  truthiness any more, and there is no exception left to remember.
 - **`W004` compared `BLPOP_TIMEOUT` against the wrong bound.** The consumer caps its
   pop at `min(BLPOP_TIMEOUT, HEARTBEAT_INTERVAL, REDIS_TIMEOUT - 1)`, and the rule
   looked only at the deadline — so `BLPOP_TIMEOUT=30, HEARTBEAT_INTERVAL=10,

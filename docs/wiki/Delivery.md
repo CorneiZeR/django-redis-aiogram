@@ -16,11 +16,14 @@ waits until the worker comes back.
 `BLPOP_TIMEOUT` is only how often the block is interrupted to check whether the
 worker is shutting down. It does not delay delivery.
 
-It is also capped just below `REDIS_TIMEOUT`, the deadline on any single Redis
-call. A pop asked to wait longer than the socket will wait for an answer turns
-every idle round into an error, so raising `BLPOP_TIMEOUT` above the deadline
-would break a consumer that is doing nothing wrong. Check `W004` says so before
-deployment; raise `REDIS_TIMEOUT` too if you want longer blocks.
+It is also capped, at whichever of two bounds is smaller: one second inside
+`REDIS_TIMEOUT`, the deadline on any single Redis call, and `HEARTBEAT_INTERVAL`,
+because a worker that popped for longer than that would let its own heartbeat key
+expire and look dead. A pop asked to wait longer than the socket will wait for an
+answer turns every idle round into an error; one asked to outlast the heartbeat
+gets the worker declared gone. Check `W004` says so before deployment, and its
+hint names the bound that is actually binding — raising `REDIS_TIMEOUT` does
+nothing when `HEARTBEAT_INTERVAL` is the smaller of the two.
 
 `DELIVERY` names the consumer and `'blpop'` is its only value. The `keyspace`
 consumer 1.x used — write a key with a TTL, react to its expiry event — was

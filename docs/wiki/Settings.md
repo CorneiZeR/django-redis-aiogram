@@ -4,7 +4,10 @@ Everything lives under `TELEGRAM_BOT` in `settings.py`. Scalar values can also
 come from `DJANGO_REDIS_AIOGRAM_<NAME>`; Django settings take precedence.
 
 All of it is validated by `manage.py check` — in processes where the bot is
-enabled. A disabled process registers no checks at all.
+enabled **or** the event log is on. A container with `ENABLED=0` and the log
+recording still registers every rule, including the ones about the bot's own
+settings, so a token it never uses can still fail its `check`. Only a process
+with both switched off registers nothing.
 
 ## Credentials
 
@@ -81,7 +84,7 @@ which carries outbound messages in both modes — see **[[Webhook]]**.
 | `DELIVERY` | `'blpop'` | The only consumer; `'keyspace'` was removed in 3.0 — see **[[Delivery]]** |
 | `REDIS_MESSAGES_KEY` | `'TELEGRAM_BOT_MESSAGE'` | List holding queued calls |
 | `WORKER_NAME` | hostname | Names this worker's in-flight list — see **[[Delivery]]** |
-| `BLPOP_TIMEOUT` | `5` | How often the consumer checks for shutdown; capped just below `REDIS_TIMEOUT` |
+| `BLPOP_TIMEOUT` | `5` | How often the consumer checks for shutdown; capped at `min(HEARTBEAT_INTERVAL, REDIS_TIMEOUT - 1)` |
 | `DRAIN_TIMEOUT` | `5` | Seconds `close()` gives in-flight sends to finish before canceling them |
 | `MAX_IN_FLIGHT` | `0` | Sends the consumer leaves in flight before it stops taking messages; `0` is no bound |
 | `REQUIRE_CRASH_SAFE` | `False` | Refuse to start where a message cannot survive the worker being killed mid-send |
@@ -151,7 +154,7 @@ entry naming a retired one is dead but harmless.
 | -- | ------- |
 | `W001` / `W002` | `TOKEN` / `REDIS_URL` empty while the bot is enabled |
 | `W003` | `TELEGRAM_BOT` contains unknown keys |
-| `W004` | `BLPOP_TIMEOUT` is at or above `REDIS_TIMEOUT`, so the consumer caps it |
+| `W004` | `BLPOP_TIMEOUT` is at or above the ceiling the consumer actually applies — `min(HEARTBEAT_INTERVAL, REDIS_TIMEOUT - 1)` — so the pop runs shorter than configured. The hint names whichever of the two is binding |
 | `E001`–`E003`, `E017` | a boolean setting holds something that cannot be read as true or false. `ENABLED` and `AUTODISCOVER` are read while the app loads, so in practice those two refuse the boot with the same message before `check` runs at all |
 | `E004`–`E007`, `E009`–`E011` | a string setting is wrong, or not one of the allowed values |
 | `E012`, `E014` | an integer setting is wrong or below its minimum |

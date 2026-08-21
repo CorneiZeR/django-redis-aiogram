@@ -104,6 +104,11 @@ the shutdown recipe.
 | `bot.inflight_depth(worker=None)` | messages one worker is part-way through sending |
 | `await bot.aqueue_depth()` / `await bot.ainflight_depth(...)` | the same read, without holding the loop |
 
+These four are reads rather than sends, so `ENABLED=0` does not turn them into
+no-ops the way it does every send: they still connect, and without `REDIS_URL` they
+raise `ImproperlyConfigured` rather than answering zero. A monitor that runs in a
+disabled process needs the URL.
+
 `inflight_depth` defaults to this process's own worker identity; naming another is
 how a monitor reads a list left behind by a worker that is gone. The key scheme
 behind them is this package's business — an exporter should not have to reproduce
@@ -266,6 +271,9 @@ from django_redis_aiogram.exceptions import DjangoRedisAiogramError
 | `DjangoRedisAiogramError` | base of everything this package raises |
 | `SerializationError` | a payload cannot be encoded, or cannot be decoded |
 | `UnknownApiMethodError` | a call names something that is not a Telegram API method |
+| `LoopUnavailableError` | there is no event loop this call can use; also a `RuntimeError` |
+| `ShuttingDownError` | the bot is closing, so the send was refused rather than queued for a loop that will not run it — a webhook view answers 503 on this, and Telegram redelivers |
+| `LoopThreadNotStartedError` | the loop exists but nothing is turning it, so a hand-off would never be stepped |
 
 Catching `DjangoRedisAiogramError` catches all of them. The two you are likely
 to name keep the bases they had before the family existed —

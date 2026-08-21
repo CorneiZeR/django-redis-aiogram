@@ -36,7 +36,7 @@ All prefixed with `tg_`, to avoid colliding with `LogRecord` attributes.
 | `tg_delivery` | the consumer that started, always `blpop` |
 | `tg_key` | Redis list being consumed |
 | `tg_timeout` | blocking-pop timeout, or how long a shutdown waited |
-| `tg_error` | text of a non-fatal error |
+| `tg_error` | the class name of a non-fatal error, not its text — a webhook secret or a chat id can end up in the message, and this field is what a log aggregator groups on |
 | `tg_crash_safe` | whether the consumer holds messages in flight; false on a Redis without `LMOVE` |
 | `tg_mode` | `polling` or `webhook` |
 | `tg_update` | the update id being handled |

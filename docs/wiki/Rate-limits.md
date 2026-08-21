@@ -57,6 +57,13 @@ Exhausting the retries logs an error with `tg_function` and `tg_max_retries`,
 and re-raises the last refusal when `RAISE_EXCEPTION` reads as true — `'false'`
 from the environment reads as false, like every boolean here. See **[[Logging]]**.
 
+**Where the raise reaches you is not everywhere.** It reaches a caller that waited
+for the answer, which since 3.1.0 excludes a process that serves the webhook: there
+the send is handed to the loop thread and the caller returns before Telegram has
+been asked, so the failure lands in the log and not in your `except`. Queued sends
+were always like that — the worker raises where the worker is.
+**[[Sending-messages|Sending messages]]** has the whole picture.
+
 ## Tuning
 
 The defaults are Telegram's documented numbers, and they apply to a bot

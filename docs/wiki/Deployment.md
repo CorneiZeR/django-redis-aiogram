@@ -59,14 +59,21 @@ migration container, CI. See below.
 ## What ENABLED=0 turns off
 
 - no router autodiscovery, so those modules are never imported
-- no system checks registered
+- no system checks registered — **unless the event log is on**, which is enough on
+  its own to register all of them, bot settings included
 - every send becomes a no-op that builds neither a bot nor a connection:
   `send`, `send_redis`, `send_raw`, `send_many` and the `await` forms `asend`,
   `asend_redis`, `asend_many`. Each still returns the correlation id it would
   have used, so a caller storing ids beside its own rows behaves the same here
 - `start_tgbot` reports why and exits
 
-A disabled process needs no token and no reachable Redis at all.
+The queue readers are the exception, and worth knowing before a monitor calls one:
+`queue_depth()` and `inflight_depth()` are **not** no-ops here. They are reads, not
+sends, so a disabled process still needs `REDIS_URL` to answer them and raises
+`ImproperlyConfigured` without one.
+
+A disabled process needs no token, and needs a reachable Redis only if something
+asks it for a queue depth.
 
 `ENABLED` is parsed rather than tested for truthiness — `'false'`, `'no'`,
 `'off'` and `0` all disable the bot, and an unparseable value raises rather
