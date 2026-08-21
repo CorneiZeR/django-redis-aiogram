@@ -394,8 +394,10 @@ class Delivery(ABC):
 
         Cancellation is the reason this is not one ``except``: it is a
         ``BaseException``, so letting it through would leave :meth:`run` and end
-        the consumer for the life of the container. The message stays in flight,
-        which is right — nothing sent it — but this worker has to keep reading.
+        the consumer for the life of the container. The message stays in flight because
+        the outcome is *unknown*: a send can be cancelled after Telegram has taken the
+        request, so leaving it risks a duplicate rather than a loss. This worker has to
+        keep reading either way.
         """
         deferring = self._defers
         if deferring:
