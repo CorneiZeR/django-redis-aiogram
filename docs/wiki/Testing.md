@@ -69,14 +69,25 @@ the registry still runs for real:
 ```python
 import fakeredis
 import fakeredis.aioredis
+import pytest
 
-server = fakeredis.FakeServer()
-monkeypatch.setattr('django_redis_aiogram.client.get_redis', lambda: fakeredis.FakeRedis(server=server))
-monkeypatch.setattr(
-    'django_redis_aiogram.redis.build_async_client',
-    lambda: fakeredis.aioredis.FakeRedis(server=server),
-)
+
+@pytest.fixture
+def fake_redis(monkeypatch):
+    """One in-memory server behind both halves, sync and async."""
+    server = fakeredis.FakeServer()
+    client = fakeredis.FakeRedis(server=server)
+    monkeypatch.setattr('django_redis_aiogram.client.get_redis', lambda: client)
+    monkeypatch.setattr(
+        'django_redis_aiogram.redis.build_async_client',
+        lambda: fakeredis.aioredis.FakeRedis(server=server),
+    )
+    return client
 ```
+
+A fixture rather than four loose lines, because `monkeypatch` is one: copied into a
+module as it stands, the calls above have no `monkeypatch` to reach and raise
+`NameError`. Take `fake_redis` in the test and read the queue off its return value.
 
 One `FakeServer` behind both, so a message queued through `asend` is visible to a
 synchronous read of the queue. This package's own `redis_server` fixture is exactly

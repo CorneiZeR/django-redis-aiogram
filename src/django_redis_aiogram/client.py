@@ -188,7 +188,8 @@ def queueing(function: str, messages: list[tuple[uuid.UUID, dict[str, Any]]]) ->
     neither can drift between the two paths, because neither path owns them.
 
     The two ways a message is lost here are **not** the same, and the ``stage`` on
-    the drop row is what tells them apart. ``serializing`` means the payload never
+    the drop row is what tells them apart. ``serialising`` — spelled as the value is
+    written, since a consumer filters on it — means the payload never
     left this process, so re-sending it is safe. ``queueing`` means the write to
     Redis raised, and a variadic ``RPUSH`` that raised may still have been applied —
     the reply is what went missing — so re-sending may duplicate. A broadcast makes

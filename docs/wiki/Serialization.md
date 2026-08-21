@@ -117,23 +117,26 @@ print(timeit.timeit(lambda: json.dumps(payload), number=calls) / calls * 1e6)
 ```
 
 A fixed correlation id and timestamp, so the payload is byte-stable between runs: a
-32-character body, 202 bytes encoded. Per-call means over 200 000 calls, CPython
+32-character body, 189 bytes encoded. Per-call means over 200 000 calls, CPython
 3.13.14 on arm64 macOS.
 
 | | |
 | --- | --- |
-| `serializer.dumps(payload)`, serializer bound | **0.98 µs** |
-| `json.dumps(payload)` — same bytes | 0.83 µs |
-| `get_serializer().dumps(payload)` — lookup included | 1.00 µs |
-| `json.dumps(payload, separators=(',', ':'))` — 190 bytes, different output | 1.01 µs |
+| `serializer.dumps(payload)`, serializer bound | **0.90 µs** |
+| `json.dumps(payload)` — same bytes | 0.80 µs |
+| `get_serializer().dumps(payload)` — lookup included | 0.98 µs |
+| `json.dumps(payload, separators=(',', ':'))` — 177 bytes, different output | 0.96 µs |
 
-So the tagging costs about **0.08 µs** over a bare `json.dumps` producing the same
+Every row from one run, median of five, so the differences below are subtractions of
+these numbers rather than separate measurements — which is how they came to disagree.
+
+So the tagging costs about **0.10 µs** over a bare `json.dumps` producing the same
 bytes: the price of `default` being available to encode aiogram models. The third row
-is a separate 0.09 µs for resolving the serializer, which the queueing path pays once
+is a separate 0.08 µs for resolving the serializer, which the queueing path pays once
 per write rather than once per message — worth separating, because it is the same size
 as the overhead and easy to attribute to the wrong thing.
 
-A faster library has to beat 0.08 µs *plus* the 0.83 µs underneath it — roughly a
+A faster library has to beat 0.10 µs *plus* the 0.80 µs underneath it — roughly a
 microsecond in total, against a Redis round trip measured at 14 µs on Linux (105 µs on
 macOS, so treat it as an order of magnitude) and a Telegram call
 in tens of milliseconds. `orjson` would also change what is representable, since it
