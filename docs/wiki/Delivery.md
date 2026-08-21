@@ -150,7 +150,10 @@ is kept for a redelivery that may turn out to be a duplicate. That is the trade
 this release makes everywhere — losing a message is worse than sending it twice, and
 handlers are asked to be idempotent for exactly this. The fourth is not a refusal at all: a handler that accepted
 `on_complete` *signals* completion through it, and the consumer takes the message
-off the in-flight list on its next turn. That is what makes at-least-once true.
+off the in-flight list on its next turn. That is what makes at-least-once true —
+where there is an in-flight list. Without `LMOVE` the message is already gone when
+the handler is called, so deferring the acknowledgement defers nothing and that
+server stays at-most-once.
 
 All three refusals rest on the in-flight list, as the paragraph above says: on a
 server without `LMOVE` the message was already popped, so none of them recovers it.

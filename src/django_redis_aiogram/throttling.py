@@ -55,7 +55,9 @@ class TokenBucket:
       won and N-1 recomputed — about N²/2 wakeups. Measured here, on the design that
       ships: 35 wakeups for 40 queued sends and 495 for 500, which is one per send that
       *had to wait* — the burst goes through without sleeping at all, so the count is
-      ``N - capacity`` rather than ``N``. The old shape is quoted as N²/2 rather than as
+      ``N - floor(capacity)`` rather than ``N``. The floor matters because ``capacity``
+      is a float: measured, 1.5 admits one call without sleeping and 5.5 admits five, so
+      a fraction of a slot buys nothing. The old shape is quoted as N²/2 rather than as
       a number, because it is gone and a number for it would be invented.
     * **Admission is strict FIFO.** A herd re-racing for the same token admits in
       whatever order the loop happens to resume, so the message that waited

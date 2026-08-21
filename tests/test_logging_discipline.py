@@ -242,12 +242,14 @@ def test_the_walk_refuses_a_logger_that_is_not_ours(source, tmp_path):
     assert [name for _, name in use.logger_names if name != PACKAGE_LOGGER], source
 
 
-LOGGING_METHODS = frozenset({'debug', 'info', 'warning', 'error', 'exception', 'critical', 'log'})
-
-
 def _is_logging_call(node: ast.Call) -> bool:
-    """A call this scan judges: `logger.warning(...)` and its siblings."""
-    return isinstance(node.func, ast.Attribute) and node.func.attr in LOGGING_METHODS
+    """A call this scan judges: `logger.warning(...)` and its siblings.
+
+    From `LEVELS`, the same set the rest of this file uses, rather than a second list —
+    mine left out `warn` and `fatal`, which `logging` still accepts, so
+    `logger.fatal(msg, **{'extra': ...})` was judged by nothing.
+    """
+    return isinstance(node.func, ast.Attribute) and node.func.attr in LEVELS
 
 
 def _keys_of(mapping: ast.expr, where: str) -> set[str]:
@@ -296,11 +298,15 @@ def fields_logged_in(source: str, name: str) -> set[str]:
     for node in ast.walk(ast.parse(source)):
         if not isinstance(node, ast.Call):
             continue
+        if not _is_logging_call(node):
+            # `extra=` is only a log field on a logging call: `handler(extra={'tg_x': 1})`
+            # is somebody's keyword argument, and judging it would fail this test over a
+            # name that is never logged
+            continue
         for keyword in node.keywords:
             where = f'{name}:{keyword.value.lineno}'
             if keyword.arg is None:
-                if _is_logging_call(node):
-                    fields |= _extra_from_spread(keyword.value, where)
+                fields |= _extra_from_spread(keyword.value, where)
                 continue
             if keyword.arg != 'extra':
                 continue
@@ -346,6 +352,9 @@ def test_every_structured_field_is_documented():
         ("logger.info('x', **{'extra': {'tg_c': 1}})", {'tg_c'}),
         ("logger.info('x', **{'extra': {'tg_d': 1}, 'stacklevel': 2})", {'tg_d'}),
         ('self.handler(**call)', set()),
+        ("handler(extra={'tg_value': 1})", set()),
+        ("logger.fatal('x', **{'extra': {'tg_f': 1}})", {'tg_f'}),
+        ("logger.warn('x', extra={'tg_w': 1})", {'tg_w'}),
     ],
 )
 def test_the_field_scan_reads_every_shape_it_should(source, expected):

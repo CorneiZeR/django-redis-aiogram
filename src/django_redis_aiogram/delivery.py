@@ -350,7 +350,10 @@ class Delivery(ABC):
         :meth:`_hand_over` returning ``not deferring``, which is not a refusal: a handler
         that took ``on_complete`` *signals* completion through it, the handle goes into a
         queue, and :meth:`collect` takes the message off the in-flight list on the
-        consumer's next turn. That is what makes at-least-once true.
+        consumer's next turn. That is what makes at-least-once true — **where there is an
+        in-flight list**. Without ``LMOVE`` the plain pop has already removed the message
+        and :meth:`acknowledge` is a no-op, so deferring the acknowledgement defers
+        nothing: that server is at-most-once whatever the handler does.
 
         Those three refusals save the message only where there *is* an in-flight list.
         Against a server without ``LMOVE`` the consumer falls back to a plain pop, so the
