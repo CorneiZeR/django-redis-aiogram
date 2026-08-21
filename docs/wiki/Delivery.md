@@ -143,8 +143,12 @@ somebody else: a pickled payload refused because `ALLOW_PICKLE` is off, which is
 the one failure a change of configuration can undo; an envelope written by a
 **newer version than this consumer understands**, which is the deploy-order case —
 roll the consumers first and it drains; and a handler raising `CancelledError`,
-which reached nothing — at shutdown usually, though the `except` is unqualified, so
-any cancellation counts. The fourth is not a refusal at all: a handler that accepted
+whose outcome is **unknown** — at shutdown usually, though the `except` is
+unqualified, so any cancellation counts. Unknown rather than "reached nothing": a
+send can be cancelled after Telegram has already taken the request, so the message
+is kept for a redelivery that may turn out to be a duplicate. That is the trade
+this release makes everywhere — losing a message is worse than sending it twice, and
+handlers are asked to be idempotent for exactly this. The fourth is not a refusal at all: a handler that accepted
 `on_complete` *signals* completion through it, and the consumer takes the message
 off the in-flight list on its next turn. That is what makes at-least-once true.
 

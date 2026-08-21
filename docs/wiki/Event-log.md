@@ -13,7 +13,7 @@ that, a table you can query and join against your own models is worth the write.
 TELEGRAM_BOT = {
     'EVENT_LOG': True,
     # part of turning it on, not an afterthought: nothing on the write path deletes
-    # anything, so `W006` warns while this is 0 — and a project running
+    # anything, so `W006` warns while this is 0, which is also the default — and a project running
     # `manage.py check --fail-level WARNING` in CI, which this documentation recommends,
     # gets a red build for a log that grows for ever. See Pruning below
     'EVENT_LOG_RETENTION_DAYS': 30,

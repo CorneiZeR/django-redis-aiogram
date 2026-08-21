@@ -504,11 +504,24 @@ def test_a_receiver_that_stops_the_log_does_not_strand_the_writer(monkeypatch):
         assert reached.wait(10), 'the receiver never ran, so nothing is on trial'
         writer = recorder._thread
         assert writer is not None, 'no writer was started, so nothing is on trial'
+        # who asked for a join, by name: `stop()` must not join the thread it is running
+        # on. Suppressing the `RuntimeError` hides that, and the writer still exits and
+        # closes — so nothing else here would notice the guard going away
+        joined_by: list[str] = []
+        real_join = writer.join
+
+        def recording_join(timeout=None):
+            """Note the caller, then join for real."""
+            joined_by.append(threading.current_thread().name)
+            return real_join(timeout)
+
+        writer.join = recording_join  # type: ignore[method-assign]  # a spy, for this test only
         proceed.set()
         writer.join(10)
 
         assert not writer.is_alive(), 'the writer outlived the stop that came from inside it'
         assert closed == [True], 'it left the connection it had opened'
+        assert writer.name not in joined_by, f'stop() joined the writer from the writer: {joined_by}'
     finally:
         events_recorded.disconnect(dispatch_uid='stop-from-the-writer')
         recorder.stop(timeout=1)
