@@ -4,6 +4,7 @@ The heartbeat is the only thing another process can observe about the consumer
 thread, and `tgbot_healthcheck` is what reads it.
 """
 
+import re
 import time
 from io import StringIO
 
@@ -464,8 +465,13 @@ def test_the_container_form_neither_scans_nor_writes(redis_server, monkeypatch):
     assert report.ok, report.message
     assert calls == [], f'the container form paid for {sorted(set(calls))}'
     # the whole line, not `'once' not in report.message`: `_guarantee` answers `unknown`
-    # on a read-only replica, so that substring is absent from a probe that did run
-    assert report.message == 'healthy: heartbeat 0s old, 0 queued', report.message
+    # on a read-only replica, so that substring is absent from a probe that did run.
+    #
+    # The age is matched rather than compared: it is wall-clock seconds, so a run that
+    # crosses a second boundary between the write above and the read reports `1s` and the
+    # equality failed on CI for a probe that was working perfectly. The digits are not
+    # what this test is about — the shape of the line is
+    assert re.fullmatch(r'healthy: heartbeat \d+s old, 0 queued', report.message), report.message
     assert report.warnings == (), report.warnings
 
 
