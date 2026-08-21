@@ -220,7 +220,7 @@ class EventRecorder:
         structure and bounds the result — measured in tens of microseconds, against
         nothing for a counter keyed on ``kind`` and ``function``. So unless the log
         is on too, a receiver gets ``Event`` objects whose ``detail`` carries what
-        the seam measured itself and not the summarised arguments. Rows are what the
+        the seam measured itself and not the summarized arguments. Rows are what the
         table gets; with the log off there are none.
         """
         return self.enabled

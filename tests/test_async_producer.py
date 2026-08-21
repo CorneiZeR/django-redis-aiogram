@@ -350,7 +350,7 @@ def test_every_synchronous_route_that_writes_names_its_own_twin(
     """The mention was on `send` alone, and that is two thirds of nothing.
 
     A web tier that wants to be explicit calls `send_redis`; a fan-out calls
-    `send_many`, which holds the loop longest of the three because it serialises
+    `send_many`, which holds the loop longest of the three because it serializes
     every payload between round trips. Both were silent, so the async methods this
     release adds went unmentioned to exactly the callers who needed them.
     """
@@ -455,12 +455,12 @@ def test_a_broadcast_records_one_row_per_message(redis_server, bulk, monkeypatch
 
 @override_settings(TELEGRAM_BOT={**SETTINGS, 'EVENT_LOG': True, 'EVENT_LOG_SYNC': True})
 @pytest.mark.parametrize('bulk', ['send_many', 'asend_many'])
-def test_a_payload_that_cannot_be_serialised_is_recorded_as_lost(redis_server, bulk, monkeypatch):
+def test_a_payload_that_cannot_be_serialized_is_recorded_as_lost(redis_server, bulk, monkeypatch):
     """A message can be lost before the write as well as by it.
 
     `send_many` promises a chunk that fails records a drop for its own messages,
     and for a bulk call those rows are the only record of which ones: the ids go
-    with the exception. Serialising outside the guard made that promise false for
+    with the exception. Serializing outside the guard made that promise false for
     the one failure that happens before the socket is touched at all.
 
     The `stage` matters as much as the row. This failure means the payload never

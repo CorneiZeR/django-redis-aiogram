@@ -193,7 +193,7 @@ def test_every_definition_in_the_module_has_a_docstring(path):
         ('once', 'Report the first finish and drop every later one.', False),
     ],
 )
-def test_a_summary_that_only_restates_the_name_is_recognised(name, docstring, expected):
+def test_a_summary_that_only_restates_the_name_is_recognized(name, docstring, expected):
     """Both directions, because a predicate that flagged everything would also pass.
 
     The negative cases are real docstrings from this package, so a future tightening that

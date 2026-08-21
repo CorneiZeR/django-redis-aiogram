@@ -234,12 +234,12 @@ def test_shutdown_cancels_a_send_that_outlasts_the_drain(caplog):
         instance.close(drain_timeout=0.1)
 
     assert 'dropped in-flight sends at shutdown' in caplog.text
-    assert len(sent) == 1, 'the cancelled send should not have gone out'
+    assert len(sent) == 1, 'the canceled send should not have gone out'
 
 
 @override_settings(TELEGRAM_BOT=SETTINGS)
 def test_shutdown_leaves_tasks_it_does_not_own_alone():
-    """aiogram keeps its own tasks on this loop; cancelling them is not ours."""
+    """aiogram keeps its own tasks on this loop; canceling them is not ours."""
     instance = TelegramBot()
     foreign = []
     created = threading.Event()
@@ -256,13 +256,13 @@ def test_shutdown_leaves_tasks_it_does_not_own_alone():
     task = foreign[0]
     cancels = []
     original_cancel = task.cancel
-    # spied rather than inferred: a stopped loop reports nothing as cancelled
+    # spied rather than inferred: a stopped loop reports nothing as canceled
     task.cancel = lambda *args, **kwargs: cancels.append(True) or original_cancel(*args, **kwargs)  # type: ignore[method-assign]
 
     instance._bot = stub_bot()
     instance.close(drain_timeout=0.1)
 
-    assert cancels == [], 'shutdown cancelled a task belonging to someone else'
+    assert cancels == [], 'shutdown canceled a task belonging to someone else'
     assert not task.cancelled()
 
 
@@ -488,7 +488,7 @@ def test_a_send_cancelled_at_shutdown_is_not_acknowledged():
 
     instance.close(drain_timeout=0.05)
 
-    assert acknowledged == [], 'a cancelled send was acknowledged'
+    assert acknowledged == [], 'a canceled send was acknowledged'
 
 
 @override_settings(TELEGRAM_BOT=SETTINGS)

@@ -18,8 +18,8 @@ handler that sends three messages produces three rows under one id, and `SET :se
 NX` would drop two of them. Use something your own domain owns — an order number, a
 notification row's primary key.
 
-Nothing to configure. If you would rather have the old behaviour for a while, there is no
-flag for it: the old behaviour lost messages.
+Nothing to configure. If you would rather have the old behavior for a while, there is no
+flag for it: the old behavior lost messages.
 
 ## Run migrate
 

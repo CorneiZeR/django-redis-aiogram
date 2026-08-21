@@ -35,7 +35,7 @@ logger = logging.getLogger('django_redis_aiogram')
 
 
 def state_name(state: StateType) -> str | None:
-    """Name a state the way a reader recognises it, whatever shape it arrives in."""
+    """Name a state the way a reader recognizes it, whatever shape it arrives in."""
     if state is None:
         return None
     if isinstance(state, State):
@@ -58,7 +58,7 @@ def event_type(update: Update) -> str:
 
 
 def describe_update(update: Update) -> dict[str, Any]:
-    """Summarise an update, under the same payload policy a send obeys."""
+    """Summarize an update, under the same payload policy a send obeys."""
     message = update.message or update.edited_message
     query = update.callback_query
     return describe(
@@ -112,7 +112,7 @@ class RecordingMiddleware(BaseMiddleware):
                 function=event_type(event),
                 chat_id=inbound.chat_id,
                 user_id=inbound.user_id,
-                # summarised only for the table: a receiver counting updates has no
+                # summarized only for the table: a receiver counting updates has no
                 # use for the text, and this is the costly part of recording one
                 detail=describe_update(event) if recorder.wants_payload else None,
             )

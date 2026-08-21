@@ -32,7 +32,7 @@ from django.dispatch import Signal
 #: * **Payload summaries are the only part of ``detail`` the log gates.** With the
 #:   log off, ``detail`` still carries what the recording seam measured itself —
 #:   a send's ``duration_ms``, a retry's ``retry_after``, a queueing failure's
-#:   ``stage``, a gap's ``dropped`` count. What is missing is the summarised
+#:   ``stage``, a gap's ``dropped`` count. What is missing is the summarized
 #:   arguments, because redacting and bounding a payload is the expensive part of
 #:   recording and no part of counting. A receiver that needs message bodies needs
 #:   the log on as well, and then ``EVENT_LOG_PAYLOAD`` decides what is in there.

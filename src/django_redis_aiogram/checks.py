@@ -295,7 +295,7 @@ def _a_url_pickle_can_survive(key: str) -> list[Problem]:
 def _a_worker_that_keeps_its_name(key: str) -> list[Problem]:
     """Warn when the name a worker's in-flight list is keyed on cannot survive a restart.
 
-    Crash safety rests on a restarted worker recognising its own list. With
+    Crash safety rests on a restarted worker recognizing its own list. With
     ``WORKER_NAME`` unset the name is the hostname — which is fine on a host, and
     is not fine in a container started without ``hostname:``, where Docker invents
     a fresh twelve-character hex name for each container it creates. Restarting

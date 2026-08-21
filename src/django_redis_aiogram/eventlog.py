@@ -141,7 +141,7 @@ def _recycle(alias: str, *, force: bool = False) -> None:
 
     Before the work, not after: this is what discards a connection whose
     CONN_MAX_AGE expired, that a restart killed, or that a previous error marked
-    unusable. Closing afterwards would leave a broken one in place.
+    unusable. Closing afterward would leave a broken one in place.
 
     Never while the caller holds a transaction open, though. Under EVENT_LOG_SYNC
     this runs on the caller's thread inside their ``atomic()`` block — and on

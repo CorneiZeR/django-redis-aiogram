@@ -190,7 +190,7 @@ EXPECTED_IDS = (
 WRONG_TYPES = {
     # non-coercible on purpose: 'yes' and 'no' are documented, working values, and
     # E001/E002 asking for a real bool was the defect. `[]` and 4.2 take the other
-    # refusal path in `coerce_bool` — wrong type rather than unrecognised word
+    # refusal path in `coerce_bool` — wrong type rather than unrecognized word
     'ENABLED': 'maybe',
     'AUTODISCOVER': [],
     'RAISE_EXCEPTION': 'maybe',

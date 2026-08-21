@@ -689,7 +689,7 @@ def test_close_does_not_strand_a_request_waiting_on_its_update(monkeypatch, capl
     Stopping the loop under one leaves that thread waiting on a future nothing
     will ever finish — a web worker held for the life of the process, while the
     teardown carries on to `loop.close()`. Waiting for updates in flight, and
-    cancelling what outlasts the drain, is what turns that into an exception the
+    canceling what outlasts the drain, is what turns that into an exception the
     request can answer with.
     """
     instance = TelegramBot()
@@ -699,7 +699,7 @@ def test_close_does_not_strand_a_request_waiting_on_its_update(monkeypatch, capl
     @instance.message(F.text)
     async def slow(message: types.Message) -> None:
         inside.set()
-        await asyncio.sleep(30)  # far longer than the drain: it must be cancelled
+        await asyncio.sleep(30)  # far longer than the drain: it must be canceled
 
     monkeypatch.setattr('django_redis_aiogram.webhook.bot', instance)
 
@@ -767,7 +767,7 @@ def test_an_update_is_refused_once_the_shutdown_has_started(monkeypatch):
     """A request that arrives mid-shutdown must be turned away, not queued.
 
     `close()` snapshots the updates in flight and then stops the loop. One
-    submitted after that snapshot would be neither waited for nor cancelled, and
+    submitted after that snapshot would be neither waited for nor canceled, and
     its request would wait for ever on a stopped loop — the stranded worker
     again, through a narrower door. The refusal is decided under the same
     `loop_lock` the snapshot is taken under, which is what leaves no window

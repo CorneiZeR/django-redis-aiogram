@@ -46,7 +46,7 @@ def test_every_link_resolves(path):
 def test_piped_links_name_the_page_first(path):
     """[[Page-Name|Link Text]], not the other way round.
 
-    Reversed, GitHub still resolves the page — it normalises spaces to dashes —
+    Reversed, GitHub still resolves the page — it normalizes spaces to dashes —
     but renders the file name as the label, so the resolve check above cannot
     catch it. This requires the first field to match a page exactly.
     """
@@ -61,7 +61,7 @@ def test_piped_links_name_the_page_first(path):
 
 @pytest.mark.parametrize('path', PAGES, ids=lambda path: path.name)
 def test_a_multi_word_page_is_linked_by_its_file_name(path):
-    """`[[Sending messages]]` does resolve — GitHub normalises spaces to dashes,
+    """`[[Sending messages]]` does resolve — GitHub normalizes spaces to dashes,
     which is why the check above accepts it — but it names no file, so a rename
     breaks it in a way only a published wiki shows. Both forms were in use here
     at once. Spell the page, let the label carry the spaces.
@@ -139,6 +139,9 @@ CHANGELOG = ROOT / 'CHANGELOG.md'
 #: here and no test noticed
 HISTORY_BEGINS = '## 3.0.0 - 2026-08-09'
 #: words the released entries spell the way those releases spelled them
+#: written the way those releases wrote them, and **not** to be Americanised: this tuple
+#: is the guard, so a sweep that edits it here edits the thing doing the guarding — which
+#: a mechanical en-US pass did, and this test caught
 HISTORICAL_SPELLINGS = ('`VACUUM` afterwards', 'about its behaviour changed', 'for the old behaviour.')
 
 
@@ -230,17 +233,17 @@ def sections(text: str) -> list[str]:
     return ATX.findall(text) + SETEXT.findall(text)
 
 
-def normalised(title: str) -> str:
+def normalized(title: str) -> str:
     """`## Rate  limits ##` and `## Rate-limits` name the same page."""
     return '-'.join(re.sub(r'\s*#+\s*$', '', title).split()).lower()
 
 
-def test_normalised_reads_the_heading_forms_markdown_allows():
+def test_normalized_reads_the_heading_forms_markdown_allows():
     """Written out, because each of these once slipped past the check below."""
-    assert normalised('Delivery') == 'delivery'
-    assert normalised('Delivery ##') == 'delivery'
-    assert normalised('  Rate   limits  ') == 'rate-limits'
-    assert normalised('Rate-limits') == 'rate-limits'
+    assert normalized('Delivery') == 'delivery'
+    assert normalized('Delivery ##') == 'delivery'
+    assert normalized('  Rate   limits  ') == 'rate-limits'
+    assert normalized('Rate-limits') == 'rate-limits'
 
 
 def test_visible_drops_what_is_not_rendered():
@@ -276,9 +279,9 @@ def test_the_readme_stays_a_front_page():
 
 def test_no_readme_section_duplicates_a_wiki_page():
     """A section named after a page is that page's material coming back."""
-    pages = {normalised(name) for name in page_names()} - {'home', '_sidebar'}
+    pages = {normalized(name) for name in page_names()} - {'home', '_sidebar'}
     duplicated = [
-        title for title in sections(visible(README.read_text(encoding='utf-8'))) if normalised(title) in pages
+        title for title in sections(visible(README.read_text(encoding='utf-8'))) if normalized(title) in pages
     ]
 
     assert not duplicated, f'these belong in the wiki, not the README: {duplicated}'
@@ -287,13 +290,13 @@ def test_no_readme_section_duplicates_a_wiki_page():
 def test_the_readme_links_to_every_page():
     """A new page nobody can find from the front page is a page nobody reads.
 
-    Both sides are normalised: GitHub resolves a wiki link case-insensitively and
+    Both sides are normalized: GitHub resolves a wiki link case-insensitively and
     treats spaces as dashes, so `../../wiki/rate-limits` reaches the page and has
     to count as reaching it.
     """
-    linked = {normalised(target) for target in README_WIKI_LINK.findall(visible(README.read_text(encoding='utf-8')))}
-    pages = {normalised(name) for name in page_names()}
-    missing = pages - linked - {normalised('Home'), normalised('_Sidebar')}
+    linked = {normalized(target) for target in README_WIKI_LINK.findall(visible(README.read_text(encoding='utf-8')))}
+    pages = {normalized(name) for name in page_names()}
+    missing = pages - linked - {normalized('Home'), normalized('_Sidebar')}
 
     assert not missing, f'pages the README does not link to: {sorted(missing)}'
 
@@ -301,7 +304,7 @@ def test_the_readme_links_to_every_page():
 def test_a_link_spelled_the_way_github_accepts_it_counts(tmp_path, monkeypatch):
     """Otherwise the test demands one spelling of a link that has several."""
     readme = tmp_path / 'README.md'
-    rows = '\n'.join(f'[{name}]({WIKI_URL}{normalised(name)})' for name in page_names() if name != '_Sidebar')
+    rows = '\n'.join(f'[{name}]({WIKI_URL}{normalized(name)})' for name in page_names() if name != '_Sidebar')
     readme.write_text(rows + '\n', encoding='utf-8')
     monkeypatch.setattr('tests.test_wiki.README', readme)
 
@@ -311,7 +314,7 @@ def test_a_link_spelled_the_way_github_accepts_it_counts(tmp_path, monkeypatch):
 def a_readme(tmp_path, monkeypatch, body: str):
     """Point the checks at a README of our own, through the name they read."""
     readme = tmp_path / 'README.md'
-    rows = '\n'.join(f'[{name}]({WIKI_URL}{normalised(name)})' for name in page_names() if name != '_Sidebar')
+    rows = '\n'.join(f'[{name}]({WIKI_URL}{normalized(name)})' for name in page_names() if name != '_Sidebar')
     readme.write_text(rows + '\n' + body, encoding='utf-8')
     monkeypatch.setattr('tests.test_wiki.README', readme)
     return readme

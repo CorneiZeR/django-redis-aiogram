@@ -1,7 +1,7 @@
 """Crash-safe consuming: a worker killed mid-send must not lose the message.
 
 The consumer moves each message to a processing list before sending and
-removes it afterwards; a new worker reclaims whatever a crashed one left
+removes it afterward; a new worker reclaims whatever a crashed one left
 behind. On servers without LMOVE it falls back to plain pops.
 """
 
@@ -717,7 +717,7 @@ def test_a_cancelled_send_is_not_acknowledged_on_the_synchronous_path():
     instance = TelegramBot()
     finished = []
 
-    class Cancelled:
+    class Canceled:
         async def send_message(self, **kwargs):
             raise asyncio.CancelledError
 
@@ -726,7 +726,7 @@ def test_a_cancelled_send_is_not_acknowledged_on_the_synchronous_path():
             async def close():
                 pass
 
-    instance._bot = Cancelled()
+    instance._bot = Canceled()
     try:
         with pytest.raises(asyncio.CancelledError):
             instance.send_raw('send_message', chat_id=1, text='x', on_complete=lambda: finished.append(True))
@@ -734,7 +734,7 @@ def test_a_cancelled_send_is_not_acknowledged_on_the_synchronous_path():
         instance._bot = None
         instance.close()
 
-    assert finished == [], 'a cancelled send was acknowledged'
+    assert finished == [], 'a canceled send was acknowledged'
 
 
 @override_settings(
@@ -882,34 +882,34 @@ def test_a_cancelled_send_does_not_end_the_consumer(redis_server, caplog):
     """`dispatch` catches Exception, and CancelledError is not one.
 
     The synchronous send path lets it out of `run_until_complete`, so it escaped
-    `run()` and ended the consumer for the life of the container — one cancelled
+    `run()` and ended the consumer for the life of the container — one canceled
     send and the worker stops delivering, quietly, with the queue still filling.
     """
-    cancelled = []
+    canceled = []
 
     def cancel_once(**kwargs):
-        cancelled.append(kwargs)
-        if len(cancelled) == 1:
+        canceled.append(kwargs)
+        if len(canceled) == 1:
             raise asyncio.CancelledError
 
     for chat_id in (1, 2):
         redis_server.rpush(QUEUE, payload(chat_id))
     delivery = Recording(handler=cancel_once)
-    delivery.handled = cancelled
+    delivery.handled = canceled
 
     with caplog.at_level('WARNING', logger=LOGGER):
         drain(delivery, expected_handled=2)
 
-    assert [item['chat_id'] for item in cancelled] == [1, 2], 'the consumer stopped after the cancellation'
+    assert [item['chat_id'] for item in canceled] == [1, 2], 'the consumer stopped after the cancellation'
     assert 'a queued send was cancelled' in caplog.text
-    assert redis_server.llen(PROCESSING) == 1, 'the cancelled message was acknowledged'
+    assert redis_server.llen(PROCESSING) == 1, 'the canceled message was acknowledged'
 
 
 @override_settings(TELEGRAM_BOT={'DELIVERY': 'blpop'})
-def test_an_unconfigured_project_gets_the_old_behaviour():
+def test_an_unconfigured_project_gets_the_old_behavior():
     """Both settings are new, and both default to what 3.0 already did.
 
-    Asserted through behaviour rather than by reading `DEFAULTS` back, because
+    Asserted through behavior rather than by reading `DEFAULTS` back, because
     the value is only interesting for what it does: `MAX_IN_FLIGHT` at 0 is no
     bound at all, and `REQUIRE_CRASH_SAFE` off means a Redis without `LMOVE`
     still starts. An upgrade must not quietly gate a deployment that was working,

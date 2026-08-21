@@ -8,7 +8,7 @@ without this package holding a lock of its own — and without ``__init__`` impo
 outside Django.
 
 Why it matters that they get the same one: each instance builds its own event loop and
-its own HTTP session, and ``loop_lock`` serialises access to *a* loop. Two bots means
+its own HTTP session, and ``loop_lock`` serializes access to *a* loop. Two bots means
 two loops, and the lock that exists to keep ``run_until_complete`` from being reentered
 would be guarding one of them while the other was entered.
 

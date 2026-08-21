@@ -44,7 +44,7 @@ DEFAULTS: dict[str, Any] = {
     'WORKER_NAME': '',
     # how long a blocking pop waits before re-checking the shutdown flag
     'BLPOP_TIMEOUT': 5,
-    # seconds close() gives in-flight sends to finish before cancelling them. A float,
+    # seconds close() gives in-flight sends to finish before canceling them. A float,
     # which is what makes `DJANGO_REDIS_AIOGRAM_DRAIN_TIMEOUT=0.5` readable: the
     # environment coerces on the default's type, and an int default sent a fraction to
     # the integer branch, where it raised out of apps.ready() and stopped every command

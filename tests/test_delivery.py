@@ -231,7 +231,7 @@ def test_concurrent_send_raw_from_web_threads(monkeypatch):
 
 
 @override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'FSM_STORAGE': 'memory', 'RATE_LIMIT': None})
-def test_sends_that_all_see_a_stopped_loop_are_serialised():
+def test_sends_that_all_see_a_stopped_loop_are_serialized():
     """The window the lock exists for.
 
     The test above cannot reach it: while one thread drives the loop the others

@@ -55,7 +55,7 @@ from django_redis_aiogram.throttling import RateLimiter, get_rate_limiter
 logger = logging.getLogger('django_redis_aiogram')
 
 #: how a scheduled send carries its correlation id, so shutdown can name what
-#: it cancelled without threading an argument through asyncio
+#: it canceled without threading an argument through asyncio
 TASK_PREFIX = 'tgbot:'
 
 #: the loop thread a web process starts, so a log line or a test can name it
@@ -123,7 +123,7 @@ def _completion(on_complete: Callable[[], None]) -> 'Callable[[asyncio.Task[None
     """
 
     def done(task: 'asyncio.Task[None]') -> None:
-        """Settle unless the task was cancelled, which is the one case that must not.
+        """Settle unless the task was canceled, which is the one case that must not.
 
         Cancellation says the task did not finish, and nothing about what Telegram saw:
         the request may already have been sent, or even acted on, when the cancel landed
@@ -176,7 +176,7 @@ def queueing(function: str, messages: list[tuple[uuid.UUID, dict[str, Any]]]) ->
 
     The one step that cannot be shared between a synchronous producer and an
     asynchronous one is the ``await`` — the language will not allow it. Everything
-    around it can be, and is: the serialisation, the key, and both event rows,
+    around it can be, and is: the serialization, the key, and both event rows,
     including the rule that a message lost on the way to Redis records a drop
     rather than letting silence imply it was queued. Resolving the serializer and
     the key sits outside that guard on purpose — a misconfigured ``SERIALIZER``
@@ -188,7 +188,7 @@ def queueing(function: str, messages: list[tuple[uuid.UUID, dict[str, Any]]]) ->
     neither can drift between the two paths, because neither path owns them.
 
     The two ways a message is lost here are **not** the same, and the ``stage`` on
-    the drop row is what tells them apart. ``serialising`` means the payload never
+    the drop row is what tells them apart. ``serializing`` means the payload never
     left this process, so re-sending it is safe. ``queueing`` means the write to
     Redis raised, and a variadic ``RPUSH`` that raised may still have been applied —
     the reply is what went missing — so re-sending may duplicate. A broadcast makes
@@ -217,7 +217,7 @@ def queueing(function: str, messages: list[tuple[uuid.UUID, dict[str, Any]]]) ->
             )
 
     try:
-        # guarded, not left to the caller: a payload that cannot be serialised
+        # guarded, not left to the caller: a payload that cannot be serialized
         # loses its message exactly as a refused write does, and for a chunk the
         # ids go with the exception — so these rows are the only record of which
         # messages were lost
@@ -241,7 +241,7 @@ def queueing(function: str, messages: list[tuple[uuid.UUID, dict[str, Any]]]) ->
         # nothing keeps the table and nothing listens, so there is no event to make
         return
     # two gates, not one: whether to record at all is a different question from
-    # whether to summarise the arguments, and describing them is the expensive
+    # whether to summarize the arguments, and describing them is the expensive
     # half. A metrics receiver counts sends; it does not read message bodies
     described = recorder.wants_payload
     for identifier, kwargs in messages:
@@ -376,7 +376,7 @@ class TelegramBot:
         self._dispatcher: Dispatcher | None = None
         self._router = Router()
         #: sends this bot scheduled, so shutdown drains its own work only
-        # the call behind each task, so shutdown can say what it cancelled
+        # the call behind each task, so shutdown can say what it canceled
         self._sends: dict[asyncio.Task[None], Outbound] = {}
         self._polling = False
         self._closing = False
@@ -531,7 +531,7 @@ class TelegramBot:
             if self._closing or loop.is_closed():
                 # decided under the same lock the shutdown snapshot is taken
                 # under, or an update submitted just after it would be neither
-                # waited for nor cancelled, and its request would never return.
+                # waited for nor canceled, and its request would never return.
                 #
                 # `is_closed()` as well, because `close()` puts `_closing` back to
                 # False in its finally: a request that captured the loop before the
@@ -562,7 +562,7 @@ class TelegramBot:
             # waiting outside the lock, so the next request is not held up by ours
             future.result()
         except (futures.CancelledError, asyncio.CancelledError) as cancelled:
-            # `_stop_runner` cancelled this one: no handler finished, so it is the
+            # `_stop_runner` canceled this one: no handler finished, so it is the
             # same refusal a request arriving mid-shutdown gets, and the view has
             # to answer it the same way. Left as a cancellation it reads as a
             # handler that failed — a 200 telling Telegram to forget an update
@@ -671,11 +671,11 @@ class TelegramBot:
         Before the teardown, not after: `close()` refuses outright on a running
         loop, so a bot that started a runner could never be closed.
 
-        Updates in flight are waited for first, and cancelled if they outlast the
+        Updates in flight are waited for first, and canceled if they outlast the
         drain. A request thread blocks on `future.result()` with no deadline, so
         stopping the loop under one would leave that thread waiting on a future
         nothing will ever finish — a web worker held for the life of the process.
-        Cancelling before the loop stops is what turns that into an exception the
+        Canceling before the loop stops is what turns that into an exception the
         request can answer with.
         """
         # under the guard `_ensure_loop_runs` registers a thread beneath, and
@@ -869,7 +869,7 @@ class TelegramBot:
 
         ``on_complete`` is called once the send has actually finished — sent,
         refused or given up on — and **not** called when the send is refused
-        before it starts or cancelled at shutdown. The consumer passes one so it
+        before it starts or canceled at shutdown. The consumer passes one so it
         can acknowledge the message then rather than now: this method returns as
         soon as the coroutine is *scheduled*, which is long before Telegram has
         seen anything.
@@ -1159,7 +1159,7 @@ class TelegramBot:
         loop: AbstractEventLoop,
         outbound: 'Outbound',
     ) -> 'asyncio.Task[None]':
-        """Create the task, named so shutdown can say which message it cancelled."""
+        """Create the task, named so shutdown can say which message it canceled."""
         return loop.create_task(coroutine, name=f'{TASK_PREFIX}{outbound.correlation_id.hex}')
 
     @staticmethod
@@ -1181,7 +1181,7 @@ class TelegramBot:
         )
 
     def _drain(self, timeout: float) -> None:
-        """Let scheduled sends finish, cancelling whatever outlasts the timeout."""
+        """Let scheduled sends finish, canceling whatever outlasts the timeout."""
         loop = self._loop
         if loop is None or loop.is_closed():
             return
@@ -1200,7 +1200,7 @@ class TelegramBot:
         finally:
             self._draining = False
 
-        # only this bot's sends: cancelling unrelated tasks on the loop is not
+        # only this bot's sends: canceling unrelated tasks on the loop is not
         # ours to do, and aiogram keeps its own there
         pending = [task for task in self._sends if not task.done()]
         if not pending:
@@ -1339,7 +1339,7 @@ class TelegramBot:
 
         Everything :meth:`send_many` says applies, and the reason to reach for this
         one is stronger than for :meth:`asend`: a fan-out writes once per chunk and
-        serialises every payload, so on a serving loop it blocks longer and more
+        serializes every payload, so on a serving loop it blocks longer and more
         often than a single send does.
         """
         writing = self._accept_bulk(function)
@@ -1363,7 +1363,7 @@ class TelegramBot:
     ) -> 'Iterator[list[tuple[uuid.UUID, dict[str, Any]]]]':
         """Group the chats into the batches one write covers.
 
-        Serialisation happens inside :func:`queueing`, one chunk at a time, which
+        Serialization happens inside :func:`queueing`, one chunk at a time, which
         is what keeps peak memory bounded: a ``BufferedInputFile`` payload times
         fifty thousand chats would otherwise all exist at once.
         """

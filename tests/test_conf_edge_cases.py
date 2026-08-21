@@ -108,7 +108,7 @@ def test_a_number_setting_reads_a_number_from_the_environment(monkeypatch, raw, 
 
 
 def test_a_number_setting_the_environment_cannot_read_is_refused(monkeypatch):
-    """The other direction: silently ignoring it would be worse than either behaviour."""
+    """The other direction: silently ignoring it would be worse than either behavior."""
     monkeypatch.setenv('DJANGO_REDIS_AIOGRAM_DRAIN_TIMEOUT', 'soon')
     conf.reset()
 

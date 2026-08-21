@@ -162,7 +162,7 @@ def test_a_receiver_gets_events_with_the_log_off(redis_server, collected):
 
 
 @override_settings(TELEGRAM_BOT=SETTINGS)
-def test_the_payload_is_not_summarised_for_a_receiver(redis_server, collected, monkeypatch):
+def test_the_payload_is_not_summarized_for_a_receiver(redis_server, collected, monkeypatch):
     """`describe()` is the expensive half of recording and no part of counting.
 
     Patched rather than inspected: asserting `detail is None` would also pass if
@@ -175,7 +175,7 @@ def test_the_payload_is_not_summarised_for_a_receiver(redis_server, collected, m
     TelegramBot().send_redis(chat_id=7, text='hi')
     recorder.flush(timeout=5)
 
-    assert called == [], 'the payload was summarised for a receiver that cannot use it'
+    assert called == [], 'the payload was summarized for a receiver that cannot use it'
     assert kinds(collected) == ['outbound.queued'], 'the event itself must still arrive'
     assert collected[0].detail is None
 
@@ -252,7 +252,7 @@ def test_an_update_reaches_a_receiver(collected):
 
     assert 'inbound.received' in kinds(collected), f'the receiver saw {kinds(collected)}'
     assert collected[0].update_id == 11
-    assert collected[0].detail is None, 'the update was summarised for a receiver'
+    assert collected[0].detail is None, 'the update was summarized for a receiver'
 
 
 @override_settings(TELEGRAM_BOT=SETTINGS)
@@ -482,11 +482,11 @@ def test_the_gap_row_reaches_a_receiver_even_when_the_kinds_exclude_it(redis_ser
 
 @override_settings(TELEGRAM_BOT=SETTINGS)
 def test_a_receiver_still_gets_the_detail_a_seam_measured_itself(redis_server, collected, monkeypatch):
-    """Only the *summarised arguments* are gated on the log, not all of `detail`.
+    """Only the *summarized arguments* are gated on the log, not all of `detail`.
 
     Claimed the other way round at first, and it was false: a send's `duration_ms`,
     a queueing failure's `stage` and a gap's `dropped` count are all measured by the
-    recording seam rather than summarised from a payload, and all reach a receiver
+    recording seam rather than summarized from a payload, and all reach a receiver
     with the log off. Pinned so the documentation cannot drift back.
     """
 

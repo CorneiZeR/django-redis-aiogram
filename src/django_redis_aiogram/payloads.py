@@ -4,8 +4,8 @@ Deliberately lossy, which is why it is not :func:`~django_redis_aiogram.serializ
 That one is lossless by contract: it base64s a whole ``BufferedInputFile``, so a
 photo send would arrive in the table as megabytes of base64.
 
-Order is fixed and load-bearing: summarise, then redact, then cap. Redaction runs
-over the summarised structure so it never walks an aiogram model, and before the
+Order is fixed and load-bearing: summarize, then redact, then cap. Redaction runs
+over the summarized structure so it never walks an aiogram model, and before the
 cap so a truncated preview cannot end halfway through a credential.
 
 No aiogram import: unknown values are rendered by class name through duck typing,
@@ -183,7 +183,7 @@ def _overflow(text: str, cap: int) -> dict[str, Any]:
 
 
 def describe(kwargs: dict[str, Any]) -> dict[str, Any]:
-    """Summarise, redact and cap one call's arguments. Never raises."""
+    """Summarize, redact and cap one call's arguments. Never raises."""
     try:
         level = detail_level()
         if level is PayloadDetail.NONE:

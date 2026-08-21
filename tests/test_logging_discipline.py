@@ -230,7 +230,7 @@ def test_the_walk_ignores_what_is_not_root_logging(source, tmp_path):
 @pytest.mark.parametrize(
     ('source', 'expected'), BOUND, ids=['positional', 'keyword', 'on an instance', 'imported getLogger']
 )
-def test_the_walk_recognises_the_package_logger_however_it_is_bound(source, expected, tmp_path):
+def test_the_walk_recognizes_the_package_logger_however_it_is_bound(source, expected, tmp_path):
     assert expected in walk(source, tmp_path).package_loggers, source
 
 

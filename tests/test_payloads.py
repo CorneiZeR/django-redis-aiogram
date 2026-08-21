@@ -177,7 +177,7 @@ def test_the_overflow_marker_obeys_the_cap_it_reports(cap):
 
 
 @override_settings(TELEGRAM_BOT={'EVENT_LOG_MAX_PAYLOAD_BYTES': 8192})
-def test_a_payload_that_cannot_be_serialised_says_so():
+def test_a_payload_that_cannot_be_serialized_says_so():
     """The net under everything else.
 
     `default=str` renders almost anything, so this branch needs a structure
@@ -191,7 +191,7 @@ def test_a_payload_that_cannot_be_serialised_says_so():
 
 
 @override_settings(TELEGRAM_BOT={'EVENT_LOG_MAX_PAYLOAD_BYTES': 8192})
-def test_an_unknown_object_never_reaches_the_serialiser_through_describe():
+def test_an_unknown_object_never_reaches_the_serializer_through_describe():
     """summarize renders it by class name first, so a row holds a readable
     marker rather than an object's repr with a memory address in it."""
     described = describe({'value': NotSerializable()})
@@ -205,8 +205,8 @@ def test_the_none_level_stores_nothing():
 
 
 @override_settings(TELEGRAM_BOT={'EVENT_LOG_PAYLOAD': 'full', 'TOKEN': TOKEN})
-def test_describe_summarises_then_redacts_then_caps():
-    """The order is load-bearing: redaction runs over the summarised structure
+def test_describe_summarizes_then_redacts_then_caps():
+    """The order is load-bearing: redaction runs over the summarized structure
     so it never walks an aiogram model, and before the cap so a truncated
     preview cannot end halfway through a credential."""
     described = describe({'text': f'url is /bot{TOKEN}/x', 'token': 'anything'})
@@ -233,7 +233,7 @@ def test_describe_never_raises(monkeypatch):
     """
 
     def explode(*_args, **_kwargs):
-        msg = 'the summariser itself broke'
+        msg = 'the summarizer itself broke'
         raise RuntimeError(msg)
 
     monkeypatch.setattr('django_redis_aiogram.payloads.summarize', explode)

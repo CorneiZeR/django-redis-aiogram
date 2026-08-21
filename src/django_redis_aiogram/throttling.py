@@ -43,7 +43,7 @@ EVICTION_CANDIDATES = 8
 
 
 class TokenBucket:
-    """A token bucket by its behaviour, GCRA by its implementation.
+    """A token bucket by its behavior, GCRA by its implementation.
 
     The name is kept because that is what the limits are described as, but nothing
     counts tokens. Each caller claims the next free slot under the lock and sleeps

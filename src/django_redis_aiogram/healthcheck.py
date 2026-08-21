@@ -352,7 +352,7 @@ def _names_the_settings_module(error: ImportError) -> bool:
 
     ``ModuleNotFoundError`` carries the dotted name it could not find, and a missing
     parent package reports the parent — so ``core.settings`` with no ``core`` on the path
-    is recognised too.
+    is recognized too.
     """
     missing = getattr(error, 'name', None)
     configured = os.environ.get('DJANGO_SETTINGS_MODULE')

@@ -42,12 +42,12 @@ class Sent:
     message_id = 4321
 
 
-def a_bot(behaviour):
+def a_bot(behavior):
     """A stand-in for the aiogram Bot, with a session close() that does nothing."""
 
     class Fake:
         async def send_message(self, **kwargs):
-            return behaviour(kwargs)
+            return behavior(kwargs)
 
         class session:
             @staticmethod
@@ -297,7 +297,7 @@ def test_only_a_real_integer_chat_id_is_stored(value, expected):
 
 
 def test_the_id_survives_a_round_trip_through_a_task_name():
-    """How shutdown says which message it cancelled, without threading an
+    """How shutdown says which message it canceled, without threading an
     argument through asyncio."""
     identifier = new_correlation_id()
 

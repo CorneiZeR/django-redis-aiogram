@@ -13,7 +13,7 @@ Two aiogram details make plain ``model_dump(mode='json')`` insufficient:
 * Every model is tagged with its concrete class name, so decoding never has to
   infer the type from a union.
 
-Each type that needs a tag is a :class:`TypeCodec` in ``_CODECS``: it recognises
+Each type that needs a tag is a :class:`TypeCodec` in ``_CODECS``: it recognizes
 its own values, writes them as a tagged JSON object and reads them back.
 :func:`encode` walks the registry before falling back to the structural cases
 (enums, mappings, sequences); :func:`decode` matches a decoded object on the tag.
@@ -151,7 +151,7 @@ CodecValue = TypeVar('CodecValue')
 
 
 class TypeCodec(ABC, Generic[CodecValue]):
-    """One tagged type: how to recognise it, how to write it, how to read it."""
+    """One tagged type: how to recognize it, how to write it, how to read it."""
 
     tag: ClassVar[SerializationTag]
 

@@ -49,7 +49,7 @@ def test_state_written_before_a_restart_is_there_after(server, redis_url):
 
 
 def test_memory_storage_loses_it_which_is_why_redis_is_the_default(server, redis_url):
-    """The 1.x behaviour, kept as an option and shown to be the wrong default."""
+    """The 1.x behavior, kept as an option and shown to be the wrong default."""
     with override_settings(TELEGRAM_BOT={'TOKEN': '42:x', 'REDIS_URL': redis_url, 'FSM_STORAGE': 'memory'}):
         before = TelegramBot()
         assert isinstance(before.dispatcher.storage, MemoryStorage)

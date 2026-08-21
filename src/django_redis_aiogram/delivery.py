@@ -11,7 +11,7 @@ processing list while it is being sent and removed once the send has actually
 finished, so a worker killed mid-send leaves it behind to be reclaimed on the
 next start. That makes delivery at-least-once — after a crash a message may be
 sent twice. Servers older than Redis 6.2 lack ``LMOVE``; there the consumer
-falls back to plain pops, which is the 1.x at-most-once behaviour, and says so
+falls back to plain pops, which is the 1.x at-most-once behavior, and says so
 in the log.
 
 "Once the send has finished" is doing real work in that sentence. Until 3.1.0 the
@@ -94,7 +94,7 @@ class Delivery(ABC):
         self._finished: queue.SimpleQueue[bytes | str] = queue.SimpleQueue()
         self._in_flight = 0
         # asked once: a handler that cannot take the callback is acknowledged the
-        # moment it returns, which is the behaviour every existing caller has
+        # moment it returns, which is the behavior every existing caller has
         self._defers = defers_completion(handler)
 
     @property
@@ -262,7 +262,7 @@ class Delivery(ABC):
         The bound is on the in-flight list as much as on memory: acknowledging is
         an ``LREM``, which scans that list, so letting a backlog accumulate there
         turns draining it into quadratic work. Zero, the default, is the
-        behaviour that shipped before deferred acknowledgement existed.
+        behavior that shipped before deferred acknowledgement existed.
 
         The wait keeps writing the heartbeat, for the same reason ``run()`` caps
         the blocking pop at ``HEARTBEAT_INTERVAL``: a worker at its limit is busy,
@@ -342,7 +342,7 @@ class Delivery(ABC):
         Returns whether the message should be acknowledged. Four paths say no, in
         two kinds. Three are refusals that leave a valid payload for somebody else:
         a pickle the configuration refuses, an envelope from a newer version, and a
-        send cancelled at shutdown — acknowledging any of them would destroy a
+        send canceled at shutdown — acknowledging any of them would destroy a
         message over a setting, a deploy order or a restart. The fourth is
         :meth:`_hand_over` returning ``not deferring``, which is not a refusal: a
         handler that took ``on_complete`` acknowledges the message itself once the

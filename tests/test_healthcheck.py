@@ -543,7 +543,7 @@ def test_a_disabled_process_is_not_unhealthy_and_is_not_reported_as_healthy():
     call_command('tgbot_healthcheck', stdout=out, force_color=True)
 
     assert out.getvalue().strip() == report.message, repr(out.getvalue())
-    assert '\x1b[' not in out.getvalue(), 'the disabled line was coloured as a success'
+    assert '\x1b[' not in out.getvalue(), 'the disabled line was colored as a success'
 
 
 @override_settings(TELEGRAM_BOT=SETTINGS)
@@ -648,7 +648,7 @@ def test_a_probe_with_a_mistyped_settings_module_says_so_instead_of_raising(monk
 
 
 def test_a_dependency_the_settings_module_imports_keeps_its_traceback(monkeypatch):
-    """Our own failure is ours to summarise into one line. This one is not.
+    """Our own failure is ours to summarize into one line. This one is not.
 
     A settings module that imports something uninstalled raises `ModuleNotFoundError`
     too, and flattening it would report `cannot read the settings: No module named 'yaml'`

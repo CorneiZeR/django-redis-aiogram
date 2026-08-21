@@ -90,7 +90,7 @@ def test_a_count_that_stopped_at_the_cap_says_so(client, monkeypatch):
     Silently, that is the defect the paginator exists to avoid, moved one step
     along: the number would be wrong and nothing would show it.
 
-    The cap is lowered rather than ten thousand rows inserted — the behaviour
+    The cap is lowered rather than ten thousand rows inserted — the behavior
     under test is the comparison, not the number.
     """
     monkeypatch.setattr(admin_module, 'COUNT_LIMIT', 2)

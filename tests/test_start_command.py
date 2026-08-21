@@ -195,7 +195,7 @@ def test_a_disabled_container_idling_still_unwinds_like_the_enabled_path(monkeyp
     released.set()  # so the wait returns at once and the finally runs here
     monkeypatch.setattr(Command, 'idle_event', released)
     before = signal.getsignal(signal.SIGTERM)
-    # the installs are recorded, because comparing the handler afterwards proves nothing on
+    # the installs are recorded, because comparing the handler afterward proves nothing on
     # its own: it also matches when nothing was ever installed, which is the state a
     # container idling without a handler is in — `docker stop` kills it and it exits 143
     installed = []
