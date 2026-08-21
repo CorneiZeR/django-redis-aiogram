@@ -18,12 +18,16 @@ worker is shutting down. It does not delay delivery.
 
 It is also capped, at whichever of two bounds is smaller: one second inside
 `REDIS_TIMEOUT`, the deadline on any single Redis call, and `HEARTBEAT_INTERVAL`,
-because a worker that popped for longer than that would let its own heartbeat key
-expire and look dead. A pop asked to wait longer than the socket will wait for an
-answer turns every idle round into an error; one asked to outlast the heartbeat
-gets the worker declared gone. Check `W004` says so before deployment, and its
-hint names the bound that is actually binding — raising `REDIS_TIMEOUT` does
-nothing when `HEARTBEAT_INTERVAL` is the smaller of the two.
+which is how often the consumer refreshes the key that says it is alive. A pop
+asked to wait longer than the socket will wait for an answer turns every idle
+round into an error. A pop that outlasts the refresh interval does not lose the
+key — it survives three intervals — but it does let the heartbeat go stale, and a
+probe reading it sees a worker that has not reported recently.
+
+Configure a value above the ceiling and the pop is silently shortened to it;
+`W004` says so before deployment, and its hint names the bound that binds —
+raising `REDIS_TIMEOUT` does nothing when `HEARTBEAT_INTERVAL` is the smaller of
+the two. A value *equal* to the ceiling is neither warned about nor shortened.
 
 `DELIVERY` names the consumer and `'blpop'` is its only value. The `keyspace`
 consumer 1.x used — write a key with a TTL, react to its expiry event — was

@@ -282,6 +282,12 @@ def test_every_structured_field_is_documented():
                     and isinstance(keyword.value.func, ast.Name)
                     and keyword.value.func.id == 'dict'
                 ):
+                    # `dict(mapping)` and `dict(mapping, tg_x=1)` carry keys this scan
+                    # cannot see, and reading only the keywords would let them through
+                    assert not keyword.value.args, (
+                        f'{path.name}:{keyword.value.lineno}: a positional mapping inside '
+                        f'`extra=dict(...)` hides the fields it logs from this scan'
+                    )
                     for entry in keyword.value.keywords:
                         assert entry.arg, f'{path.name}: a `**` spread inside an `extra=dict(...)`'
                         emitted.add(entry.arg)

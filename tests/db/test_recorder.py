@@ -487,15 +487,24 @@ def test_a_receiver_that_stops_the_log_does_not_strand_the_writer(monkeypatch):
     closed = []
     monkeypatch.setattr(EventRecorder, '_close_connections', staticmethod(lambda: closed.append(True)))
     recorder = EventRecorder()
+    # the receiver waits, so the handle can be read before `stop()` clears it: otherwise
+    # the writer can stop and detach itself between `record()` and the read below, and the
+    # test fails on a correct implementation
+    reached = threading.Event()
+    proceed = threading.Event()
 
     def stop_from_the_writer(sender, **kwargs):
+        reached.set()
+        proceed.wait(10)
         recorder.stop(timeout=0.1)
 
     events_recorded.connect(stop_from_the_writer, dispatch_uid='stop-from-the-writer')
     try:
         recorder.record(an_event(chat_id=44))
+        assert reached.wait(10), 'the receiver never ran, so nothing is on trial'
         writer = recorder._thread
         assert writer is not None, 'no writer was started, so nothing is on trial'
+        proceed.set()
         writer.join(10)
 
         assert not writer.is_alive(), 'the writer outlived the stop that came from inside it'

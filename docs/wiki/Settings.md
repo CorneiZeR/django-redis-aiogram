@@ -154,7 +154,7 @@ entry naming a retired one is dead but harmless.
 | -- | ------- |
 | `W001` / `W002` | `TOKEN` / `REDIS_URL` empty while the bot is enabled |
 | `W003` | `TELEGRAM_BOT` contains unknown keys |
-| `W004` | `BLPOP_TIMEOUT` is at or above the ceiling the consumer actually applies — `min(HEARTBEAT_INTERVAL, REDIS_TIMEOUT - 1)` — so the pop runs shorter than configured. The hint names whichever of the two is binding |
+| `W004` | `BLPOP_TIMEOUT` is **above** the ceiling the consumer applies — `min(HEARTBEAT_INTERVAL, REDIS_TIMEOUT - 1)` — so the pop is silently shortened to it. Equal to the ceiling is not warned about and is not shortened. The hint names whichever of the two binds |
 | `E001`–`E003`, `E017` | a boolean setting holds something that cannot be read as true or false. `ENABLED` and `AUTODISCOVER` are read while the app loads, so in practice those two refuse the boot with the same message before `check` runs at all |
 | `E004`–`E007`, `E009`–`E011` | a string setting is wrong, or not one of the allowed values |
 | `E012`, `E014` | an integer setting is wrong or below its minimum |
