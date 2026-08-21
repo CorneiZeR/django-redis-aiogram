@@ -242,14 +242,21 @@ def test_the_walk_refuses_a_logger_that_is_not_ours(source, tmp_path):
     assert [name for _, name in use.logger_names if name != PACKAGE_LOGGER], source
 
 
-def _is_logging_call(node: ast.Call) -> bool:
-    """A call this scan judges: `logger.warning(...)` and its siblings.
+def _is_logging_call(node: ast.Call, receivers: 'set[str]') -> bool:
+    """A call this scan judges: `logger.warning(...)` on a name that holds a logger.
 
-    From `LEVELS`, the same set the rest of this file uses, rather than a second list —
-    mine left out `warn` and `fatal`, which `logging` still accepts, so
+    Levels come from `LEVELS`, the same set the rest of this file uses, rather than a
+    second list — mine left out `warn` and `fatal`, which `logging` still accepts, so
     `logger.fatal(msg, **{'extra': ...})` was judged by nothing.
+
+    The *receiver* matters as much as the level: `handler.info('x', extra={'tg_x': 1})`
+    has the shape of a logging call and logs nothing, so counting it would fail the
+    documentation check over a field nobody emits. `receivers` comes from
+    :class:`LoggingUse`, which already tracks which names hold this package's logger.
     """
-    return isinstance(node.func, ast.Attribute) and node.func.attr in LEVELS
+    if not isinstance(node.func, ast.Attribute) or node.func.attr not in LEVELS:
+        return False
+    return isinstance(node.func.value, ast.Name) and node.func.value.id in receivers
 
 
 def _keys_of(mapping: ast.expr, where: str) -> set[str]:
@@ -292,13 +299,22 @@ def _extra_from_spread(spread: ast.expr, where: str) -> set[str]:
     return keys
 
 
-def fields_logged_in(source: str, name: str) -> set[str]:
-    """Every `extra=` key one module logs, refusing any shape it cannot read."""
+def fields_logged_in(source: str, name: str, receivers: 'set[str] | None' = None) -> set[str]:
+    """Every `extra=` key one module logs, refusing any shape it cannot read.
+
+    `receivers` defaults to the names this module binds a logger to, which is what makes
+    the scan ignore a `handler.info(...)` that happens to share the shape.
+    """
+    tree = ast.parse(source)
+    if receivers is None:
+        use = LoggingUse()
+        use.visit(tree)
+        receivers = use.package_loggers | use.logging_variables
     fields: set[str] = set()
-    for node in ast.walk(ast.parse(source)):
+    for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
-        if not _is_logging_call(node):
+        if not _is_logging_call(node, receivers):
             # `extra=` is only a log field on a logging call: `handler(extra={'tg_x': 1})`
             # is somebody's keyword argument, and judging it would fail this test over a
             # name that is never logged
@@ -353,6 +369,11 @@ def test_every_structured_field_is_documented():
         ("logger.info('x', **{'extra': {'tg_d': 1}, 'stacklevel': 2})", {'tg_d'}),
         ('self.handler(**call)', set()),
         ("handler(extra={'tg_value': 1})", set()),
+        # the shape of a logging call on something that is not a logger: `handler.info`
+        # logs nothing, so counting its `extra` would fail the documentation check over a
+        # field nobody emits
+        ("handler.info('x', extra={'tg_unrelated': 1})", set()),
+        ("self.logger.info('x', extra={'tg_attribute': 1})", set()),
         ("logger.fatal('x', **{'extra': {'tg_f': 1}})", {'tg_f'}),
         ("logger.warn('x', extra={'tg_w': 1})", {'tg_w'}),
     ],
@@ -364,7 +385,7 @@ def test_the_field_scan_reads_every_shape_it_should(source, expected):
     name, so a loop matching `arg == 'extra'` walks straight past it. `**call` on
     something that is not a logging call stays allowed, because that is ordinary code.
     """
-    assert fields_logged_in(source, 'probe.py') == expected
+    assert fields_logged_in(source, 'probe.py', receivers={'logger'}) == expected
 
 
 @pytest.mark.parametrize(
@@ -384,4 +405,4 @@ def test_the_field_scan_refuses_what_it_cannot_read(source, refusal):
     rather than by this suite — so the refusals are pinned rather than trusted.
     """
     with pytest.raises(AssertionError, match=refusal):
-        fields_logged_in(source, 'probe.py')
+        fields_logged_in(source, 'probe.py', receivers={'logger'})
