@@ -1,6 +1,6 @@
 # Changelog
 
-## 3.1.0 - unreleased
+## 3.1.0 - 2026-08-21
 
 **At-least-once delivery is true now, and was not before.** A message is
 acknowledged when its send finishes rather than when it is scheduled, so

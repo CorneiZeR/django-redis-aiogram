@@ -142,6 +142,21 @@ HISTORY_BEGINS = '## 3.0.0 - 2026-08-09'
 HISTORICAL_SPELLINGS = ('`VACUUM` afterwards', 'about its behaviour changed', 'for the old behaviour.')
 
 
+def test_the_newest_changelog_entry_is_this_version_and_is_dated():
+    """A release shipped as `unreleased` reads as a nightly to whoever installs it.
+
+    Two ways to get this wrong, and one test for both: publishing with the heading still
+    saying `unreleased`, and bumping `__version__` without writing the entry. Read from
+    `__version__` so the next release inherits the demand rather than the date.
+    """
+    from django_redis_aiogram import __version__
+
+    heading = next(line for line in CHANGELOG.read_text(encoding='utf-8').splitlines() if line.startswith('## '))
+
+    assert heading.startswith(f'## {__version__} - '), f'the newest entry is not {__version__}: {heading!r}'
+    assert re.fullmatch(r'## \S+ - \d{4}-\d{2}-\d{2}', heading), f'not dated: {heading!r}'
+
+
 def test_the_released_entries_keep_the_words_they_shipped_with():
     """A changelog entry is a record of what was said, not prose to be improved.
 
