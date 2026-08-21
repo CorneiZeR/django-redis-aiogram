@@ -80,6 +80,12 @@ path = "src/django_redis_aiogram/__init__.py"
 packages = ["src/django_redis_aiogram"]
 
 [tool.hatch.build.targets.sdist]
+# hatchling searches for licence files by name, at any depth, whatever the anchoring
+# in `license-files` — so a contributor with a `venv/` or a vendored dependency ships
+# their LICENSE files inside ours. Measured: an untracked `_probe_dir/LICENSE` lands in
+# the sdist while `_probe_dir/NOTES.txt` and `_probe_dir/COPYING` do not. CI builds from
+# a clean checkout and never saw it. `License-File` metadata still names only ours
+exclude = ["*/LICENSE"]
 # docs/ and the contributor files travel with the sdist: a distribution nobody
 # can review or rebuild from itself is only half a distribution
 include = [

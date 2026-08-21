@@ -104,6 +104,12 @@ the shutdown recipe.
 | `bot.inflight_depth(worker=None)` | messages one worker is part-way through sending |
 | `await bot.aqueue_depth()` / `await bot.ainflight_depth(...)` | the same read, without holding the loop |
 
+`aget_redis()` and `aclose_redis()` in `django_redis_aiogram.redis` are **not** part
+of this surface, deliberately: the async client is one per running loop, and its
+lifetime belongs to `bot.aclose()` rather than to a caller. Reach the queue through
+the four methods above; if you hold a client of your own, you own closing it on the
+loop that made it.
+
 These four are reads rather than sends, so `ENABLED=0` does not turn them into
 no-ops the way it does every send: they still connect, and without `REDIS_URL` they
 raise `ImproperlyConfigured` rather than answering zero. A monitor that runs in a

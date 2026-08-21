@@ -53,6 +53,10 @@ for expected in (
     'django_redis_aiogram/management/commands/start_tgbot.py',
     'django_redis_aiogram/migrations/__init__.py',
     'django_redis_aiogram/migrations/0001_initial.py',
+    # every migration, not just the first: 3.1.0 ships 0002 and the Upgrading page
+    # tells operators to run it, so a wheel that dropped it would break the upgrade
+    # it documents
+    'django_redis_aiogram/migrations/0002_kind_id_index.py',
 ):
     assert expected in names, f'{expected} missing from the wheel'
 # 3.0 removed the 1.x package name; packaging it again would silently recreate
@@ -102,6 +106,40 @@ grep -q 'redis is unreachable' "$work/probe.err" \
 [ "$probe_status" = 1 ] || { echo "    expected exit 1 from an unreachable Redis, got $probe_status"; exit 1; }
 echo "    python -m django_redis_aiogram.healthcheck refused an unreachable Redis with exit 1"
 
+# and the path a healthy container takes, which is the one compose depends on: a probe
+# that only ever answered "unreachable" would pass the check above while returning
+# non-zero for every healthy container, and nothing here would notice
+if [ -n "${DJANGO_REDIS_AIOGRAM_TEST_REDIS_URL:-}" ]; then
+    # a reachable server is not a healthy bot: the probe also wants a heartbeat, which is
+    # what a running consumer writes. Written here by hand, because starting a consumer
+    # would need a Telegram token — and what is under test is the probe's success path,
+    # not the consumer's
+    DJANGO_REDIS_AIOGRAM_REDIS_URL="$DJANGO_REDIS_AIOGRAM_TEST_REDIS_URL" \
+        "$work/venv/bin/python" - <<PROBE
+import time
+
+import redis
+
+# the same write the consumer makes: an epoch second as text, with a TTL. The probe
+# reads it as a timestamp, so a placeholder value reads as a worker last seen in 1970
+client = redis.Redis.from_url("$DJANGO_REDIS_AIOGRAM_TEST_REDIS_URL")
+client.set('TELEGRAM_BOT_MESSAGE:heartbeat:smoke', str(int(time.time())), ex=60)
+PROBE
+    DJANGO_SETTINGS_MODULE=settings DJANGO_REDIS_AIOGRAM_REDIS_URL="$DJANGO_REDIS_AIOGRAM_TEST_REDIS_URL" \
+        DJANGO_REDIS_AIOGRAM_WORKER_NAME=smoke \
+        "$work/venv/bin/python" -m django_redis_aiogram.healthcheck > "$work/ok.out" 2> "$work/ok.err" \
+        && healthy_status=0 || healthy_status=$?
+    [ "$healthy_status" = 0 ] || {
+        echo "    a reachable Redis still gave exit $healthy_status:"
+        sed 's/^/      /' "$work/ok.err"
+        exit 1
+    }
+    grep -q . "$work/ok.out" || { echo '    the healthy probe printed nothing on stdout'; exit 1; }
+    echo "    and answered a reachable Redis with exit 0 and a line on stdout"
+else
+    echo "    (set DJANGO_REDIS_AIOGRAM_TEST_REDIS_URL to check the success path too)"
+fi
+
 echo "--- the 1.x package name is gone from the installed environment"
 "$work/venv/bin/python" - <<'PY'
 import importlib.util
@@ -123,6 +161,8 @@ echo "--- types are visible to a consumer"
 cat > uses_it.py <<'PY'
 # typing.assert_type is 3.11 and up, and this script runs on whatever python a
 # contributor has. mypy installs typing_extensions itself, so this adds nothing
+import uuid
+
 from typing_extensions import assert_type
 
 from redis import Redis
@@ -131,6 +171,15 @@ from django_redis_aiogram import bot, redis_conn
 
 def notify(chat_id: int) -> None:
     bot.send(chat_id=chat_id, text='hi')
+
+async def notify_from_async(chat_id: int) -> None:
+    # 3.1.0's own surface, checked against the installed package rather than the
+    # checkout: `asend` returns the correlation id, `aqueue_depth` an int, and
+    # `close` takes the drain budget as a float
+    identifier = await bot.asend(chat_id=chat_id, text='hi')
+    assert_type(identifier, uuid.UUID)
+    assert_type(await bot.aqueue_depth(), int)
+    bot.close(drain_timeout=0.5)
 
 # redis_conn forwards through __getattr__, so it resolved to Any while
 # get_redis() did not. Nothing is called here: this is the installed package's
