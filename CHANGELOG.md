@@ -335,7 +335,7 @@ them, so it is not one per message.
 
 - **`python -m django_redis_aiogram.healthcheck`**, and `--stranded` / `--guarantee` on
   it, so a container probe can answer without booting Django. See the `### Fixed` entry
-  below for why the management command could not be used in a healthcheck at all.
+  above for why the management command could not be used in a healthcheck at all.
 
 - **`await bot.asend(...)`**, and `asend_redis`, for code already on an event
   loop. `send()` writes to a socket on the calling thread, which under ASGI is
