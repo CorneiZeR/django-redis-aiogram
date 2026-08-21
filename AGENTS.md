@@ -81,7 +81,9 @@ Packaging-only work does not need the Redis suite, and vice versa.
   validates credentials goes behind a property or a function. This is the defect
   2.0 existed to fix; re-introducing it breaks every consumer's test suite.
 - **Importing the package stays cheap.** `__init__` resolves its exports lazily
-  (PEP 562) so `import django_redis_aiogram` costs ~1 ms, and a disabled Django
+  (PEP 562) so `import django_redis_aiogram` costs about 0.17 ms — it was ~1.4 ms
+  before 3.1.0, and the changelog's 0.134 ms is the same measurement on another
+  machine — and a disabled Django
   boot never loads aiogram (~900 ms). `tests/test_lazy_init.py` pins both in
   subprocesses; an eager import anywhere on the boot path fails them.
 - **Every change carries a test, and the test must fail without the change.**

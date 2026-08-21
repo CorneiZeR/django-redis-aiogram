@@ -161,10 +161,12 @@ class TelegramEventAdmin(ModelAdminBase):
     def get_queryset(self, request: HttpRequest) -> QuerySet[TelegramEvent]:
         """Read from the alias the writer writes to, router installed or not.
 
-        The two wide columns are left behind. Between them they are most of what
-        a row weighs — about 1.4 MB per fifty-row page — and the changelist
-        renders neither, so they were fetched to be discarded, including for a
-        user `get_fields` withholds them from. :meth:`get_object` asks for them
+        The two wide columns are left behind. Between them they are most of what a
+        row weighs — about 1.4 MB per fifty-row page under ``EVENT_LOG_PAYLOAD:
+        'full'`` with long tracebacks, and much less on the default ``'summary'``
+        with its 8 KiB cap — and the changelist renders neither, so they were
+        fetched to be discarded, including for a user `get_fields` withholds them
+        from. :meth:`get_object` asks for them
         back on the one page that shows them.
         """
         return super().get_queryset(request).using(log_alias()).defer(*PAYLOAD_COLUMNS)

@@ -339,11 +339,14 @@ class Delivery(ABC):
         A bad payload is one message's problem, so everything short of a kill is
         logged and dropped: the consumer has to survive it to deliver the rest.
 
-        Returns whether the message should be acknowledged. Two cases say no: a
-        pickle the configuration refuses, and an envelope from a newer version.
-        Both are valid payloads somebody else can deliver, so they stay in
-        flight — acknowledging would destroy them over a setting or a deploy
-        order.
+        Returns whether the message should be acknowledged. Four paths say no, in
+        two kinds. Three are refusals that leave a valid payload for somebody else:
+        a pickle the configuration refuses, an envelope from a newer version, and a
+        send cancelled at shutdown — acknowledging any of them would destroy a
+        message over a setting, a deploy order or a restart. The fourth is
+        :meth:`_hand_over` returning ``not deferring``, which is not a refusal: a
+        handler that took ``on_complete`` acknowledges the message itself once the
+        send has finished, which is what makes at-least-once true.
         """
         if handle is None:
             handle = raw

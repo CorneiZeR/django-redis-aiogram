@@ -132,11 +132,16 @@ the in-flight list — and `False` means it does not, leaving the message there
 for a later run to reclaim. Withholding the acknowledgement only saves the
 message where there *is* an in-flight list: without `LMOVE` the message was
 already popped before it was refused, so `False` and `True` come to the same
-thing and it is gone. Three cases return `False` today. A pickled payload
-refused because `ALLOW_PICKLE` is off, which is the one failure a change of
-configuration can undo; a handler that accepted `on_complete`, where the
-acknowledgement is not withheld but deferred to the send; and a send canceled
-rather than failed, which reached nothing and is left for a reclaim. Everything
+thing and it is gone.
+
+`False` comes back for four reasons, in two kinds. Three leave the message for
+somebody else: a pickled payload refused because `ALLOW_PICKLE` is off, which is
+the one failure a change of configuration can undo; an envelope written by a
+**newer version than this consumer understands**, which is the deploy-order case —
+roll the consumers first and it drains; and a send canceled rather than failed,
+which reached nothing. The fourth is not a refusal at all: a handler that accepted
+`on_complete` defers the acknowledgement to the send, which is what makes
+at-least-once true. Everything
 else — undecodable bytes, a method that is not Telegram API, a handler that
 raised before it scheduled anything — returns `True`, because redelivering it
 would only fail again.

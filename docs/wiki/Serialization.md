@@ -122,7 +122,7 @@ A fixed correlation id and timestamp, so the payload is byte-stable between runs
 
 | | |
 | --- | --- |
-| `serializer.dumps(payload)`, serializer bound | **0.91 µs** |
+| `serializer.dumps(payload)`, serializer bound | **0.98 µs** |
 | `json.dumps(payload)` — same bytes | 0.83 µs |
 | `get_serializer().dumps(payload)` — lookup included | 1.00 µs |
 | `json.dumps(payload, separators=(',', ':'))` — 190 bytes, different output | 1.01 µs |
@@ -134,7 +134,8 @@ per write rather than once per message — worth separating, because it is the s
 as the overhead and easy to attribute to the wrong thing.
 
 A faster library has to beat 0.08 µs *plus* the 0.83 µs underneath it — roughly a
-microsecond in total, against a Redis round trip measured at 14 µs and a Telegram call
+microsecond in total, against a Redis round trip measured at 14 µs on Linux (105 µs on
+macOS, so treat it as an order of magnitude) and a Telegram call
 in tens of milliseconds. `orjson` would also change what is representable, since it
 has its own rules about `dict` keys and subclasses while the tagging here depends on
 `default` being called for exactly the types it registers.

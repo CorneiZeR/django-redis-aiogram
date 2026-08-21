@@ -10,8 +10,8 @@ from django_redis_aiogram import bot
 does appears on first use — so importing it anywhere is safe, including in a
 process that never talks to Telegram.
 
-`import django_redis_aiogram` costs about a millisecond, because the package
-resolves its exports on attribute access. Naming `bot` is what loads aiogram and
+`import django_redis_aiogram` costs about 0.17 ms, because the package resolves its
+exports on attribute access — it was roughly a millisecond and a half before 3.1.0. Naming `bot` is what loads aiogram and
 the pydantic stack under it (~900 ms), so `from django_redis_aiogram import bot`
 pays that once, at the moment of import. Put it in the modules that send —
 router modules, the views and tasks that call `bot.send()` — and a process that

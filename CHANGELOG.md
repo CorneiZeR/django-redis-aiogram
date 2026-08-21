@@ -238,8 +238,10 @@ them, so it is not one per message.
   window* query loses its range column. `drai_event_recent` still covers a time
   window without a kind.
 - The changelist stops fetching `error` and `detail`. It renders neither, and
-  between them they are most of what a row weighs — about 1.4 MB per fifty-row
-  page, fetched even for a reader the payload permission withholds them from.
+  between them they are most of what a row weighs. Under `EVENT_LOG_PAYLOAD: 'full'`
+  with long tracebacks that is about 1.4 MB per fifty-row page; on the default,
+  `'summary'` with its 8 KiB cap, far less — either way fetched to be discarded, and
+  fetched even for a reader the payload permission withholds them from.
   The detail page asks for them back, and only for a reader allowed to see them.
 - Only indexed columns are sortable in the admin. One click on the `function`,
   `worker` or `error_code` header was a full sort of a table sized by traffic.
@@ -466,9 +468,11 @@ them, so it is not one per message.
   shared between receivers, so treat it as read-only.
 
   `Event`'s field names are pinned in `tests/test_public_surface.py`, which makes
-  them public API. Importing the seam pulls neither aiogram nor the ORM: 0.356 ms
-  on top of a process that has already imported Django, of which `django.dispatch`
-  is 0.150 ms. And a process that has receivers but no table no longer imports
+  them public API. Importing the seam pulls neither aiogram nor the ORM: **0.15 ms**
+  on top of a process that already has `django.dispatch`, which every Django process
+  has by the time settings are read. From a bare interpreter it is 16 ms, almost all
+  of it `django.dispatch` pulling `asgiref` — which is why the test asserts what gets
+  imported rather than how long it takes. And a process that has receivers but no table no longer imports
   `eventlog` — and so `django.db` — to close a connection it never opened.
   **Event log** has the recipe, including the two honest notes about
   `prometheus_client` and about which container has to run the exporter.
@@ -486,7 +490,11 @@ them, so it is not one per message.
 - **Encoding a queued call takes one pass instead of two.** `encode()` rebuilt
   every container and `json.dumps` then walked the copy. A `JSONEncoder` that
   tags as it writes produces the same bytes from one walk: a plain send 2.17 →
-  0.58 µs, an envelope 4.12 → 0.84 µs, a thirty-button keyboard **53.3 → 6.1 µs**.
+  0.58 µs, an envelope 4.12 → 0.98 µs, a thirty-button keyboard of **plain dicts**
+  53.3 → 6.0 µs. Built from `InlineKeyboardButton` objects, which is how every
+  keyboard on **Sending messages** is built, the same markup costs 235 µs — the
+  encoder still walks each model through the recursive path, and that is where the
+  time goes rather than in the JSON.
   A payload built from aiogram model objects is unchanged at 1.0x — `ModelCodec`
   still recurses per field, and it has to, because `encode` is exported and a
   codec returning half-tagged data would break every caller that uses it alone.
@@ -501,9 +509,12 @@ them, so it is not one per message.
   and covered by its own test, because what it guards is the token reaching a row.
 - **The rate limiter no longer spins.** It paced correctly, but by counting
   tokens: every waiter recomputed the same wait from the same shared state, so N
-  waiters woke together, one won and the rest went back to sleep. Measured at 40
-  queued sends it woke **113,652** times; it now wakes 35. At 500 sends the old
-  design burned 0.387 s of pure spinning. Admission also becomes strict FIFO —
+  waiters woke together, one won and the rest went back to sleep — about N²/2
+  wakeups, which is the shape rather than a number, because the old design is gone
+  and cannot be re-measured honestly. What is measured is what ships: **35 wakeups
+  for 40 queued sends, 495 for 500** — one per admitted call and no more. A
+  recompute-and-re-sleep tail costs 120 251 for those same 40, which is what the
+  test that pins this uses to fail. Admission also becomes strict FIFO —
   before, a herd re-racing for the same token admitted in whatever order the loop
   happened to resume, so the message that had waited longest had no claim on
   going first. The limits themselves are unchanged, and every existing pacing
@@ -525,10 +536,12 @@ them, so it is not one per message.
   pinned by eight threads on a barrier asserting they get one instance.
 - **`orjson` is not coming, and here is the number.** On a fixed 202-byte send,
   `timeit` over 200 000 calls on CPython 3.13.14: `serializer.dumps(payload)` is
-  **0.91 µs** with the serializer bound the way the queueing path binds it, and a bare
+  **0.98 µs** with the serializer bound the way the queueing path binds it, and a bare
   `json.dumps` producing the same bytes is **0.83 µs**. So the tagging costs about
   0.08 µs, and a faster library has to beat that plus the 0.83 µs underneath it —
-  roughly a microsecond in total, against a 14 µs Redis round trip and a Telegram call
+  roughly a microsecond in total, against a Redis round trip of 14 µs on Linux — 105 µs
+  measured on macOS, so read it as an order of magnitude rather than a constant — and a
+  Telegram call
   in tens of milliseconds. Resolving the serializer is a separate 0.09 µs, paid once per
   write rather than per message, and worth separating because it is the same size as the
   overhead. `orjson` would also change what is representable, since the tagging depends
@@ -612,7 +625,7 @@ them, so it is not one per message.
   definition is missing. Its own control asserts that a nested definition *is* seen, since
   a walker that stopped descending would report 100% for ever. A second check refuses the
   degenerate restatement — a summary whose every word is filler or a word of the name, so
-  `def _bucket(): """Return the bucket."""` fails — measured against all 511 definitions
+  `def _bucket(): """Return the bucket."""` fails — run against all 484 definitions
   in `src/` and reporting none of them, because a false positive there would fail the build
   on a docstring somebody wrote on purpose.
 

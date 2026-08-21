@@ -59,6 +59,30 @@ Patch `django_redis_aiogram.client.get_redis` — the name the sending code look
 up. Patching `django_redis_aiogram.redis.get_redis` alone leaves the real
 connection in place.
 
+**That covers the synchronous sends only.** `asend`, `asend_redis`, `asend_many`,
+`aqueue_depth` and `ainflight_depth` go through `aget_redis`, which keeps one
+client per running loop — so a test that patched the synchronous name and then
+awaited one of these opened a real connection. Patch the builder underneath it and
+the registry still runs for real:
+
+```python
+import fakeredis
+import fakeredis.aioredis
+
+server = fakeredis.FakeServer()
+monkeypatch.setattr('django_redis_aiogram.client.get_redis', lambda: fakeredis.FakeRedis(server=server))
+monkeypatch.setattr(
+    'django_redis_aiogram.redis.build_async_client',
+    lambda: fakeredis.aioredis.FakeRedis(server=server),
+)
+```
+
+One `FakeServer` behind both, so a message queued through `asend` is visible to a
+synchronous read of the queue. This package's own `redis_server` fixture is exactly
+this, and patches `aget_redis`'s *builder* rather than `aget_redis` itself for the
+same reason the note above gives: patching the accessor leaves the thing under test
+untested.
+
 ## Faking the send instead
 
 When the payload is not the point, replace the call:

@@ -310,10 +310,11 @@ def test_connecting_a_metrics_receiver_pulls_neither_aiogram_nor_the_orm():
     without the ORM, so it can be done before `django.setup()` has finished.
 
     Measured on top of a process that has already imported Django, which every
-    Django process has by the time settings are read: **0.356 ms**, of which
-    `django.dispatch` is 0.150 ms. From a *bare* interpreter it is 109 ms — but that
-    is Django's own import, not ours, and it is the reason this asserts the shape of
-    what gets pulled rather than a number. `django` and `asgiref` are allowed
+    Django process has by the time settings are read: **0.15 ms**. From a *bare*
+    interpreter it is 16 ms, almost all of it `django.dispatch` pulling `asgiref`
+    rather than anything of ours — which is the reason this asserts the shape of what
+    gets pulled rather than a number: the figure moves with Django's version and the
+    machine, and the shape does not. `django` and `asgiref` are allowed
     through: `django.dispatch` imports `asgiref.sync` for async receivers, and both
     are already loaded in the process this runs in.
     """
