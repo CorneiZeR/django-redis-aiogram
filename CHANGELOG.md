@@ -11,6 +11,12 @@ them, so it is not one per message.
 
 ### Fixed
 
+- **A replacement writer no longer strands the one it replaced.** `stop()` detaches
+  the old queue and sets the stop flag; a `record()` landing next starts a
+  replacement, and starting one *clears* that flag. The old writer then found an empty
+  queue with nothing telling it to stop and waited on it for the life of the process,
+  holding the database connection it had opened. It now leaves when its own buffer is
+  no longer the recorder's queue, which nobody else can undo.
 - **A receiver that turns the log off no longer strands the writer thread.**
   `events_recorded` receivers run on the writer's own thread, so one of them calling
   `recorder.stop()` is a reachable thing to do — and the writer then ran for the life of

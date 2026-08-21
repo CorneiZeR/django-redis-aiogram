@@ -63,8 +63,9 @@ migration container, CI. See below.
   its own to register all of them, bot settings included
 - every send becomes a no-op that builds neither a bot nor a connection:
   `send`, `send_redis`, `send_raw`, `send_many` and the `await` forms `asend`,
-  `asend_redis`, `asend_many`. Each still returns the correlation id it would
-  have used, so a caller storing ids beside its own rows behaves the same here
+  `asend_redis`, `asend_many`. Each still returns what it would have returned — the
+  correlation id for one message, and one id per chat from `send_many` and
+  `asend_many` — so a caller storing ids beside its own rows behaves the same here
 - `start_tgbot` reports why and exits
 
 The queue readers are the exception, and worth knowing before a monitor calls one:

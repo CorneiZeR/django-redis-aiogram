@@ -528,6 +528,51 @@ def test_a_receiver_that_stops_the_log_does_not_strand_the_writer(monkeypatch):
 
 
 @pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT={**ON, 'EVENT_LOG_FLUSH_INTERVAL': 1})
+def test_a_replacement_writer_does_not_strand_the_one_it_replaced():
+    """`_stopping` is shared, so a replacement can clear the signal meant for its elder.
+
+    `stop()` detaches the old queue and sets the flag; a `record()` that lands next calls
+    `_buffer()`, which **clears** that same flag and starts a new writer. The old one then
+    found an empty queue with the flag down and waited on it for the life of the process,
+    holding the connection it had opened — the #136 leak again, reached from the other
+    side.
+
+    Its own buffer no longer being the recorder's queue is the per-writer half of the
+    answer: nobody else can undo it. Held inside a receiver so the elder is still running
+    when the replacement starts, rather than hoping to lose a race.
+    """
+    reached = threading.Event()
+    proceed = threading.Event()
+
+    def hold(sender, **kwargs):
+        reached.set()
+        proceed.wait(10)
+
+    recorder = EventRecorder()
+    events_recorded.connect(hold, dispatch_uid='hold-the-writer')
+    try:
+        recorder.record(an_event(chat_id=45))
+        assert reached.wait(10), 'the receiver never ran, so nothing is on trial'
+        elder = recorder._thread
+        assert elder is not None
+
+        recorder.stop(timeout=0.1)  # detaches the elder's queue and sets the flag
+        recorder.record(an_event(chat_id=46))  # `_buffer()` clears it and starts a replacement
+        assert recorder._thread is not elder, 'no replacement was started, so nothing is on trial'
+        assert not recorder._stopping.is_set(), 'the replacement did not clear the flag'
+
+        proceed.set()
+        elder.join(10)
+
+        assert not elder.is_alive(), 'the replacement stranded the writer it replaced'
+    finally:
+        events_recorded.disconnect(dispatch_uid='hold-the-writer')
+        proceed.set()
+        recorder.stop(timeout=2)
+
+
+@pytest.mark.django_db(transaction=True)
 @override_settings(TELEGRAM_BOT={**ON, 'EVENT_LOG_SYNC': True})
 def test_a_caller_that_wrote_does_not_stay_marked():
     """Only the writer's exit closes connections, so only the writer's mark is read.

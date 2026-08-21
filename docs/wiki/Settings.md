@@ -6,10 +6,12 @@ come from `DJANGO_REDIS_AIOGRAM_<NAME>`; Django settings take precedence.
 All of it is validated by `manage.py check` — in processes where the bot is
 enabled **or** the event log is on. A container with `ENABLED=0` and the log
 recording still registers every rule, including the ones about the bot's own
-settings, so a token it never uses still produces `W001` and `W002`. Plain
-`manage.py check` exits 0 on those — they are warnings — but the
-`--fail-level WARNING` this documentation recommends for CI turns them into a
-failure. Only a process with both switched off registers nothing.
+settings. The credential warnings stay silent there — `W001` and `W002` are gated on
+the bot being enabled, as the table below says — but the log's own rules are not:
+measured on `{'ENABLED': False, 'EVENT_LOG': True}`, that process reports `W005`,
+`W006` and `I001`. Plain `manage.py check` exits 0 on all three, and the
+`--fail-level WARNING` this documentation recommends for CI fails on the two
+warnings. Only a process with both switched off registers nothing.
 
 ## Credentials
 

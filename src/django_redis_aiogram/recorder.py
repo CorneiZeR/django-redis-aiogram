@@ -445,9 +445,16 @@ class EventRecorder:
                 # thread learns, but it is not the only one — `stop()` called from a
                 # receiver runs on *this* thread and drains this very buffer through
                 # `_abandon`, taking that wake with it. The loop then never saw one and
-                # spun for the life of the process, holding a connection. The flag and an
-                # empty queue say everything the wake said
-                if self._stopping.is_set() and buffer.empty():
+                # spun for the life of the process, holding a connection.
+                #
+                # `_queue is not buffer` is the other half, and it is per writer where the
+                # flag is not: `stop()` detaches this queue and sets `_stopping`, and a
+                # `record()` that lands next calls `_buffer()`, which *clears* the flag and
+                # starts a replacement. This writer then saw an empty detached queue with
+                # the flag down and waited on it for the life of the process. Its own
+                # buffer no longer being the recorder's queue says the same thing and
+                # cannot be undone by anybody else
+                if buffer.empty() and (self._stopping.is_set() or self._queue is not buffer):
                     return
         except Exception:
             logger.exception('the event writer stopped; it restarts on the next event')
