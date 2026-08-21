@@ -55,7 +55,9 @@ class TokenBucket:
       won and N-1 recomputed — about N²/2 wakeups. Measured here, on the design that
       ships: 35 wakeups for 40 queued sends and 495 for 500, which is one per send that
       *had to wait* — the burst goes through without sleeping at all, so the count is
-      ``N - max(1, floor(capacity))`` rather than ``N``. The floor matters because
+      ``max(0, N - max(1, floor(capacity)))`` rather than ``N`` — clamped, because a
+      batch smaller than the burst sleeps not at all: measured, three calls against a
+      capacity of five wake nobody. The floor matters because
       ``capacity`` is a float: measured, 1.5 admits one call without sleeping and 5.5
       admits five, so a fraction of a slot buys nothing. The ``max`` matters because a
       capacity *below* one still admits the first call — ``_burst`` clamps to zero and the

@@ -337,8 +337,8 @@ bodies pushes the per-event figure up, so measure rather than trust it once
 `EVENT_LOG_PAYLOAD` is `'full'`.
 
 Nothing on the write path deletes anything. Set `EVENT_LOG_RETENTION_DAYS` and
-schedule the command; `W006` warns while it is unset, because the feature is not
-finished without it:
+schedule the command; `W006` warns while it is `0`, which is its default, because the
+feature is not finished without it:
 
 ```shell
 python manage.py tgbot_prune_events

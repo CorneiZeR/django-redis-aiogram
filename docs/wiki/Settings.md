@@ -11,7 +11,8 @@ the bot being enabled, as the table below says — but the log's own rules are n
 measured on `{'ENABLED': False, 'EVENT_LOG': True}`, that process reports `W005`,
 `W006` and `I001`. Plain `manage.py check` exits 0 on all three, and the
 `--fail-level WARNING` this documentation recommends for CI fails on the two
-warnings. Only a process with both switched off registers nothing.
+warnings. Only a process with `ENABLED` and `EVENT_LOG` both switched off registers
+nothing.
 
 ## Credentials
 
