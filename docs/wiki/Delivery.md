@@ -141,7 +141,11 @@ the one failure a change of configuration can undo; an envelope written by a
 roll the consumers first and it drains; and a send canceled rather than failed,
 which reached nothing. The fourth is not a refusal at all: a handler that accepted
 `on_complete` defers the acknowledgement to the send, which is what makes
-at-least-once true. Everything
+at-least-once true.
+
+All three refusals rest on the in-flight list, as the paragraph above says: on a
+server without `LMOVE` the message was already popped, so none of them recovers it.
+There, `False` only means this consumer will not delete it twice. Everything
 else — undecodable bytes, a method that is not Telegram API, a handler that
 raised before it scheduled anything — returns `True`, because redelivering it
 would only fail again.

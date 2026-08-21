@@ -520,7 +520,8 @@ them, so it is not one per message.
   waiters woke together, one won and the rest went back to sleep — about N²/2
   wakeups, which is the shape rather than a number, because the old design is gone
   and cannot be re-measured honestly. What is measured is what ships: **35 wakeups
-  for 40 queued sends, 495 for 500** — one per admitted call and no more. A
+  for 40 queued sends, 495 for 500** — one per send that had to wait, since the burst
+  is admitted without sleeping at all, so the count is `N - capacity`. A
   recompute-and-re-sleep tail costs 120 251 for those same 40, which is what the
   test that pins this uses to fail. Admission also becomes strict FIFO —
   before, a herd re-racing for the same token admitted in whatever order the loop

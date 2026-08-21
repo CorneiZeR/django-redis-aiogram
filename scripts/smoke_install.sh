@@ -15,11 +15,21 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
-echo "--- building the wheel and the sdist"
-python -m build --sdist --wheel --outdir "$work/dist" "$root" >/dev/null
-wheel="$(ls "$work"/dist/*.whl)"
-sdist="$(ls "$work"/dist/*.tar.gz)"
-echo "built $(basename "$wheel") and $(basename "$sdist")"
+# a directory of already-built artifacts, when the caller has one. The release workflow
+# does: it builds once, uploads that wheel, and this must check *that* file rather than
+# one built again here — same source, but not the same bytes, and the bytes are what
+# PyPI keeps for ever
+if [ -n "${1:-}" ]; then
+    echo "--- using the artifacts already built in $1"
+    wheel="$(ls "$1"/*.whl)"
+    sdist="$(ls "$1"/*.tar.gz)"
+else
+    echo "--- building the wheel and the sdist"
+    python -m build --sdist --wheel --outdir "$work/dist" "$root" >/dev/null
+    wheel="$(ls "$work"/dist/*.whl)"
+    sdist="$(ls "$work"/dist/*.tar.gz)"
+fi
+echo "checking $(basename "$wheel") and $(basename "$sdist")"
 
 echo "--- the sdist must carry what a rebuild and a review need"
 python - "$sdist" <<'PY'

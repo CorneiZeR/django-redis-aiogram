@@ -1,6 +1,7 @@
 """The wiki is published verbatim, so a broken link ships as a broken link."""
 
 import re
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -157,7 +158,13 @@ def test_the_newest_changelog_entry_is_this_version_and_is_dated():
     heading = next(line for line in CHANGELOG.read_text(encoding='utf-8').splitlines() if line.startswith('## '))
 
     assert heading.startswith(f'## {__version__} - '), f'the newest entry is not {__version__}: {heading!r}'
-    assert re.fullmatch(r'## \S+ - \d{4}-\d{2}-\d{2}', heading), f'not dated: {heading!r}'
+    stamp = heading.removeprefix(f'## {__version__} - ')
+    # parsed, not pattern-matched: `2026-13-45` has the shape of a date and is not one,
+    # and a release dated by hand is exactly where that typo lands
+    try:
+        date.fromisoformat(stamp)
+    except ValueError as wrong:
+        raise AssertionError(f'not a date: {stamp!r} ({wrong})') from wrong
 
 
 def test_the_released_entries_keep_the_words_they_shipped_with():
@@ -190,8 +197,13 @@ def test_the_upgrade_page_covers_the_version_being_shipped():
 
     series = '.'.join(__version__.split('.')[:2])
     page = (WIKI / 'Upgrading.md').read_text(encoding='utf-8')
+    headings = [line for line in page.splitlines() if line.startswith('# ')]
 
-    assert f'to {series}\n' in page, f'no section upgrading to {series}: {page.splitlines()[:8]}'
+    # the heading, not the page text: `to 3.1` appears in any prose that mentions
+    # upgrading to it, so the broad search passed on a page with no such section
+    assert any(line.endswith(f' to {series}') for line in headings), (
+        f'no section heading upgrading to {series}: {headings}'
+    )
 
 
 def test_home_and_sidebar_exist():

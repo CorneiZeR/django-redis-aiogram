@@ -58,10 +58,10 @@ TELEGRAM_BOT = {
 
 A payload names the method to call, so that name is validated before anything is
 looked up on the bot. Only the Telegram API methods aiogram exposes are
-accepted — the ones matching `aiogram.methods`, **181** of them at the time of
-writing. Anything else is refused with a `ValueError`.
+accepted: **185** names match `aiogram.methods` at the time of writing, and **181**
+are allowed once four are denied. Anything else is refused with a `ValueError`.
 
-Four of aiogram's own are denied on purpose: `set_webhook` and `delete_webhook`
+Those four of aiogram's own are denied on purpose: `set_webhook` and `delete_webhook`
 reconfigure where Telegram delivers, `log_out` invalidates the token, and `close`
 tears down the session the consumer is using. None is a message, and a queue is
 not the place to reach them from — `manage.py tgbot_webhook` is.

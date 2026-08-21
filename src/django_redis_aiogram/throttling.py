@@ -52,10 +52,11 @@ class TokenBucket:
 
     * **Wakeups are O(1) per admitted call.** Counting meant every waiter computed
       the same wait from the same shared state, so N waiters woke together, one
-      won and N-1 recomputed — about N²/2 wakeups. Measured here, on the design
-      that ships: 35 wakeups for 40 queued sends and 495 for 500, one per admitted
-      call. The old shape is quoted as N²/2 rather than as a number, because it is
-      gone and a number for it would be invented.
+      won and N-1 recomputed — about N²/2 wakeups. Measured here, on the design that
+      ships: 35 wakeups for 40 queued sends and 495 for 500, which is one per send that
+      *had to wait* — the burst goes through without sleeping at all, so the count is
+      ``N - capacity`` rather than ``N``. The old shape is quoted as N²/2 rather than as
+      a number, because it is gone and a number for it would be invented.
     * **Admission is strict FIFO.** A herd re-racing for the same token admits in
       whatever order the loop happens to resume, so the message that waited
       longest had no claim on going first.

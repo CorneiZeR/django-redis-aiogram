@@ -23,18 +23,29 @@ flag for it: the old behavior lost messages.
 
 ## Run migrate
 
-`0002_kind_id_index` adds the index the event log's admin page and its pruning both read.
-It ships whether or not you turn the log on, and it is `AddIndex` followed by
-`RemoveIndex` — the table is never left without a kind index, so the migration is safe to
-run on a live table. On Postgres large enough for the lock to matter, create it by hand
-first:
+`0002_kind_id_index` swaps the index the event log's admin page and its pruning read:
+`AddIndex` for `drai_event_kind_id` on `(kind, -id)`, then `RemoveIndex` for the old
+`drai_event_kind_recent`. In that order, so the table is never without an index on
+`kind`. It ships whether or not you turn the log on.
+
+`AddIndex` issues a plain `CREATE INDEX` — no `IF NOT EXISTS`, and no adoption of one
+that is already there — so on PostgreSQL, where a table big enough for the lock to matter
+wants `CONCURRENTLY`, creating it by hand ahead of `migrate` makes the migration **fail**
+rather than saving it work. Do the whole swap by hand and then tell Django it is done:
 
 ```sql
 CREATE INDEX CONCURRENTLY drai_event_kind_id ON django_redis_aiogram_event (kind, id DESC);
+DROP INDEX CONCURRENTLY drai_event_kind_recent;
 ```
 
-then `migrate` finds it already there. The name is new rather than reused for exactly
-this reason.
+```shell
+python manage.py migrate django_redis_aiogram 0002_kind_id_index --fake
+```
+
+Neither statement can run inside a transaction, so run them outside one — `psql` does
+that by default. Everywhere else, plain `migrate` is the whole procedure. The index name
+is new rather than reused so that the hand-made one and the migration's own cannot be
+confused for each other.
 
 ## Change the compose healthcheck
 

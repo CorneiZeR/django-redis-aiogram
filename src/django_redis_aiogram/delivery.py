@@ -347,6 +347,11 @@ class Delivery(ABC):
         :meth:`_hand_over` returning ``not deferring``, which is not a refusal: a
         handler that took ``on_complete`` acknowledges the message itself once the
         send has finished, which is what makes at-least-once true.
+
+        Those three refusals save the message only where there *is* an in-flight list.
+        Against a server without ``LMOVE`` the consumer falls back to a plain pop, so the
+        message is gone before the refusal happens and ``False`` buys nothing: what they
+        avoid there is a second delete, not a loss.
         """
         if handle is None:
             handle = raw

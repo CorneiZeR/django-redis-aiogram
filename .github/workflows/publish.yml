@@ -48,12 +48,14 @@ jobs:
         env:
           PIP_CONSTRAINT: ${{ github.workspace }}/.github/release-constraints.txt
       - run: twine check dist/*
-      # the artifact, not the checkout: everything else about this release was checked
-      # on a branch, and what gets uploaded here is a file nobody has installed yet. A
-      # version can never be replaced on PyPI, so this is the last moment the wheel can
-      # be refused for a missing module, a lost migration or typing a consumer cannot see
+      # `dist/`, so this installs the very file the upload step publishes rather than
+      # building a second one from the same source. Everything else about this release
+      # was checked on a branch; what goes up here is a file nobody has installed, and a
+      # version can never be replaced on PyPI — so this is the last moment that exact
+      # wheel can be refused for a missing module, a lost migration or typing a consumer
+      # cannot see
       - name: The wheel a consumer will install must work
-        run: bash scripts/smoke_install.sh
+        run: bash scripts/smoke_install.sh dist
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: dist

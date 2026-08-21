@@ -263,11 +263,35 @@ def test_every_structured_field_is_documented():
             if not isinstance(node, ast.Call):
                 continue
             for keyword in node.keywords:
-                if keyword.arg != 'extra' or not isinstance(keyword.value, ast.Dict):
+                if keyword.arg != 'extra':
                     continue
-                for key in keyword.value.keys:
-                    if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                if isinstance(keyword.value, ast.Dict):
+                    for key in keyword.value.keys:
+                        # a `**other` spread has no key, and a computed one cannot be read
+                        # here — either way this scan cannot see the field, so say so
+                        readable = isinstance(key, ast.Constant) and isinstance(key.value, str)
+                        assert readable, (
+                            f'{path.name}: an `extra=` key this scan cannot read, so the '
+                            f'field it logs cannot be held to the documentation'
+                        )
                         emitted.add(key.value)
+                    continue
+                # `extra=dict(...)`: readable, and worth reading rather than skipping
+                if (
+                    isinstance(keyword.value, ast.Call)
+                    and isinstance(keyword.value.func, ast.Name)
+                    and keyword.value.func.id == 'dict'
+                ):
+                    for entry in keyword.value.keywords:
+                        assert entry.arg, f'{path.name}: a `**` spread inside an `extra=dict(...)`'
+                        emitted.add(entry.arg)
+                    continue
+                # anything else — a variable, a comprehension, a call — is a field this
+                # scan would silently miss, which is the whole defect it exists to catch
+                raise AssertionError(
+                    f'{path.name}:{keyword.value.lineno}: `extra=` is not a literal mapping, '
+                    f'so this scan cannot tell which fields it logs'
+                )
     page = (SOURCE.parent / 'docs' / 'wiki' / 'Logging.md').read_text(encoding='utf-8')
     documented = set(re.findall(r'`(tg_[a-z_]+)`', page))
 
