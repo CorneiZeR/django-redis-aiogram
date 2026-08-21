@@ -11,6 +11,14 @@ them, so it is not one per message.
 
 ### Fixed
 
+- **A receiver that turns the log off no longer strands the writer thread.**
+  `events_recorded` receivers run on the writer's own thread, so one of them calling
+  `recorder.stop()` is a reachable thing to do — and the writer then ran for the life of
+  the process, holding a database connection. Its loop ended only when it had *seen* the
+  wake `stop()` queues, and `stop()` drains that same buffer through `_abandon`, taking
+  the wake with it; the flag and an empty queue say everything the wake said. `stop()`
+  from the writer also stops trying to join itself, which it had been reporting as a
+  writer that missed its deadline.
 - **Logging an event could still destroy the caller's writes.** The guard that stops the
   log recycling a connection mid-transaction tested `in_atomic_block`, which is half of
   what an open transaction means — and the worse half. With autocommit off

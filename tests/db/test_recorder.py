@@ -22,6 +22,7 @@ from django_redis_aiogram.enums import EventKind
 from django_redis_aiogram.eventlog import ROW_BY_ROW, EventLogRefusedError, write_batch
 from django_redis_aiogram.models import TelegramEvent
 from django_redis_aiogram.recorder import FAILURE_LIMIT, Event, EventRecorder
+from django_redis_aiogram.signals import events_recorded
 
 ON = {'EVENT_LOG': True}
 
@@ -467,6 +468,41 @@ def test_stopping_the_writer_does_not_leave_the_stopper_marked():
 
     assert threading.get_ident() not in recorder._touched_database, 'the thread that stopped it stayed marked'
     assert TelegramEvent.objects.filter(chat_id=41).exists(), 'nothing was written, so nothing is on trial'
+
+
+@pytest.mark.django_db(transaction=True)
+@override_settings(TELEGRAM_BOT={**ON, 'EVENT_LOG_FLUSH_INTERVAL': 1})
+def test_a_receiver_that_stops_the_log_does_not_strand_the_writer(monkeypatch):
+    """Receivers run on the writer's thread, and one of them may turn the log off.
+
+    `stop()` from there used to leave the writer running for the life of the process,
+    holding a database connection: the loop only ended when it had *seen* the wake that
+    `stop()` queues, and `stop()` drains that same buffer through `_abandon` — taking the
+    wake with it. The flag and an empty queue say everything the wake said.
+
+    Two things asserted, because the leak had two halves: the thread ends, and it closes
+    the connection it opened. That second half is the `stop()`-from-the-writer branch of
+    the mark handling, which nothing else can reach.
+    """
+    closed = []
+    monkeypatch.setattr(EventRecorder, '_close_connections', staticmethod(lambda: closed.append(True)))
+    recorder = EventRecorder()
+
+    def stop_from_the_writer(sender, **kwargs):
+        recorder.stop(timeout=0.1)
+
+    events_recorded.connect(stop_from_the_writer, dispatch_uid='stop-from-the-writer')
+    try:
+        recorder.record(an_event(chat_id=44))
+        writer = recorder._thread
+        assert writer is not None, 'no writer was started, so nothing is on trial'
+        writer.join(10)
+
+        assert not writer.is_alive(), 'the writer outlived the stop that came from inside it'
+        assert closed == [True], 'it left the connection it had opened'
+    finally:
+        events_recorded.disconnect(dispatch_uid='stop-from-the-writer')
+        recorder.stop(timeout=1)
 
 
 @pytest.mark.django_db(transaction=True)
