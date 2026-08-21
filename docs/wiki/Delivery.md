@@ -142,10 +142,11 @@ thing and it is gone.
 somebody else: a pickled payload refused because `ALLOW_PICKLE` is off, which is
 the one failure a change of configuration can undo; an envelope written by a
 **newer version than this consumer understands**, which is the deploy-order case —
-roll the consumers first and it drains; and a send canceled rather than failed,
-which reached nothing. The fourth is not a refusal at all: a handler that accepted
-`on_complete` defers the acknowledgement to the send, which is what makes
-at-least-once true.
+roll the consumers first and it drains; and a handler raising `CancelledError`,
+which reached nothing — at shutdown usually, though the `except` is unqualified, so
+any cancellation counts. The fourth is not a refusal at all: a handler that accepted
+`on_complete` *signals* completion through it, and the consumer takes the message
+off the in-flight list on its next turn. That is what makes at-least-once true.
 
 All three refusals rest on the in-flight list, as the paragraph above says: on a
 server without `LMOVE` the message was already popped, so none of them recovers it.

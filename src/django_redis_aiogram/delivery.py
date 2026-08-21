@@ -342,11 +342,13 @@ class Delivery(ABC):
         Returns whether the message should be acknowledged. Four paths say no, in
         two kinds. Three are refusals that leave a valid payload for somebody else:
         a pickle the configuration refuses, an envelope from a newer version, and a
-        send canceled at shutdown — acknowledging any of them would destroy a
-        message over a setting, a deploy order or a restart. The fourth is
-        :meth:`_hand_over` returning ``not deferring``, which is not a refusal: a
-        handler that took ``on_complete`` acknowledges the message itself once the
-        send has finished, which is what makes at-least-once true.
+        handler raising ``CancelledError`` — at shutdown usually, but the ``except`` is
+        unqualified, so any cancellation counts. Acknowledging any of them would destroy
+        a message over a setting, a deploy order or a restart. The fourth is
+        :meth:`_hand_over` returning ``not deferring``, which is not a refusal: a handler
+        that took ``on_complete`` *signals* completion through it, the handle goes into a
+        queue, and :meth:`collect` takes the message off the in-flight list on the
+        consumer's next turn. That is what makes at-least-once true.
 
         Those three refusals save the message only where there *is* an in-flight list.
         Against a server without ``LMOVE`` the consumer falls back to a plain pop, so the

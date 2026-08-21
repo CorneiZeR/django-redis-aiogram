@@ -155,7 +155,10 @@ def test_the_newest_changelog_entry_is_this_version_and_is_dated():
     """
     from django_redis_aiogram import __version__
 
-    heading = next(line for line in CHANGELOG.read_text(encoding='utf-8').splitlines() if line.startswith('## '))
+    # `visible()`, because a heading inside a fenced block is not a release: without it
+    # the real one could be deleted and an example in a code block would satisfy this
+    lines = visible(CHANGELOG.read_text(encoding='utf-8')).splitlines()
+    heading = next(line for line in lines if line.startswith('## '))
 
     assert heading.startswith(f'## {__version__} - '), f'the newest entry is not {__version__}: {heading!r}'
     stamp = heading.removeprefix(f'## {__version__} - ')
@@ -196,7 +199,8 @@ def test_the_upgrade_page_covers_the_version_being_shipped():
     from django_redis_aiogram import __version__
 
     series = '.'.join(__version__.split('.')[:2])
-    page = (WIKI / 'Upgrading.md').read_text(encoding='utf-8')
+    # `visible()` for the same reason: a heading in a code block is not a section
+    page = visible((WIKI / 'Upgrading.md').read_text(encoding='utf-8'))
     headings = [line for line in page.splitlines() if line.startswith('# ')]
 
     # the heading, not the page text: `to 3.1` appears in any prose that mentions
