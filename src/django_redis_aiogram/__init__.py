@@ -20,7 +20,9 @@ __version__ = '3.1.1'
 warnings.warn(
     'django-redis-aiogram is no longer maintained and 3.1.1 is its last release. '
     'Move to django-aiogram: ' + 'https://corneizer.github.io/django-aiogram/latest/Upgrading/#from-31-to-40',
-    DeprecationWarning,
+    # not DeprecationWarning: Python shows that only when __main__ imports the package,
+    # and Django imports INSTALLED_APPS through importlib, so nobody would see it
+    FutureWarning,
     stacklevel=2,
 )
 

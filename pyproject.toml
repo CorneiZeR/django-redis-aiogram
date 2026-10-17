@@ -122,8 +122,8 @@ filterwarnings = [
     "error::DeprecationWarning",
     "error::PendingDeprecationWarning",
     "error::FutureWarning",
-    # the package's own notice that it is unmaintained, raised on every import
-    "ignore:django-redis-aiogram is no longer maintained:DeprecationWarning",
+    # the package's own notice that it is unmaintained, raised once, on the first import
+    "ignore:django-redis-aiogram is no longer maintained:FutureWarning",
 ]
 
 [tool.ruff]

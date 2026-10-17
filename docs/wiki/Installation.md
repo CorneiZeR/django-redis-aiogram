@@ -1,5 +1,10 @@
 # Installation
 
+> [!WARNING]
+> **No longer maintained.** Superseded by
+> [django-aiogram](https://github.com/CorneiZeR/django-aiogram);
+> [the upgrade guide](https://corneizer.github.io/django-aiogram/latest/Upgrading/#from-31-to-40) covers the move.
+
 ```shell
 pip install django-redis-aiogram
 ```
