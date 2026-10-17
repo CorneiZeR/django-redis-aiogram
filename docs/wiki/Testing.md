@@ -124,7 +124,7 @@ you can build:
 
 ```python
 import asyncio
-import datetime
+import datetime as dt
 
 from aiogram import types
 
@@ -134,7 +134,7 @@ from myapp.tg_router import start_handler
 def a_message(text):
     return types.Message(
         message_id=1,
-        date=datetime.datetime.now(datetime.timezone.utc),
+        date=dt.datetime.now(dt.timezone.utc),
         chat=types.Chat(id=42, type='private'),
         text=text,
     )

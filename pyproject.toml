@@ -52,7 +52,9 @@ dev = [
     "pytest>=8",
     "pytest-django>=4.9",
     "fakeredis>=2.26",
-    "ruff>=0.9",
+    # pinned: `select = ["ALL"]` takes every rule a release adds, so a floor let 0.17's
+    # ICN001 fail CI on code nobody touched
+    "ruff==0.17.0",
     "mypy>=1.14",
     # <6.1: 6.1.0 resolves every Self-returning QuerySet method to Any, so a plain
     # queryset.filter() trips no-any-return under strict. Manager methods are unaffected,
