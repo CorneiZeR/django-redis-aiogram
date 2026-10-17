@@ -1,5 +1,18 @@
 # Changelog
 
+## 3.1.1 - 2026-10-18
+
+**The last release: this package is no longer maintained.** It is superseded by
+[django-aiogram](https://github.com/CorneiZeR/django-aiogram), the same library under a
+name that no longer promises one transport. Nothing else changes in 3.1.1.
+
+### Changed
+
+- Importing `django_redis_aiogram` raises a `DeprecationWarning` that names
+  [the upgrade guide](https://corneizer.github.io/django-aiogram/latest/Upgrading/#from-31-to-40).
+- The README, the wiki and the PyPI metadata (`Development Status :: 7 - Inactive`) say
+  the same.
+
 ## 3.1.0 - 2026-08-22
 
 **At-least-once delivery is true now, and was not before.** A message is

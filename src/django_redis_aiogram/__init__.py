@@ -8,12 +8,21 @@ attribute access instead (PEP 562).
 
 from __future__ import annotations
 
+import warnings
+
 #: not imported from ``typing``: with annotations postponed nothing here needs that
 #: module at runtime, and it was over half of what importing this package cost. Type
 #: checkers understand the sentinel, and a reader can see it is always false
 TYPE_CHECKING = False
 
-__version__ = '3.1.0'
+__version__ = '3.1.1'
+
+warnings.warn(
+    'django-redis-aiogram is no longer maintained and 3.1.1 is its last release. '
+    'Move to django-aiogram: ' + 'https://corneizer.github.io/django-aiogram/latest/Upgrading/#from-31-to-40',
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 __all__ = ('TelegramBot', '__version__', 'bot', 'conf', 'get_redis', 'redis_conn')
 
