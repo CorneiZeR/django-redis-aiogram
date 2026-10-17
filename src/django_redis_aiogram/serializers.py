@@ -20,7 +20,7 @@ its own values, writes them as a tagged JSON object and reads them back.
 """
 
 import base64
-import datetime
+import datetime as dt
 import json
 import pickle
 from abc import ABC, abstractmethod
@@ -252,40 +252,40 @@ class InputFileCodec(TypeCodec[InputFile]):
         raise UnknownInputFileKindError(kind)
 
 
-class DatetimeCodec(TypeCodec[datetime.datetime]):
+class DatetimeCodec(TypeCodec[dt.datetime]):
     """A datetime, as an ISO 8601 string that keeps its offset."""
 
     tag = SerializationTag.DATETIME
 
     def matches(self, value: object) -> bool:
         """Report whether ``value`` is a datetime."""
-        return isinstance(value, datetime.datetime)
+        return isinstance(value, dt.datetime)
 
-    def encode(self, value: datetime.datetime) -> dict[str, Any]:
+    def encode(self, value: dt.datetime) -> dict[str, Any]:
         """Tag the ISO form."""
         return {self.tag: value.isoformat()}
 
-    def decode(self, payload: dict[str, Any]) -> datetime.datetime:
+    def decode(self, payload: dict[str, Any]) -> dt.datetime:
         """Parse the ISO form back."""
-        return datetime.datetime.fromisoformat(payload[self.tag])
+        return dt.datetime.fromisoformat(payload[self.tag])
 
 
-class DateCodec(TypeCodec[datetime.date]):
+class DateCodec(TypeCodec[dt.date]):
     """A date, as an ISO 8601 string."""
 
     tag = SerializationTag.DATE
 
     def matches(self, value: object) -> bool:
         """Report whether ``value`` is a date."""
-        return isinstance(value, datetime.date)
+        return isinstance(value, dt.date)
 
-    def encode(self, value: datetime.date) -> dict[str, Any]:
+    def encode(self, value: dt.date) -> dict[str, Any]:
         """Tag the ISO form."""
         return {self.tag: value.isoformat()}
 
-    def decode(self, payload: dict[str, Any]) -> datetime.date:
+    def decode(self, payload: dict[str, Any]) -> dt.date:
         """Parse the ISO form back."""
-        return datetime.date.fromisoformat(payload[self.tag])
+        return dt.date.fromisoformat(payload[self.tag])
 
 
 class DecimalCodec(TypeCodec[Decimal]):

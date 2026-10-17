@@ -12,7 +12,7 @@ No aiogram import: unknown values are rendered by class name through duck typing
 which keeps this usable from the delivery thread as well.
 """
 
-import datetime
+import datetime as dt
 import json
 import logging
 import re
@@ -64,7 +64,7 @@ def _scalar(value: Any, *, bodies: bool) -> Any:  # noqa: ANN401 - a call argume
         return value if len(value) <= MAX_STRING else value[:MAX_STRING] + '…'
     if isinstance(value, bool) or value is None or isinstance(value, (int, float)):
         return value
-    if isinstance(value, (datetime.datetime, datetime.date, Decimal)):
+    if isinstance(value, (dt.datetime, dt.date, Decimal)):
         return str(value)
     return _UNHANDLED
 

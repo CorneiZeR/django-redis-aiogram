@@ -6,7 +6,7 @@ from inside the writer thread rather than at module scope — that is what keeps
 a coroutine and free in a process with the log switched off.
 """
 
-import datetime
+import datetime as dt
 import logging
 from collections.abc import Sequence
 
@@ -51,9 +51,9 @@ def log_alias() -> str:
     return event_log_database() or DEFAULT_DB_ALIAS
 
 
-def _moment(stamp: float) -> datetime.datetime:
+def _moment(stamp: float) -> dt.datetime:
     """Return the recorded instant, in whichever flavour of datetime this project stores."""
-    moment = datetime.datetime.fromtimestamp(stamp, tz=datetime.timezone.utc)
+    moment = dt.datetime.fromtimestamp(stamp, tz=dt.timezone.utc)
     return moment if django_settings.USE_TZ else timezone.make_naive(moment)
 
 

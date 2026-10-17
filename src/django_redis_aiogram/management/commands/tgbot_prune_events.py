@@ -11,7 +11,7 @@ with the inserts still arriving at the hot end, which is what keeps InnoDB's
 next-key locks out of the picture.
 """
 
-import datetime
+import datetime as dt
 import logging
 import time
 from argparse import ArgumentParser
@@ -34,7 +34,7 @@ class Window(NamedTuple):
     rows: models.QuerySet[TelegramEvent]
     low: int
     watermark: int
-    cutoff: datetime.datetime
+    cutoff: dt.datetime
     alias: str
 
 
@@ -87,7 +87,7 @@ class Command(BaseCommand):
             # from cron — where a Django traceback is the least useful thing to wake up to
             msg = f'no database is configured under the alias {alias!r}; DATABASES has {sorted(connections)}.'
             raise CommandError(msg)
-        cutoff = timezone.now() - datetime.timedelta(days=days)
+        cutoff = timezone.now() - dt.timedelta(days=days)
         rows = TelegramEvent.objects.using(alias)
 
         # where the walk stops: nothing older than the cutoff lives above this id.
