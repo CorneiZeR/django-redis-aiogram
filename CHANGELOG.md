@@ -1,5 +1,21 @@
 # Changelog
 
+## 3.1.1 - 2026-10-18
+
+**The last release: this package is no longer maintained.** It is superseded by
+[django-aiogram](https://github.com/CorneiZeR/django-aiogram), the same library under a
+name that no longer promises one transport. The code is 3.1.0's.
+
+### Changed
+
+- Importing `django_redis_aiogram` raises a `FutureWarning` that names
+  [the upgrade guide](https://corneizer.github.io/django-aiogram/latest/Upgrading/#from-31-to-40). A `FutureWarning`, because Python shows it
+  by default: a `DeprecationWarning` raised while Django imports `INSTALLED_APPS` is
+  dropped. **A suite that turns warnings into errors fails at import** until it moves,
+  or adds `ignore:django-redis-aiogram is no longer maintained:FutureWarning` to its filters.
+- The README, the wiki, `SECURITY.md` and the PyPI metadata (`Development Status :: 7 - Inactive`) say
+  the same.
+
 ## 3.1.0 - 2026-08-22
 
 **At-least-once delivery is true now, and was not before.** A message is

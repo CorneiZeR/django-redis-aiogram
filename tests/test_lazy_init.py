@@ -435,6 +435,8 @@ def test_the_probe_with_no_settings_module_refuses_in_one_line():
     would answer `redis is unreachable` instead and never name the variable at fault.
     """
     environment = {key: value for key, value in os.environ.items() if key != 'DJANGO_SETTINGS_MODULE'}
+    # the unmaintained notice is every process's first line since 3.1.1; this is about the next one
+    environment['PYTHONWARNINGS'] = 'ignore:django-redis-aiogram is no longer maintained:FutureWarning'
     probe = subprocess.run(
         [sys.executable, '-m', 'django_redis_aiogram.healthcheck'],
         capture_output=True,
@@ -500,3 +502,37 @@ def test_the_healthcheck_probe_does_not_populate_the_app_registry(tmp_path):
 
     assert control.returncode == 0, control.stderr
     assert marker.exists(), 'the marker never fires, so its absence above proved nothing'
+
+
+def test_importing_says_the_package_is_unmaintained():
+    """3.1.1 is the last release; the import is the one place every user meets.
+
+    A FutureWarning, because a DeprecationWarning raised while Django imports
+    INSTALLED_APPS is attributed to importlib and dropped by the default filters.
+
+    A subprocess, because this interpreter imported the package long ago and a warning
+    raised at import fires once.
+    """
+    script = textwrap.dedent("""
+        import warnings
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            import django_redis_aiogram
+        notices = [w for w in caught if issubclass(w.category, FutureWarning)]
+        assert len(notices) == 1, [str(w.message) for w in caught]
+        assert 'no longer maintained' in str(notices[0].message)
+        assert 'django-aiogram' in str(notices[0].message)
+        # stacklevel=2 names the importer, here `-c`; any other level names the package
+        assert notices[0].filename == '<string>', notices[0].filename
+        print('notice ok')
+    """)
+    result = subprocess.run(  # noqa: S603 - our own interpreter, and a script written right above
+        [sys.executable, '-c', script],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=SUBPROCESS_TIMEOUT,
+        env={**os.environ, 'DJANGO_SETTINGS_MODULE': 'tests.settings'},
+    )
+    assert result.returncode == 0, result.stderr
+    assert 'notice ok' in result.stdout

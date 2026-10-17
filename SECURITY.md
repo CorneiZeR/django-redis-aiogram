@@ -8,9 +8,12 @@ rather than opening a public issue.
 
 ## Supported versions
 
+None: 3.1.1 is the last release, and no fixes will follow. Report against
+[django-aiogram](https://github.com/CorneiZeR/django-aiogram/security), which supersedes it.
+
 | Version | Supported |
 |---------|-----------|
-| 3.x     | yes       |
+| 3.x     | no        |
 | 2.x     | no        |
 | 1.x     | no        |
 

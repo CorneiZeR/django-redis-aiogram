@@ -1,5 +1,11 @@
 # django-redis-aiogram
 
+> [!WARNING]
+> **No longer maintained.** This package is superseded by
+> [django-aiogram](https://github.com/CorneiZeR/django-aiogram), which carries the same
+> handlers and `bot.send()` over a Redis list, Redis Streams, RabbitMQ or Kafka.
+> 3.1.1 is the last release; the [upgrade guide](https://corneizer.github.io/django-aiogram/latest/Upgrading/#from-31-to-40) covers the move.
+
 Run [aiogram](https://docs.aiogram.dev/) in a container next to Django, write
 handlers as ordinary Django app code, and send Telegram messages from anywhere
 in the project.
