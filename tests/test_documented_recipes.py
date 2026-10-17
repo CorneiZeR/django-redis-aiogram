@@ -6,7 +6,7 @@ than none: a reader trusts it and then debugs our page instead of their code.
 
 import ast
 import asyncio
-import datetime
+import datetime as dt
 import importlib
 import pathlib
 import re
@@ -30,7 +30,7 @@ QUEUE = 'TELEGRAM_BOT_MESSAGE'
 def a_message(text):
     return types.Message(
         message_id=1,
-        date=datetime.datetime.now(datetime.timezone.utc),
+        date=dt.datetime.now(dt.timezone.utc),
         chat=types.Chat(id=42, type='private'),
         text=text,
     )

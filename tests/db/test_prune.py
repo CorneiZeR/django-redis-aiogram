@@ -1,6 +1,6 @@
 """The only thing that bounds the table's growth."""
 
-import datetime
+import datetime as dt
 from io import StringIO
 
 import pytest
@@ -24,7 +24,7 @@ def an_event(days_old=0, **kwargs):
     )
     # written after the insert, because created_at has a default rather than
     # being settable through the manager in a way that survives it
-    TelegramEvent.objects.filter(pk=event.pk).update(created_at=timezone.now() - datetime.timedelta(days=days_old))
+    TelegramEvent.objects.filter(pk=event.pk).update(created_at=timezone.now() - dt.timedelta(days=days_old))
     return event
 
 
@@ -179,7 +179,7 @@ def test_it_prunes_the_configured_alias_and_leaves_the_other_alone():
     on_default = TelegramEvent.objects.using('default').create(
         kind=EventKind.OUTBOUND_SENT.value, correlation_id=new_correlation_id()
     )
-    stale = timezone.now() - datetime.timedelta(days=40)
+    stale = timezone.now() - dt.timedelta(days=40)
     TelegramEvent.objects.using('logs').filter(pk=on_logs.pk).update(created_at=stale)
     TelegramEvent.objects.using('default').filter(pk=on_default.pk).update(created_at=stale)
 
@@ -194,7 +194,7 @@ def test_it_prunes_the_configured_alias_and_leaves_the_other_alone():
 def test_the_database_flag_wins_over_the_configured_alias():
     """The two put in conflict, which is the only arrangement that pins the
     precedence: with the setting unset, either order picks the same alias."""
-    stale = timezone.now() - datetime.timedelta(days=40)
+    stale = timezone.now() - dt.timedelta(days=40)
     for alias in ('logs', 'default'):
         row = TelegramEvent.objects.using(alias).create(
             kind=EventKind.OUTBOUND_SENT.value, correlation_id=new_correlation_id()

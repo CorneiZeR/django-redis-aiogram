@@ -6,7 +6,7 @@ trip. They do now; what actually breaks plain pydantic dumping is aiogram's
 unions. Both cases are pinned here.
 """
 
-import datetime
+import datetime as dt
 import json
 import sys
 from decimal import Decimal
@@ -105,8 +105,8 @@ def test_message_entities_survive():
 @pytest.mark.parametrize(
     'value',
     [
-        datetime.datetime(2026, 8, 3, 12, 30, tzinfo=datetime.timezone.utc),
-        datetime.date(2026, 8, 3),
+        dt.datetime(2026, 8, 3, 12, 30, tzinfo=dt.timezone.utc),
+        dt.date(2026, 8, 3),
         Decimal('1.50'),
         b'\x89PNG',
         'plain',
@@ -179,7 +179,7 @@ def test_the_enum_values_are_frozen():
 
 def test_a_tag_lands_in_the_payload_as_a_plain_key():
     """An enum member used as a dict key must serialize to its value, not its name."""
-    raw = JsonSerializer().dumps({'when': datetime.date(2026, 8, 3)})
+    raw = JsonSerializer().dumps({'when': dt.date(2026, 8, 3)})
     assert json.loads(raw) == {'when': {'__date__': '2026-08-03'}}
 
 
@@ -328,8 +328,8 @@ def test_the_one_pass_encoder_writes_the_same_bytes():
         {'function': 'send_message', 'chat_id': 1, 'text': 'hello'},
         {'tag': SerializationTag.MODEL, 'mode': PayloadDetail.FULL},
         {SerializationTag.MODEL: 'as a key', PayloadDetail.SUMMARY: 'and this one'},
-        {'when': datetime.datetime(2026, 8, 16, 3, 4, 5, tzinfo=datetime.timezone.utc)},
-        {'day': datetime.date(2026, 8, 16), 'money': Decimal('1.10'), 'blob': b'\x00\xff'},
+        {'when': dt.datetime(2026, 8, 16, 3, 4, 5, tzinfo=dt.timezone.utc)},
+        {'day': dt.date(2026, 8, 16), 'money': Decimal('1.10'), 'blob': b'\x00\xff'},
         {'nested': [{'deep': ({'tuple': 1}, [2, 3])}]},
         {'sentinel': Default('parse_mode')},
         {'markup': InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text='b', callback_data='c')]])},
